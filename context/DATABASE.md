@@ -1,0 +1,614 @@
+# Database
+
+> Nguồn schema duy nhất là **Flyway**; Hibernate chạy `ddl-auto: validate`.
+> Tenant isolation: **Hibernate multi-tenancy DISCRIMINATOR** (bỏ RLS).
+> Migration đã squash thành baseline (2026-06-30): `V1__baseline_schema.sql` + `V2__baseline_seed.sql`.
+
+## 1. ERD
+
+Các thực thể trong hệ thống và mối quan hệ giữa chúng.
+
+| Thực thể | Mô tả |
+|----------|-------|
+| tenant | Tổ chức khách hàng |
+| platform_user | Tài khoản quản trị nền tảng |
+| tenant_user | Người dùng trong tenant |
+| refresh_token | Token làm mới JWT |
+| role | Vai trò |
+| user_role_scope | Phân quyền user ↔ role + scope node |
+| tenant_node | Cây tổ chức: TENANT_ROOT → BRANCH → PRODUCTION_AREA → SITE |
+| gateway | Gateway IoT (Advantech) |
+| gateway_pin | Chân vật lý trên gateway (INPUT=đo / OUTPUT=điều khiển) |
+| external_source | Nguồn dữ liệu ngoài (kết nối DB khác) |
+| external_source_job | Task scrape/pull dữ liệu từ external_source |
+| dashboard | Bảng điều khiển (widget JSONB) |
+| dashboard_template | Template dashboard (SYSTEM/CUSTOM) |
+| datastream | Kênh dữ liệu/điều khiển (neo vào gateway_pin) |
+| alert_rule | Rule cảnh báo (SENSOR/GATEWAY) |
+| alert_channel | Kênh nhận cảnh báo (EMAIL/TELEGRAM) |
+| alert | Instance cảnh báo đang mở/closed |
+| command | Lệnh điều khiển gateway |
+| outbox_event | Transactional outbox (Kafka) |
+
+| Quan hệ | Loại | Mô tả |
+|----------|------|-------|
+| tenant — tenant_user | 1-n | Nhiều user thuộc 1 tenant |
+| tenant — tenant_node | 1-n | Cây tổ chức trong tenant |
+| tenant — external_source | 1-n | External source thuộc tenant |
+| tenant_node — tenant_node | 1-n (self-ref) | Parent-child (ltree) |
+| tenant_node — gateway | 1-n | Gateway thuộc SITE |
+| tenant_node — external_source | 1-n | External source thuộc node |
+| gateway — gateway_pin | 1-n | Chân vật lý trên gateway |
+| gateway_pin — datastream | 1-1 | Datastream neo vào gateway_pin (sensor) |
+| external_source — external_source_job | 1-n | Job scrape từ external_source |
+| external_source_job — datastream | 1-n | Datastream neo vào external_source_job |
+| datastream — dashboard | 1-n (qua JSONB) | Widget bind datastream |
+| alert_rule — alert_channel | 1-n | Nhiều kênh nhận 1 rule |
+| alert_rule — alert | 1-n | Rule tạo nhiều alert |
+| outbox_event | — | Transactional outbox, publish Kafka |
+
+```mermaid
+erDiagram
+    TENANT ||--o{ TENANT_USER : has
+    TENANT ||--o{ TENANT_NODE : has
+    TENANT ||--o{ ROLE : has
+    TENANT ||--o{ DASHBOARD : has
+    TENANT ||--o{ GATEWAY : has
+    TENANT ||--o{ ALERT_RULE : has
+    TENANT ||--o{ EXTERNAL_SOURCE : has
+
+    TENANT_USER ||--o{ USER_ROLE_SCOPE : has
+    USER_ROLE_SCOPE }o--|| ROLE : assigned
+    USER_ROLE_SCOPE }o--o| TENANT_NODE : scoped
+
+    TENANT_NODE ||--o{ TENANT_NODE : parent
+    TENANT_NODE ||--o{ GATEWAY : hosts
+    TENANT_NODE ||--o{ DASHBOARD : anchors
+    TENANT_NODE ||--o{ EXTERNAL_SOURCE : owns
+
+    GATEWAY ||--o{ GATEWAY_PIN : has
+    GATEWAY_PIN ||--|| DATASTREAM : feeds
+
+    EXTERNAL_SOURCE ||--o{ DATAFLOW : pulls
+    DATAFLOW ||--o{ DATASTREAM : produces
+    DATASTREAM ||--o{ DASHBOARD : binds
+
+    ALERT_RULE ||--o{ ALERT_CHANNEL : notifies
+    ALERT_RULE ||--o{ ALERT : generates
+
+    GATEWAY ||--o{ COMMAND : receives
+    COMMAND ||--o{ COMMAND_EVENT : timeline
+
+    TENANT ||--o{ OUTBOX_EVENT : publishes
+```
+
+## 2. Các bảng
+
+> Mỗi bảng ghi rõ đại diện cho gì (bảng dữ liệu chính, bảng kết nối, bảng log, ...).
+> Cột chuẩn `id bigint PK auto increment, tenant_id bigint NOT NULL, created_at/updated_at timestamptz, created_by/updated_by bigint`.
+
+### tenant
+**Vì sao cần:** Tổ chức khách hàng. Không `@TenantId` (self-referencing platform context).
+
+| Column | Type | Constraint | Mô tả |
+|--------|------|------------|-------|
+| id | bigint | PK auto increment | Tenant ID |
+| name | varchar | NOT NULL | Tên hiển thị |
+| email | varchar | NOT NULL | Email liên hệ |
+| status | varchar | NOT NULL, CHECK IN ('ACTIVE','LOCKED') | |
+| settings_json | jsonb | | Cấu hình tenant |
+| created_at | timestamptz | NOT NULL | |
+| updated_at | timestamptz | NOT NULL | |
+| deleted_at | timestamptz | | Soft delete |
+
+### platform_user
+**Vì sao cần:** Tài khoản quản trị nền tảng. Không `tenant_id` → cross-tenant.
+
+| Column | Type | Constraint | Mô tả |
+|--------|------|------------|-------|
+| id | bigint | PK auto increment | Platform user ID |
+| username | varchar | NOT NULL, UNIQUE lower(username) toàn cục | Định danh đăng nhập |
+| full_name | varchar | NOT NULL | Họ tên |
+| email | varchar | NULLABLE, UNIQUE toàn cục | Email liên hệ |
+| password_hash | varchar | NOT NULL | BCrypt |
+| status | varchar | NOT NULL DEFAULT 'ACTIVE', CHECK IN ('ACTIVE','LOCKED') | |
+| created_at | timestamptz | NOT NULL | |
+| updated_at | timestamptz | NOT NULL | |
+| deleted_at | timestamptz | | Soft delete |
+
+### tenant_user
+**Vì sao cần:** Người dùng trong tenant. Đăng nhập bằng `username` (unique toàn cục).
+
+| Column | Type | Constraint | Mô tả |
+|--------|------|------------|-------|
+| id | bigint | PK auto increment | User ID |
+| tenant_id | bigint | NOT NULL, FK tenant | Tenant sở hữu |
+| username | varchar | NOT NULL, UNIQUE lower(username) toàn cục | Định danh đăng nhập |
+| full_name | varchar | NOT NULL | Họ tên |
+| email | varchar | NULLABLE, UNIQUE lower(email) toàn cục | Email liên hệ |
+| password_hash | varchar | NOT NULL | BCrypt |
+| status | varchar | NOT NULL, CHECK IN ('ACTIVE','LOCKED') | |
+| created_at | timestamptz | NOT NULL | |
+| created_by | bigint | | |
+| updated_at | timestamptz | NOT NULL | |
+| updated_by | bigint | | |
+| deleted_at | timestamptz | | Soft delete |
+
+### refresh_token
+**Vì sao cần:** Token làm mới JWT.
+
+| Column | Type | Constraint | Mô tả |
+|--------|------|------------|-------|
+| id | bigint | PK auto increment | |
+| tenant_id | bigint | NOT NULL, FK tenant | |
+| user_id | bigint | NOT NULL, FK tenant_user | |
+| token_hash | varchar | NOT NULL, UNIQUE | SHA-256 (không lưu token gốc) |
+| expires_at | timestamptz | NOT NULL | 30 ngày |
+| revoked_at | timestamptz | | NULL = còn hiệu lực |
+| created_at | timestamptz | NOT NULL | |
+
+- Index `(tenant_id, user_id)`, partial index `WHERE revoked_at IS NULL` (tra token còn hiệu lực).
+- Rotation: mỗi lần refresh → revoke token cũ (`revoked_at = now()`) + insert token mới. Logout = revoke.
+
+### platform_role
+**Vì sao cần:** Vai trò cho quản trị viên nền tảng (cross-tenant).
+
+| Column | Type | Constraint | Mô tả |
+|--------|------|------------|-------|
+| id | bigint | PK auto increment | |
+| name | varchar | NOT NULL, UNIQUE | Tên hiển thị |
+| value | varchar | NOT NULL, UNIQUE | Mã role (e.g. PLATFORM_ADMIN, SUPPORT) |
+| created_at | timestamptz | NOT NULL | |
+
+- Seed: `PLATFORM_ADMIN`.
+
+### tenant_role
+**Vì sao cần:** Vai trò cho người dùng trong tenant.
+
+| Column | Type | Constraint | Mô tả |
+|--------|------|------------|-------|
+| id | bigint | PK auto increment | |
+| tenant_id | bigint | NOT NULL, FK tenant | |
+| name | varchar | NOT NULL | Tên hiển thị |
+| value | varchar | NOT NULL | Mã role (e.g. TENANT_ADMIN, MANAGER, OPERATOR, VIEWER) |
+| created_at | timestamptz | NOT NULL | |
+| created_by | bigint | | |
+
+- Unique `(tenant_id, value)`.
+- Seed per-tenant: `TENANT_ADMIN`, `MANAGER`, `OPERATOR`, `VIEWER`.
+
+### user_role_scope
+**Vì sao cần:** Phân quyền user ↔ tenant_role + scope node. 1 user có thể phụ trách nhiều node.
+
+| Column | Type | Constraint | Mô tả |
+|--------|------|------------|-------|
+| id | bigint | PK auto increment | |
+| tenant_id | bigint | NOT NULL, FK tenant | |
+| user_id | bigint | NOT NULL, FK tenant_user | |
+| role_id | bigint | NOT NULL, FK tenant_role | |
+| tenant_node_id | bigint | NULLABLE, FK tenant_node | NULL = full-access toàn tenant |
+
+- Unique `(tenant_id, user_id, role_id, COALESCE(tenant_node_id, 0))`.
+- Service chặn xóa scope làm tenant mất Tenant Admin active cuối cùng.
+
+### tenant_node
+**Vì sao cần:** Cây tổ chức: TENANT_ROOT → BRANCH → PRODUCTION_AREA → SITE. Dùng ltree.
+
+| Column | Type | Constraint | Mô tả |
+|--------|------|------------|-------|
+| id | bigint | PK auto increment | |
+| tenant_id | bigint | NOT NULL, FK tenant | |
+| parent_id | bigint | NULLABLE, FK tenant_node(self) | NULL cho TENANT_ROOT |
+| node_type | varchar | NOT NULL, CHECK IN ('TENANT_ROOT','BRANCH','PRODUCTION_AREA','SITE') | |
+| name | varchar | NOT NULL | |
+| path | ltree | NOT NULL | Materialized path |
+| depth | int | NOT NULL | Độ sâu |
+| created_at | timestamptz | NOT NULL | |
+| created_by | bigint | | |
+| updated_at | timestamptz | NOT NULL | |
+| updated_by | bigint | | |
+| deleted_at | timestamptz | | Soft delete |
+
+- Composite FK parent `(tenant_id, parent_id) → (tenant_id, id)`.
+- Check thứ bậc `TENANT_ROOT → BRANCH → PRODUCTION_AREA → SITE`.
+- GiST index trên `path`.
+- Label ltree = `id` viết `-`→`_`; `path = parent.path || '.' || label`.
+
+### gateway
+**Vì sao cần:** Gateway IoT (Advantech). MAC = định danh ngoài.
+
+| Column | Type | Constraint | Mô tả |
+|--------|------|------------|-------|
+| id | bigint | PK auto increment | |
+| tenant_id | bigint | NOT NULL, FK tenant | |
+| tenant_node_id | bigint | NULLABLE, FK tenant_node | NULL = gateway mồ côi |
+| name | varchar | NOT NULL | Metadata |
+| mac_address | varchar(32) | NOT NULL, UNIQUE toàn platform | MAC = định danh ngoài (wire/MQTT) |
+| last_seen_at | timestamptz | | Lần cuối nhận heartbeat/data từ gateway |
+| created_at | timestamptz | NOT NULL | |
+| created_by | bigint | | |
+| updated_at | timestamptz | NOT NULL | |
+| updated_by | bigint | | |
+| deleted_at | timestamptz | | Soft delete |
+
+- Composite FK `(tenant_id, tenant_node_id) → tenant_node`.
+- Unique `(tenant_id, id)`.
+- `last_seen_at`: JPA `updatable=false` (chỉ realtime ghi).
+
+### gateway_pin
+**Vì sao cần:** Chân vật lý trên gateway. INPUT=đo (cảm biến) / OUTPUT=điều khiển (relay).
+
+| Column | Type | Constraint | Mô tả |
+|--------|------|------------|-------|
+| id | bigint | PK auto increment | |
+| tenant_id | bigint | NOT NULL, FK tenant | |
+| gateway_id | bigint | NOT NULL, FK gateway ON DELETE CASCADE | |
+| direction | varchar | NOT NULL, CHECK IN ('INPUT','OUTPUT') | INPUT=cảm biến, OUTPUT=relay |
+| type | varchar | NOT NULL, CHECK IN ('AI','DI','DO','AO') | Khớp direction |
+| name | varchar | NOT NULL | Metadata (nhãn hiển thị) |
+| metric_id | bigint | NULLABLE, INPUT MUST NOT NULL, OUTPUT = NULL | FK metric |
+| pin_number | int | NOT NULL | Số chân vật lý (AI1.., DO1..) |
+| power_desired_state | varchar | NULLABLE, CHECK IN ('ON','OFF') | OUTPUT only — ý muốn |
+| power_reported_state | varchar | NULLABLE, CHECK IN ('ON','OFF') | OUTPUT only — realtime set khi ACK |
+| enabled | boolean | NOT NULL DEFAULT true | false = tạm ngưng, bỏ qua dữ liệu từ pin này |
+| created_at | timestamptz | NOT NULL | |
+| created_by | bigint | | |
+| updated_at | timestamptz | NOT NULL | |
+| updated_by | bigint | | |
+
+- Composite FK `(tenant_id, gateway_id) → gateway`. Unique `(tenant_id, id)`.
+- Unique **`uq_gateway_pin (tenant_id, gateway_id, type, pin_number)`**.
+- CHECK: INPUT ⇒ `metric_id NOT NULL` & power* NULL; OUTPUT ⇒ `pin_number NOT NULL` & metric NULL.
+- 1 gateway_pin → 1 datastream (single source of truth).
+
+### metric
+**Vì sao cần:** Master data kiểu đo. Chia sẻ chéo tenant (system data).
+
+| Column | Type | Constraint | Mô tả |
+|--------|------|------------|-------|
+| id | bigint | PK auto increment | |
+| code | varchar | NOT NULL, UNIQUE | temperature, humidity, pressure... |
+| name | varchar | NOT NULL | Nhiệt độ, Độ ẩm, Áp suất... |
+| unit | varchar | NOT NULL | °C, %RH, hPa... |
+| data_type | varchar | NOT NULL, CHECK IN ('NUMBER','BOOLEAN','STRING') | |
+| min_value | double | | Range hợp lệ optional |
+| max_value | double | | |
+| created_at | timestamptz | NOT NULL | |
+
+- System seed data: temperature, humidity, pressure, pm25, co2, light, voltage, current, power...
+
+### external_source
+**Vì sao cần:** Kết nối CSDL ngoài. Mỗi source = 1 nguồn dữ liệu có Dashboard riêng.
+
+| Column | Type | Constraint | Mô tả |
+|--------|------|------------|-------|
+| id | bigint | PK auto increment | |
+| tenant_id | bigint | NOT NULL, FK tenant | |
+| tenant_node_id | bigint | NOT NULL, FK tenant_node | Source thuộc node |
+| name | varchar | NOT NULL | Tên hiển thị |
+| connection_type | varchar | NOT NULL | Loại kết nối (POSTGRESQL, MYSQL, MONGODB...) |
+| connection_config | jsonb | NOT NULL | Cấu hình kết nối (host, port, db...) |
+| credential_encrypted | text | NOT NULL | Credential AES-GCM encrypted |
+| last_sync_status | varchar | | Trạng thái sync gần nhất |
+| last_sync_at | timestamptz | | Lần sync gần nhất |
+| last_error | text | | Lỗi gần nhất |
+| created_at | timestamptz | NOT NULL | |
+| created_by | bigint | | |
+| updated_at | timestamptz | NOT NULL | |
+| updated_by | bigint | | |
+| deleted_at | timestamptz | | Soft delete |
+
+- Composite FK `(tenant_id, tenant_node_id) → tenant_node`.
+- Unique `(tenant_id, id)`.
+
+### external_source_job
+**Vì sao cần:** Task scrape/pull dữ liệu từ external_source. Mỗi job chạy 1 logic lọc/map riêng.
+
+| Column | Type | Constraint | Mô tả |
+|--------|------|------------|-------|
+| id | bigint | PK auto increment | |
+| tenant_id | bigint | NOT NULL, FK tenant | |
+| external_source_id | bigint | NOT NULL, FK external_source ON DELETE CASCADE | Nguồn dữ liệu |
+| name | varchar | NOT NULL | Tên job |
+| query_config | jsonb | NOT NULL | Cấu hình query (SELECT, table, params...) |
+| filter_config | jsonb | | Bộ lọc dữ liệu sau khi query |
+| mapping_config | jsonb | | Map field → metric, chuyển đổi type |
+| schedule_cron | varchar | | Cron expression hoặc interval (e.g. '*/30 * * * *') |
+| incremental_field | varchar | | Cột thời gian dùng để incremental reading |
+| incremental_cursor | varchar | | Giá trị cursor hiện tại (timestamp hoặc value) |
+| total_row_count | bigint | NOT NULL DEFAULT 0 | Thống kê số dòng luỹ kế |
+| last_run_status | varchar | NULLABLE, CHECK IN ('RUNNING','SUCCESS','FAILED') | NULL = chưa chạy |
+| last_run_at | timestamptz | | Lần chạy gần nhất |
+| next_run_at | timestamptz | | Lần chạy tiếp theo |
+| last_error | text | | Lỗi gần nhất |
+| created_at | timestamptz | NOT NULL | |
+| created_by | bigint | | |
+| updated_at | timestamptz | NOT NULL | |
+| updated_by | bigint | | |
+| deleted_at | timestamptz | | Soft delete |
+
+- Composite FK `(tenant_id, external_source_id) → external_source`.
+- Unique `(tenant_id, id)`.
+
+### dashboard
+**Vì sao cần:** Bảng điều khiển. Widget + layout lưu JSONB (`layout_json`).
+
+| Column | Type | Constraint | Mô tả |
+|--------|------|------------|-------|
+| id | bigint | PK auto increment | |
+| tenant_id | bigint | NOT NULL, FK tenant | |
+| user_id | bigint | NOT NULL, FK tenant_user | Chủ board |
+| tenant_node_id | bigint | NULLABLE, FK tenant_node | Anchor node (site hoặc node gộp) |
+| name | varchar | NOT NULL | Tên board |
+| layout_json | jsonb | NOT NULL | `{widgets:[{id,type,layout,title,binding,config}]}` |
+| created_at | timestamptz | NOT NULL | |
+| created_by | bigint | | |
+| updated_at | timestamptz | NOT NULL | |
+| updated_by | bigint | | |
+
+- Unique `(tenant_id, user_id, tenant_node_id)`.
+- WidgetType: VALUE/LINE/SWITCH (gắn nguồn); DEVICE_COUNT/DEVICES_ONLINE/DEVICE_TABLE/EVENT_* (tổng hợp theo node).
+
+### dashboard_template
+**Vì sao cần:** Template dashboard. Global seed data — mọi tenant đều dùng được. Template chỉ định loại widget + metric, khi áp dụng vào node thì hệ thống tự tìm tất cả datastream có metric đó và tạo widget cho từng datastream.
+
+| Column | Type | Constraint | Mô tả |
+|--------|------|------------|-------|
+| id | bigint | PK auto increment | |
+| name | varchar | NOT NULL | |
+| description | varchar | | |
+| layout_json | jsonb | NOT NULL | Danh sách widget template: `[{widget_type, metric, config}]` — mỗi entry là 1 loại widget cần tạo |
+| created_at | timestamptz | NOT NULL | |
+| created_by | bigint | | |
+| updated_at | timestamptz | NOT NULL | |
+| updated_by | bigint | | |
+
+**logic áp dụng:**
+```
+Template layout = [
+  { widget_type: "LINE", metric: "temperature", config: {...} },
+  { widget_type: "VALUE", metric: "humidity", config: {...} }
+]
+
+Áp dụng vào node X → hệ thống query:
+  SELECT * FROM datastream WHERE tenant_node_id = X AND metric = 'temperature'
+  → Mỗi datastream = 1 widget LINE trong dashboard
+```
+
+### datastream
+**Vì sao cần:** Kênh dữ liệu/điều khiển kiểu Blynk. Nguồn từ gateway_pin hoặc external_source_job.
+
+| Column | Type | Constraint | Mô tả |
+|--------|------|------------|-------|
+| id | bigint | PK auto increment | |
+| tenant_id | bigint | NOT NULL, FK tenant | |
+| tenant_node_id | bigint | NOT NULL, FK tenant_node | Anchor node |
+| name | varchar | NOT NULL | Tên kênh |
+| metric_id | bigint | NOT NULL, FK metric | Kiểu đo (temperature, humidity...) |
+| source_type | varchar | NOT NULL, CHECK IN ('GATEWAY_PIN','EXTERNAL_SOURCE_JOB') | Loại nguồn |
+| source_id | bigint | NOT NULL | ID nguồn (gateway_pin hoặc external_source_job) |
+| created_at | timestamptz | NOT NULL | |
+| created_by | bigint | | |
+| updated_at | timestamptz | NOT NULL | |
+| updated_by | bigint | | |
+
+- CHECK: source_type + source_id hợp lệ.
+- Composite FK `(tenant_id, tenant_node_id) → tenant_node`.
+- Unique `(tenant_id, tenant_node_id, lower(name))` = `uq_datastream_name`.
+
+### alert_rule
+**Vì sao cần:** Rule cảnh báo theo metric tại 1 node. Tất cả datastream có metric đó tại node đều bị monitor.
+
+| Column | Type | Constraint | Mô tả |
+|--------|------|------------|-------|
+| id | bigint | PK auto increment | |
+| tenant_id | bigint | NOT NULL, FK tenant | |
+| tenant_node_id | bigint | NOT NULL, FK tenant_node | Node áp dụng rule |
+| name | varchar | NOT NULL | |
+| metric_id | bigint | NOT NULL, FK metric | Metric cần monitor |
+| severity | varchar | NOT NULL, CHECK IN ('WARNING','CRITICAL') | |
+| conditions_json | jsonb | NOT NULL | `[{"operator":">","threshold":30}]` |
+| duration_seconds | int | DEFAULT 0 | 0 = trigger ngay, >0 = phải vi phạm liên tục N giây |
+| enabled | boolean | NOT NULL DEFAULT true | |
+| created_at | timestamptz | NOT NULL | |
+| created_by | bigint | | |
+| updated_at | timestamptz | NOT NULL | |
+| updated_by | bigint | | |
+
+- Index `(tenant_id, tenant_node_id, metric_id, enabled)`.
+- Rule áp dụng cho TẤT CẢ datastream có metric_id tại node.
+
+### alert_channel
+**Vì sao cần:** Kênh nhận cảnh báo thuộc HẲN về rule. EMAIL hoặc TELEGRAM.
+
+| Column | Type | Constraint | Mô tả |
+|--------|------|------------|-------|
+| id | bigint | PK auto increment | |
+| tenant_id | bigint | NOT NULL, FK tenant | |
+| alert_rule_id | bigint | NOT NULL, FK alert_rule ON DELETE CASCADE | |
+| channel_type | varchar | NOT NULL, CHECK IN ('EMAIL','TELEGRAM') | |
+| name | varchar | NULLABLE | Tên người nhận |
+| address | varchar | NOT NULL | EMAIL→email; TELEGRAM→chat_id |
+| telegram_bot_token | varchar | NULLABLE, TELEGRAM MUST NOT NULL | Bot token per-recipient |
+| created_at | timestamptz | NOT NULL | |
+
+- Unique `(alert_rule_id, channel_type, address)`.
+- Channel KHÔNG tái dùng chéo rule. Sửa rule = REPLACE toàn bộ.
+
+### alert
+**Vì sao cần:** Instance cảnh báo. State machine: PENDING → ACTIVE → RECOVERED.
+
+| Column | Type | Constraint | Mô tả |
+|--------|------|------------|-------|
+| id | bigint | PK auto increment | |
+| tenant_id | bigint | NOT NULL, FK tenant | |
+| rule_id | bigint | NOT NULL, FK alert_rule | |
+| tenant_node_id | bigint | NOT NULL, FK tenant_node | Node xảy ra alert |
+| datastream_id | bigint | NULLABLE, FK datastream | Datastream vi phạm (NULL nếu alert nhiều datastream) |
+| fingerprint | varchar | NOT NULL | ruleId:datastreamId hoặc ruleId:nodeId |
+| status | varchar | NOT NULL, CHECK IN ('PENDING','ACTIVE','RECOVERED') | |
+| severity | varchar | NOT NULL | Snapshot từ rule |
+| started_at | timestamptz | NOT NULL | Bắt đầu vi phạm (PENDING) |
+| triggered_at | timestamptz | | Đủ duration → ACTIVE |
+| recovered_at | timestamptz | | Hết điều kiện |
+| last_observed_at | timestamptz | | Quan sát gần nhất |
+| last_observed_value | double | | |
+| threshold_snapshot_json | jsonb | | Snapshot condition |
+| created_at | timestamptz | NOT NULL | |
+| updated_at | timestamptz | NOT NULL | |
+
+- Partial unique `uq_alert_open (tenant_id, fingerprint) WHERE status IN ('PENDING','ACTIVE')`.
+- Stateful trong DB: breach đầu → PENDING; đủ duration → ACTIVE (gửi mail); hết breach → RECOVERED.
+
+### command
+**Vì sao cần:** Lệnh điều khiển gateway. Enum cố định TURN_ON/TURN_OFF.
+
+| Column | Type | Constraint | Mô tả |
+|--------|------|------------|-------|
+| id | uuid | PK | |
+| tenant_id | uuid | NOT NULL, FK tenant | |
+| gateway_id | uuid | NOT NULL, FK gateway | |
+| tenant_node_id | uuid | NULLABLE | Snapshot (KHÔNG FK — có thể trỏ node đã xóa) |
+| command_type | varchar | NOT NULL, CHECK IN ('TURN_ON','TURN_OFF') | |
+| parameters_json | jsonb | NOT NULL | `{"pin":"2"}` → resolve pin DO |
+| status | varchar | NOT NULL, CHECK IN ('PENDING','DISPATCHED','ACKNOWLEDGED','FAILED','TIMED_OUT') | |
+| requested_by | uuid | NOT NULL | |
+| requested_at | timestamptz | NOT NULL | |
+| dispatched_at | timestamptz | | |
+| acknowledged_at | timestamptz | | |
+| completed_at | timestamptz | | |
+| timeout_at | timestamptz | NOT NULL | |
+| correlation_id | uuid | | Trace Kafka/MQTT |
+| idempotency_key | varchar | | Chống submit lặp |
+| retry_count | int | NOT NULL DEFAULT 0 | |
+| ack_payload_json | jsonb | | ACK đã sanitize |
+| error | text | | Lỗi (code + message) |
+| created_at | timestamptz | NOT NULL | |
+| updated_at | timestamptz | NOT NULL | |
+
+- Unique idempotency `(tenant_id, requested_by, idempotency_key)`.
+- Index `(tenant_id, gateway_id, requested_at desc)`, `(tenant_id, status, requested_at desc)`.
+- Partial `(status, timeout_at) WHERE status IN ('PENDING','DISPATCHED')` cho timeout worker.
+
+### outbox_event
+**Vì sao cần:** Transactional outbox dùng chung (hiện cho command).
+
+| Column | Type | Constraint | Mô tả |
+|--------|------|------------|-------|
+| id | uuid | PK | Event ID |
+| tenant_id | uuid | NOT NULL | Tenant context (set thủ công lúc insert) |
+| aggregate_type | varchar | NOT NULL | |
+| aggregate_id | uuid | NOT NULL | |
+| event_type | varchar | NOT NULL | = tên Kafka topic |
+| payload_json | jsonb | NOT NULL | |
+| correlation_id | uuid | | |
+| occurred_at | timestamptz | NOT NULL | Business time |
+| status | varchar | NOT NULL, CHECK IN ('PENDING','PUBLISHED','FAILED') | |
+| attempt_count | int | NOT NULL DEFAULT 0 | |
+| next_attempt_at | timestamptz | | |
+| published_at | timestamptz | | |
+| last_error | varchar | | |
+
+- Index dispatch `(status, next_attempt_at, occurred_at) WHERE status IN ('PENDING','FAILED')`.
+- `OutboxEvent` KHÔNG `@TenantId` — publisher nền quét cross-tenant.
+
+## 3. Indexes quan trọng
+
+| Index | Bảng | Column(s) | Ý nghĩa |
+|-------|------|-----------|---------|
+| `uq_gateway_mac` | gateway | `mac_address` | Định danh gateway toàn platform |
+| `ix_gateway_node` | gateway | `(tenant_id, tenant_node_id)` | Gateway theo node |
+| `uq_gateway_pin` | gateway_pin | `(tenant_id, gateway_id, signal_type, pin_number)` | Chân vật lý duy nhất TRONG mỗi signal_type/gateway |
+| `uq_datastream_name` | datastream | `(tenant_id, tenant_node_id, lower(name))` | Tên kênh duy nhất trong anchor node |
+| `uq_dashboard_user_node` | dashboard | `(tenant_id, user_id, tenant_node_id)` | 1 board/user/node |
+| `uq_alert_open` | alert | `(tenant_id, fingerprint) WHERE status IN ('PENDING','ACTIVE')` | 1 alert đang mở/fingerprint |
+| `ix_alert_rule_metric` | alert_rule | `(tenant_id, enabled, metric)` | Alert rule theo metric |
+| `ix_alert_rule_scope` | alert_rule | `(tenant_id, scope_type, scope_id)` | Alert rule theo scope |
+| `ix_command_pending` | command | `(status, timeout_at) WHERE status IN ('PENDING','DISPATCHED')` | Timeout worker |
+| `ix_outbox_dispatch` | outbox_event | `(status, next_attempt_at, occurred_at) WHERE status IN ('PENDING','FAILED')` | Publisher scan |
+| GiST | tenant_node | `path` | Descendant query (scope/resources) |
+| `ix_scope_nodes` | user_role_scope | `(tenant_id, user_id)` | Resolve scope nodes |
+| `ix_user_status` | tenant_user | `(tenant_id, status)` | User theo status |
+
+## 4. InfluxDB
+
+### Measurement `sensor_reading` (gateway sources)
+
+```text
+measurement: sensor_reading
+timestamp: measuredAt (WritePrecision.NS)
+Tags: tenant_id, tenant_node_id, gateway_id, metric
+Fields: value_float (double), quality (string)
+```
+
+### Measurement `external_reading` (external sources)
+
+```text
+measurement: external_reading
+timestamp: measuredAt (WritePrecision.NS)
+Tags: tenant_id, tenant_node_id, source_id (external_source_job_id), metric
+Fields: value_float (double), quality (string)
+```
+
+### Bucket và retention
+
+| Bucket | Resolution | Retention |
+|--------|------------|-----------|
+| `raw` | Dữ liệu gốc (~30s) | 7 ngày |
+| `downsampled_1m` | 1 phút | 30 ngày |
+| `downsampled_5m` | 5 phút | 90 ngày |
+| `downsampled_1h` | 1 giờ | 1 năm |
+| `downsampled_1d` | 1 ngày | 3 năm |
+| `external_history` | Gốc từ nguồn | 3 năm |
+
+### Query routing
+
+| Khoảng query | Bucket |
+|--------------|--------|
+| ≤ 7 ngày | `raw` |
+| ≤ 30 ngày | `downsampled_1m` |
+| ≤ 90 ngày | `downsampled_5m` |
+| ≤ 1 năm | `downsampled_1h` |
+| > 1 năm | `downsampled_1d` |
+
+## 5. Redis
+
+Không phải nguồn bền vững. Key đang dùng:
+
+```text
+telemetry-dedup:{tenantId}:{messageId}  — dedup ingestion, TTL 6h
+gw-resolve:{mac}                        — "uuid|tenant|site", TTL 10'
+scope-sites:{tenant}:{user}             — tập SITE in-scope, TTL 60s
+ws-site-auth:{tenant}:{site}            — WS site↔tenant, TTL 10'
+ws-scope-auth:{...}                     — WS site↔scope user, TTL 60s
+alert-rules:{tenantId}:{metric}         — rule đã resolve scope+recipient, TTL 60s
+```
+
+Mất Redis → giảm hiệu năng, KHÔNG mất cấu hình nguồn (Postgres).
+
+## 6. MinIO
+
+### Buckets
+
+| Bucket | Purpose | Retention |
+|--------|---------|-----------|
+| `reports` | Báo cáo PDF | 1 năm |
+| `uploads` | File upload từ user (config, firmware...) | 90 ngày |
+| `backups` | Backup database, config | Permanent |
+
+### Object keys
+
+```text
+reports/{tenantId}/{yyyy}/{MM}/{reportId}.pdf
+uploads/{tenantId}/{yyyy}/{MM}/{uuid}.{ext}
+backups/{type}/{yyyy}/{MM}/{dd}/{filename}
+```
+
+### Backup object key examples
+
+```text
+backups/postgres/2024/01/15/pg_dump_20240115_103000.sql.gz
+backups/influxdb/2024/01/15/influx_backup_20240115.tar
+```
+
+Postgres lưu `object_key`, `checksum`, `file_size_bytes`, `status`. API cấp presigned GET ngắn hạn (~5′).
