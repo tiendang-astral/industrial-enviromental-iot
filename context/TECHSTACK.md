@@ -15,7 +15,7 @@
 | Icon | Lucide | | Icon library cho shadcn/ui |
 | Chart | Apache ECharts | 5.x | Time-series lớn, zoom/pan/brush mượt hơn Chart.js/Recharts cho dashboard IoT |
 | Canvas / Rich Editor | react-grid-layout | 1.x | Widget kéo-thả, resize, lưu layout per-site/per-user |
-| Realtime | socket.io-client | 4.x | Nhận cập nhật realtime từ backend |
+| Realtime | @stomp/stompjs | 7.x | STOMP-over-WebSocket, khớp `Spring WebSocket` ở Backend — không dùng socket.io vì Spring không có server socket.io chính thức (quyết định chốt khi làm trang Chi tiết Gateway, ban đầu doc ghi nhầm socket.io-client) |
 | Bundler | Vite | 5.x | |
 | Testing | Vitest + React Testing Library | | |
 
@@ -23,8 +23,8 @@
 
 | Đầu mục | Thư viện | Version | Ghi chú |
 |---------|----------|---------|---------|
-| Framework | Spring Boot (Java 17+) | Spring Boot 3.x | Khớp layer Controller/Service/Repository/DTO đã định nghĩa trong CONVENTIONS.md |
-| ORM / Query Builder | Spring Data JPA (Hibernate 6.x) | | Entity + Repository pattern, migration versioned |
+| Framework | Spring Boot (Java 21+) | Spring Boot 4.x | Khớp layer Controller/Service/Repository/DTO đã định nghĩa trong CONVENTIONS.md |
+| ORM / Query Builder | Spring Data JPA (Hibernate 7.x) | | Entity + Repository pattern, migration versioned |
 | Realtime | Spring WebSocket + Redis | | Redis để fan-out realtime khi scale ngang nhiều instance |
 | MQTT Client | Eclipse Paho (Spring Integration MQTT) | | Subscribe topic từ EMQX, forward vào Kafka |
 | Message Queue Client | Spring Kafka | | Producer/Consumer cho Ingestion Pipeline |

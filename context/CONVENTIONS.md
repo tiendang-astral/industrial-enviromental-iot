@@ -6,7 +6,11 @@
 
 ## 1. Frontend
 
-> Thư mục project: **`x-frontend/`**.
+> **2 SPA độc lập, deploy riêng, không share code/package giữa 2 project** (cùng triết lý "chấp nhận duplicate" như 3 Backend service ở mục 2):
+> - **`x-frontend/`** — app cho **tenant user** (Tenant Admin / Kỹ thuật viên / Nhân viên): dashboard, alert, command, report, quản lý tổ chức trong tenant. Dùng đủ stack ở `TECHSTACK.md` (ECharts, react-grid-layout, @stomp/stompjs...).
+> - **`x-frontend-admin/`** — app cho **platform user** (System Admin): quản lý tenant, quản lý platform_user. Scope nhỏ, **không cần** ECharts/react-grid-layout/@stomp/stompjs (không có dashboard/widget/realtime) — chỉ cần Router, TanStack Query, Axios, RHF+Zod, shadcn/ui.
+> - Cả 2 gọi chung 1 Backend API (`x-backend`) — Backend tự phân biệt `platform_user`/`tenant_user` theo `username` khi login, không cần API riêng cho từng frontend (xem `ARCHITECTURE.md` § Flow Auth/RBAC).
+> - Quy tắc dưới đây (naming, layer responsibility, cấu trúc thư mục `src/`) áp dụng **cho cả 2 project**, mỗi project tự có `components/ui` (shadcn generated riêng), `services/`, `stores/`... của mình.
 
 ### Nguyên tắc quan trọng
 
@@ -14,7 +18,7 @@
 - State lived ở common parent gần nhất; server state (API data) không đưa vào Zustand — để TanStack Query quản lý cache/refetch
 - Props đi xuống, callback đi lên
 - Không mutate props/query cache trực tiếp — update qua `setQueryData`/mutation
-- Lazy load route theo role (System Admin / Tenant Admin / Kỹ thuật viên / Nhân viên) để giảm bundle
+- Lazy load route theo role trong từng app (`x-frontend`: Tenant Admin / Kỹ thuật viên / Nhân viên; `x-frontend-admin`: System Admin) để giảm bundle
 
 ### Tổ chức thư mục
 
@@ -56,15 +60,22 @@ Page → orchestration, layout, route-level state
 Store (Zustand) → chạy song song, chỉ giữ UI/local state, không giữ data từ API
 ```
 
+### Layout & Auth UX (áp dụng cho cả `x-frontend` và `x-frontend-admin`)
+
+- **Shell:** `AppShell` (`SidebarProvider` + `Sidebar` + `SidebarInset` — block có sẵn của shadcn/ui). Sidebar Header hiện context hiện tại (`x-frontend`: tên tenant đang làm việc; `x-frontend-admin`: badge "Platform Admin" màu riêng để không nhầm 2 app khi mở song song). SidebarContent là menu nhóm theo domain — item chưa triển khai (theo roadmap `PLAN.md`) disable + badge "Sắp có". Topbar trong `SidebarInset` chỉ gồm `SidebarTrigger` + breadcrumb/tiêu đề trang + `UserMenu` — **không** làm global bar 2 tầng kiểu AWS Console, không cần thiết ở quy mô vài mục nav.
+- **UserMenu:** avatar dropdown 3 mục cố định — Thông tin tài khoản (dialog đọc từ `GET /me`), Đổi mật khẩu (dialog form gọi `PUT /auth/password`), Đăng xuất (`POST /auth/logout` → clear store → redirect `/login`).
+- **Auth state:** `stores/useAuthStore.ts` (Zustand) giữ access token + user hiện tại **trong memory**, không persist localStorage. Route chưa auth → redirect `/login` (route guard trong `router.tsx`).
+- **Toast:** `sonner` cho lỗi network/5xx và thông báo thành công (đổi mật khẩu, tạo tenant...); lỗi field-level (401 sai mật khẩu, 400 field cụ thể) hiện inline dưới input qua RHF, không dùng toast cho lỗi field.
+
 ### Đặc điểm riêng
 
 - **Component pattern:** Functional component + hooks, compound component cho widget phức tạp (VD: `Widget.Header`, `Widget.Body`)
-- **State management:** Zustand cho local/UI state (theme, sidebar, dashboard editing mode); TanStack Query cho server state — cache theo `queryKey` gồm `tenant_id`/`node_id`, invalidate khi nhận event realtime qua socket.io
+- **State management:** Zustand cho local/UI state (theme, sidebar, dashboard editing mode); TanStack Query cho server state — cache theo `queryKey` gồm `tenant_id`/`node_id`, invalidate khi nhận event realtime qua STOMP
 - **Form handling:** React Hook Form + Zod resolver; validate schema dùng lại được cả client và tham chiếu contract API
 - **Styling approach:** Tailwind CSS + shadcn/ui (Radix primitives), biến thể qua `cn()` helper, không viết CSS-in-JS
-- **Realtime:** `socket.io-client` subscribe theo `tenant_id`/`site_id`; khi nhận event → `queryClient.setQueryData`/`invalidateQueries` tương ứng, không tạo state riêng song song với cache
-- **Chart:** Apache ECharts duy nhất cho time-series (zoom/pan/brush); không trộn thêm chart lib khác
-- **Dashboard layout:** `react-grid-layout` cho kéo-thả/resize; lưu `layout_json` lên server qua debounce (tránh gọi API mỗi lần kéo)
+- **Realtime (chỉ `x-frontend`):** `@stomp/stompjs` connect endpoint `/ws` (JWT header CONNECT), subscribe STOMP topic `/topic/realtime/{tenantId}/{tenantNodeId}`; khi nhận event → `queryClient.setQueryData`/`invalidateQueries` tương ứng, không tạo state riêng song song với cache
+- **Chart (chỉ `x-frontend`):** Apache ECharts duy nhất cho time-series (zoom/pan/brush); không trộn thêm chart lib khác
+- **Dashboard layout (chỉ `x-frontend`):** `react-grid-layout` cho kéo-thả/resize; lưu `layout_json` lên server qua debounce (tránh gọi API mỗi lần kéo)
 - **Thinking in React:** Chia UI thành hierarchy → build static trước → tìm minimal state → xác định state sống ở đâu → thêm inverse data flow
 
 ---

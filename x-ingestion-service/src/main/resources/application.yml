@@ -1,0 +1,46 @@
+spring:
+  application:
+    name: ingestion-service
+
+  kafka:
+    bootstrap-servers: localhost:29092
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+
+  datasource:
+    url: jdbc:postgresql://localhost:5433/iiot
+    username: iiot
+    password: iiot
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+
+  data:
+    redis:
+      host: localhost
+      port: 19380
+
+mqtt:
+  broker-url: tcp://localhost:1883
+  client-id: ingestion-service
+  topic-filter: gateway/+/data
+
+app:
+  kafka:
+    topic:
+      sensor-data-raw: sensor-data-raw
+  redis:
+    gw-resolve-ttl-minutes: 10
+
+server:
+  port: 8081
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

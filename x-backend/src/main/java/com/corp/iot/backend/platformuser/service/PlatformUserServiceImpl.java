@@ -1,0 +1,42 @@
+package com.corp.iot.backend.platformuser.service;
+
+import com.corp.iot.backend.common.exception.BusinessException;
+import com.corp.iot.backend.platformuser.dto.CreatePlatformUserRequest;
+import com.corp.iot.backend.platformuser.dto.PlatformUserResponse;
+import com.corp.iot.backend.platformuser.entity.PlatformUser;
+import com.corp.iot.backend.platformuser.mapper.PlatformUserMapper;
+import com.corp.iot.backend.platformuser.repository.PlatformUserRepository;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+
+import java.util.List;
+
+@Service
+@RequiredArgsConstructor
+public class PlatformUserServiceImpl implements PlatformUserService {
+
+    private final PlatformUserRepository platformUserRepository;
+    private final PlatformUserMapper platformUserMapper;
+    private final PasswordEncoder passwordEncoder;
+
+    @Override
+    public PlatformUserResponse create(CreatePlatformUserRequest request) {
+        if (platformUserRepository.findByUsernameIgnoreCase(request.username()).isPresent()) {
+            throw new BusinessException(HttpStatus.CONFLICT, "USERNAME_TAKEN", "Username đã tồn tại");
+        }
+        PlatformUser user = new PlatformUser();
+        user.setUsername(request.username());
+        user.setFullName(request.fullName());
+        user.setEmail(request.email());
+        user.setPasswordHash(passwordEncoder.encode(request.password()));
+        platformUserRepository.save(user);
+        return platformUserMapper.toResponse(user);
+    }
+
+    @Override
+    public List<PlatformUserResponse> list() {
+        return platformUserRepository.findAll().stream().map(platformUserMapper::toResponse).toList();
+    }
+}

@@ -9,6 +9,7 @@
 skinparam componentStyle rectangle
 
 [Frontend SPA] as FE
+[Admin Frontend] as ADMINFE
 [Gateway] as GW
 [External Database] as EXTDB
 [EMQX] as EMQX
@@ -37,14 +38,18 @@ BE --> PG : CRUD
 BE --> REDIS : cache
 REDIS --> BE : pub-sub
 BE <--> FE : REST/WebSocket
+BE <--> ADMINFE : REST
 @enduml
 ```
 
+> **Frontend:** **2 SPA độc lập, deploy riêng** — `x-frontend` (tenant user: Tenant Admin/Kỹ thuật viên/Nhân viên — dashboard, alert, command, report, quản lý tổ chức trong tenant) và `x-frontend-admin` (platform user: System Admin — quản lý tenant, quản lý platform_user; không cần realtime/dashboard/widget nên không dùng ECharts/react-grid-layout/socket.io). Cả 2 gọi chung 1 Backend API cho hầu hết endpoint, **riêng login/refresh/logout tách namespace path khác nhau** (`/api/v1/tenant/auth/*` và `/api/v1/platform/auth/*`, xem flow Auth) — vì cookie `refresh_token` scope theo Path chứ không phân biệt port, nếu dùng chung 1 path thì mở cả 2 app trong cùng trình duyệt sẽ ghi đè cookie của nhau (phát hiện thực tế lúc dev). Các endpoint còn lại (CRUD tenant, gateway...) vẫn dùng chung, Backend tự phân biệt `platform_user`/`tenant_user` theo `username` khi login.
+>
 > **Deploy:** Backend / Ingestion Service / Processing Service là **3 Spring Boot app độc lập** (3 deployable unit riêng, mỗi service 1 Docker image), không phải module trong 1 app. Deploy/scale riêng để tránh ảnh hưởng hiệu suất lẫn nhau — VD: Ingestion tải cao (nhiều gateway kết nối đồng thời) không kéo chậm Backend đang phục vụ user, Processing chạy report nặng không làm nghẽn consumer alert/command. 3 service **không gọi trực tiếp HTTP/RPC** với nhau — chỉ giao tiếp qua Kafka, Redis, hoặc đọc/viết chung PostgreSQL (shared-database pattern, chưa cần DB-per-service ở quy mô hiện tại).
 
 ## 2. Data flow
 
 > Mô tả đường đi của data từ nguồn đến người dùng, qua những service nào và xử lý gì ở mỗi bước.
+> "Frontend" trong các flow dưới đây (trừ Auth/RBAC) = `x-frontend` (tenant) — dashboard/alert/command/report là tính năng trong phạm vi 1 tenant, `x-frontend-admin` không tham gia các flow này.
 
 ### Flow: Gateway sensor data (MQTT ingestion)
 
@@ -54,15 +59,54 @@ BE <--> FE : REST/WebSocket
 
 | Bước | Service | Xử lý gì |
 |------|---------|-----------|
-| 1 | Gateway | Đọc chân INPUT (AI/DI), đóng gói giá trị thành JSON, publish theo topic MQTT (định danh bằng `mac_address`) |
+| 1 | Gateway | Đọc **tất cả** chân INPUT (AI/DI) theo 1 chu kỳ polling cố định, đóng gói **batch** giá trị thành 1 JSON, publish 1 lần lên topic MQTT định danh bằng `mac_address` |
 | 2 | EMQX | Nhận kết nối MQTT từ hàng nghìn gateway đồng thời, route message theo topic |
-| 3 | Ingestion Service | Subscribe topic (Paho/Spring Integration MQTT), resolve `mac_address` → `gateway_id`/`tenant_id` (cache Redis `gw-resolve`, TTL 10'), publish Kafka `sensor-data-raw` (partition `tenant_id`+`gateway_id`) |
+| 3 | Ingestion Service | Subscribe topic (Paho/Spring Integration MQTT), resolve `mac_address` → `gateway_id`/`tenant_id`/`tenant_node_id` (cache Redis `gw-resolve`, TTL 10', fallback query Postgres read-only nếu miss), **unbundle batch → 1 Kafka message/reading**, sinh `messageId` deterministic, publish Kafka `sensor-data-raw` (partition `tenant_id`+`gateway_id`) |
 | 4 | Kafka | Buffer `sensor-data-raw`, đảm bảo at-least-once, decouple ingestion khỏi xử lý |
-| 5 | Processing Service | Consume, dedup theo `messageId` (Redis `telemetry-dedup`, TTL 6h), validate schema, chuẩn hóa field theo `metric`, bỏ qua pin có `enabled=false` |
-| 6 | Processing Service | Ghi InfluxDB measurement `sensor_reading` (tag `tenant_id`, `tenant_node_id`, `gateway_id`, `metric`); update `gateway.last_seen_at` trong Postgres |
-| 7 | Processing Service | Đánh giá `alert_rule` theo `metric` tại node ngay sau khi ghi (chi tiết ở flow Alert); publish event realtime lên Redis pub/sub |
-| 8 | Backend | Nhận qua Redis pub/sub (fan-out khi chạy nhiều instance), push STOMP/WebSocket tới client đang subscribe |
-| 9 | Frontend | Render chart/value widget realtime trên Dashboard |
+| 5 | Processing Service | Consume, dedup theo `messageId` (Redis `telemetry-dedup`, TTL 6h), validate schema, resolve `gateway_pin` theo `(gatewayId, type, pinNumber)` để lấy `metric`, bỏ qua pin có `enabled=false` hoặc không tìm thấy (log + skip, không throw) |
+| 6 | Processing Service | Ghi InfluxDB measurement `sensor_reading` (tag `tenant_id`, `tenant_node_id`, `gateway_id`, `metric`, `pin_number`, `pin_type` — 2 tag pin bắt buộc để phân biệt khi nhiều pin chung metric); update `gateway.last_seen_at` trong Postgres |
+| 7 | Processing Service | Đánh giá `alert_rule` theo `metric` tại node ngay sau khi ghi (chi tiết ở flow Alert — **Phase 6**); publish event realtime lên Redis pub/sub channel `realtime:{tenantId}:{tenantNodeId}` (payload kèm `pinNumber`/`pinType`) |
+| 8 | Backend | `RedisRealtimeBridge` (`RedisMessageListenerContainer`, pattern `realtime:*`) nhận message, forward `SimpMessagingTemplate` vào STOMP topic `/topic/realtime/{tenantId}/{tenantNodeId}` (fan-out khi chạy nhiều instance nhờ mọi instance đều subscribe Redis) |
+| 9 | Frontend | `@stomp/stompjs` client connect endpoint `/ws` (JWT ở header CONNECT), subscribe đúng topic theo site đang xem, khớp `pinNumber`/`pinType` để cập nhật đúng widget/card, render realtime |
+
+**Contract STOMP/WebSocket (Backend ↔ Frontend), chốt khi làm trang Chi tiết Gateway:**
+
+```
+Endpoint: /ws (không dùng SockJS — browser hiện đại hỗ trợ WebSocket native đầy đủ)
+CONNECT: header Authorization: Bearer {accessToken} — StompAuthChannelInterceptor validate JWT (JwtService),
+         set Principal; SUBSCRIBE bị chặn nếu tenantId trong destination không khớp JWT hoặc
+         ScopeService.canAccessNode(...) = false (tái dùng cơ chế phân quyền theo tenant_node đã có).
+SUBSCRIBE: /topic/realtime/{tenantId}/{tenantNodeId}
+Message payload (JSON, forward nguyên văn từ Redis): {gatewayId, metric, pinNumber, pinType, value, measuredAt}
+```
+
+**Contract MQTT (Gateway → EMQX), chốt ở Phase 3:**
+
+```
+Topic: gateway/{mac_address}/data   (QoS 1)
+Payload:
+{
+  "measuredAt": "2026-08-12T09:41:00Z",
+  "readings": [
+    { "type": "AI", "pinNumber": 1, "value": 23.5 },
+    { "type": "DI", "pinNumber": 1, "value": 1 }
+  ]
+}
+```
+
+`type` + `pinNumber` bắt buộc đi cùng nhau — unique constraint thật của `gateway_pin` là `(tenant_id, gateway_id, type, pin_number)`, riêng `pinNumber` không đủ phân biệt (VD `AI1` và `DI1` có thể trùng số).
+
+**Contract Kafka `sensor-data-raw`** — JSON string thuần (không dùng Spring Kafka type-header serializer, tránh khoá theo Java class giữa 2 service độc lập version riêng); key partition = `"{tenantId}:{gatewayId}"`; header Kafka `correlation_id` = 1 UUID sinh ra mỗi batch MQTT (dùng chung cho mọi reading unbundle từ batch đó):
+
+```json
+{
+  "messageId": "sha256-hex(mac+type+pinNumber+measuredAt)",
+  "tenantId": 12, "gatewayId": 34, "tenantNodeId": 56,
+  "macAddress": "AA:BB:CC:DD:EE:FF",
+  "pinType": "AI", "pinNumber": 1, "value": 23.5,
+  "measuredAt": "2026-08-12T09:41:00Z"
+}
+```
 
 ### Flow: External source data (polling)
 
@@ -140,7 +184,7 @@ BE <--> FE : REST/WebSocket
 
 | Bước | Service | Xử lý gì |
 |------|---------|-----------|
-| 1 | Frontend | Submit `username`/`password` (login form) |
+| 1 | Frontend | Submit `username`/`password` (login form) — `x-frontend` (tenant_user) gọi `/api/v1/tenant/auth/login`, `x-frontend-admin` (platform_user) gọi `/api/v1/platform/auth/login` (namespace path riêng để cookie `refresh_token` không đụng độ khi mở cả 2 app cùng trình duyệt lúc dev local) |
 | 2 | Backend | Query `platform_user` hoặc `tenant_user` theo `username` (unique toàn cục), verify BCrypt |
 | 3 | Backend | Issue JWT access token + refresh token, lưu `refresh_token.token_hash` (SHA-256), `expires_at` |
 | 4 | Backend | Mỗi request sau đó: validate JWT, xác định `tenant_id`/`user_id` |

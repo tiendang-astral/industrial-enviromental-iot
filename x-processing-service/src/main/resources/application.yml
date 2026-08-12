@@ -1,0 +1,48 @@
+spring:
+  application:
+    name: processing-service
+
+  kafka:
+    bootstrap-servers: localhost:29092
+    consumer:
+      group-id: processing-service
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      auto-offset-reset: earliest
+
+  datasource:
+    url: jdbc:postgresql://localhost:5433/iiot
+    username: iiot
+    password: iiot
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+
+  data:
+    redis:
+      host: localhost
+      port: 19380
+
+influx:
+  url: http://localhost:8086
+  org: iiot
+  bucket: raw
+  token: iiot-dev-admin-token
+
+app:
+  kafka:
+    topic:
+      sensor-data-raw: sensor-data-raw
+  redis:
+    telemetry-dedup-ttl-hours: 6
+
+server:
+  port: 8082
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

@@ -1,1 +1,18 @@
-.claude/
+# Claude Code — settings.local.json là override cá nhân (không chia sẻ), nhưng
+# commands/agents/skills dùng chung cho cả team nên KHÔNG ignore toàn bộ .claude/.
+.claude/settings.local.json
+.run/
+logs/
+node_modules/
+.codegraph/
+
+# Editor / OS
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# Secrets — chưa có file nào hiện tại, chặn trước khi lỡ tạo/commit
+.env
+.env.local
+.env.*.local

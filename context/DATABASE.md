@@ -2,7 +2,7 @@
 
 > Nguồn schema duy nhất là **Flyway**; Hibernate chạy `ddl-auto: validate`.
 > Tenant isolation: **Hibernate multi-tenancy DISCRIMINATOR** (bỏ RLS).
-> Migration đã squash thành baseline (2026-06-30): `V1__baseline_schema.sql` + `V2__baseline_seed.sql`.
+> Migration đã squash thành baseline (2026-06-30): `V1__baseline_schema.sql`; các thay đổi sau baseline theo từng version riêng (`V2__auth_seed.sql`, `V3__refresh_token_platform_user.sql`, `V4__phase2_metric_seed.sql`, `V5__dev_seed_credentials.sql`, `V6__backfill_datastream_from_gateway_pin.sql`, `V7__phase4_dashboard_template_seed.sql`, `V8__weather_and_gas_metric_seed.sql`...).
 
 ## 1. ERD
 
@@ -135,19 +135,21 @@ erDiagram
 | deleted_at | timestamptz | | Soft delete |
 
 ### refresh_token
-**Vì sao cần:** Token làm mới JWT.
+**Vì sao cần:** Token làm mới JWT. Dùng chung cho cả `tenant_user` và `platform_user` (2 cột user rời nhau, đúng 1 trong 2 NOT NULL).
 
 | Column | Type | Constraint | Mô tả |
 |--------|------|------------|-------|
 | id | bigint | PK auto increment | |
-| tenant_id | bigint | NOT NULL, FK tenant | |
-| user_id | bigint | NOT NULL, FK tenant_user | |
+| tenant_id | bigint | NULLABLE, FK tenant | NULL = token của platform_user |
+| user_id | bigint | NULLABLE, FK tenant_user | NULL = token của platform_user |
+| platform_user_id | bigint | NULLABLE, FK platform_user | NULL = token của tenant_user |
 | token_hash | varchar | NOT NULL, UNIQUE | SHA-256 (không lưu token gốc) |
 | expires_at | timestamptz | NOT NULL | 30 ngày |
 | revoked_at | timestamptz | | NULL = còn hiệu lực |
 | created_at | timestamptz | NOT NULL | |
 
-- Index `(tenant_id, user_id)`, partial index `WHERE revoked_at IS NULL` (tra token còn hiệu lực).
+- CHECK: đúng 1 trong 2 — `(tenant_id, user_id NOT NULL và platform_user_id NULL)` hoặc `(tenant_id, user_id NULL và platform_user_id NOT NULL)`.
+- Index `(tenant_id, user_id) WHERE user_id IS NOT NULL`, `(platform_user_id) WHERE platform_user_id IS NOT NULL`, cả 2 kèm `WHERE revoked_at IS NULL` (tra token còn hiệu lực).
 - Rotation: mỗi lần refresh → revoke token cũ (`revoked_at = now()`) + insert token mới. Logout = revoke.
 
 ### platform_role
@@ -275,7 +277,7 @@ erDiagram
 | max_value | double | | |
 | created_at | timestamptz | NOT NULL | |
 
-- System seed data: temperature, humidity, pressure, pm25, co2, light, voltage, current, power...
+- System seed data: temperature, humidity, pressure, pm25, co2, light, voltage, current, power... — seed ở `V4__phase2_metric_seed.sql` (Phase 2).
 
 ### external_source
 **Vì sao cần:** Kết nối CSDL ngoài. Mỗi source = 1 nguồn dữ liệu có Dashboard riêng.
@@ -395,6 +397,8 @@ Template layout = [
 - CHECK: source_type + source_id hợp lệ.
 - Composite FK `(tenant_id, tenant_node_id) → tenant_node`.
 - Unique `(tenant_id, tenant_node_id, lower(name))` = `uq_datastream_name`.
+- **Tự động tạo 1-1** khi tạo `gateway_pin` INPUT (`GatewayPinServiceImpl.create()`, cùng transaction) — không có endpoint tạo/xóa datastream riêng, khớp nguyên tắc "1 gateway_pin → 1 datastream" ở bảng `gateway_pin`. Backfill 1 lần cho pin có trước tính năng Dashboard qua `V6__backfill_datastream_from_gateway_pin.sql`.
+- **KHÔNG bị xóa khi pin bị tắt** (`gateway_pin.enabled=false`) — `id` phải ổn định để widget Dashboard đang bind không mất liên kết khi user bật lại pin; lúc pin tắt chỉ dừng nhận data (Processing Service đã skip từ Phase 3), Backend expose thêm `sourceEnabled` (API.md) để FE hiện badge "Pin đã tắt" thay vì hiển thị âm thầm dữ liệu cũ.
 
 ### alert_rule
 **Vì sao cần:** Rule cảnh báo theo metric tại 1 node. Tất cả datastream có metric đó tại node đều bị monitor.
@@ -466,13 +470,13 @@ Template layout = [
 | Column | Type | Constraint | Mô tả |
 |--------|------|------------|-------|
 | id | uuid | PK | |
-| tenant_id | uuid | NOT NULL, FK tenant | |
-| gateway_id | uuid | NOT NULL, FK gateway | |
-| tenant_node_id | uuid | NULLABLE | Snapshot (KHÔNG FK — có thể trỏ node đã xóa) |
+| tenant_id | bigint | NOT NULL, FK tenant | |
+| gateway_id | bigint | NOT NULL, FK gateway | |
+| tenant_node_id | bigint | NULLABLE | Snapshot (KHÔNG FK — có thể trỏ node đã xóa) |
 | command_type | varchar | NOT NULL, CHECK IN ('TURN_ON','TURN_OFF') | |
 | parameters_json | jsonb | NOT NULL | `{"pin":"2"}` → resolve pin DO |
 | status | varchar | NOT NULL, CHECK IN ('PENDING','DISPATCHED','ACKNOWLEDGED','FAILED','TIMED_OUT') | |
-| requested_by | uuid | NOT NULL | |
+| requested_by | bigint | NOT NULL | |
 | requested_at | timestamptz | NOT NULL | |
 | dispatched_at | timestamptz | | |
 | acknowledged_at | timestamptz | | |
@@ -496,7 +500,7 @@ Template layout = [
 | Column | Type | Constraint | Mô tả |
 |--------|------|------------|-------|
 | id | uuid | PK | Event ID |
-| tenant_id | uuid | NOT NULL | Tenant context (set thủ công lúc insert) |
+| tenant_id | bigint | NOT NULL | Tenant context (set thủ công lúc insert), không FK |
 | aggregate_type | varchar | NOT NULL | |
 | aggregate_id | uuid | NOT NULL | |
 | event_type | varchar | NOT NULL | = tên Kafka topic |
@@ -518,12 +522,11 @@ Template layout = [
 |-------|------|-----------|---------|
 | `uq_gateway_mac` | gateway | `mac_address` | Định danh gateway toàn platform |
 | `ix_gateway_node` | gateway | `(tenant_id, tenant_node_id)` | Gateway theo node |
-| `uq_gateway_pin` | gateway_pin | `(tenant_id, gateway_id, signal_type, pin_number)` | Chân vật lý duy nhất TRONG mỗi signal_type/gateway |
+| `uq_gateway_pin` | gateway_pin | `(tenant_id, gateway_id, type, pin_number)` | Chân vật lý duy nhất TRONG mỗi type/gateway |
 | `uq_datastream_name` | datastream | `(tenant_id, tenant_node_id, lower(name))` | Tên kênh duy nhất trong anchor node |
 | `uq_dashboard_user_node` | dashboard | `(tenant_id, user_id, tenant_node_id)` | 1 board/user/node |
 | `uq_alert_open` | alert | `(tenant_id, fingerprint) WHERE status IN ('PENDING','ACTIVE')` | 1 alert đang mở/fingerprint |
-| `ix_alert_rule_metric` | alert_rule | `(tenant_id, enabled, metric)` | Alert rule theo metric |
-| `ix_alert_rule_scope` | alert_rule | `(tenant_id, scope_type, scope_id)` | Alert rule theo scope |
+| `ix_alert_rule_node_metric` | alert_rule | `(tenant_id, tenant_node_id, metric_id, enabled)` | Alert rule theo node + metric |
 | `ix_command_pending` | command | `(status, timeout_at) WHERE status IN ('PENDING','DISPATCHED')` | Timeout worker |
 | `ix_outbox_dispatch` | outbox_event | `(status, next_attempt_at, occurred_at) WHERE status IN ('PENDING','FAILED')` | Publisher scan |
 | GiST | tenant_node | `path` | Descendant query (scope/resources) |
@@ -537,9 +540,11 @@ Template layout = [
 ```text
 measurement: sensor_reading
 timestamp: measuredAt (WritePrecision.NS)
-Tags: tenant_id, tenant_node_id, gateway_id, metric
+Tags: tenant_id, tenant_node_id, gateway_id, metric, pin_number, pin_type
 Fields: value_float (double), quality (string)
 ```
+
+> `pin_number`/`pin_type` thêm ở Phase "Chi tiết Gateway" (sau Phase 3) — bắt buộc để phân biệt đúng pin khi 1 gateway có nhiều pin cùng `metric` (VD 2 cảm biến nhiệt độ khác vị trí). Data ghi trước đó (Phase 3 test) không có 2 tag này, chấp nhận vì bucket `raw` retention 7 ngày.
 
 ### Measurement `external_reading` (external sources)
 
@@ -577,11 +582,18 @@ Không phải nguồn bền vững. Key đang dùng:
 
 ```text
 telemetry-dedup:{tenantId}:{messageId}  — dedup ingestion, TTL 6h
-gw-resolve:{mac}                        — "uuid|tenant|site", TTL 10'
+gw-resolve:{mac}                        — "gatewayId|tenantId|tenantNodeId", TTL 10'
 scope-sites:{tenant}:{user}             — tập SITE in-scope, TTL 60s
 ws-site-auth:{tenant}:{site}            — WS site↔tenant, TTL 10'
 ws-scope-auth:{...}                     — WS site↔scope user, TTL 60s
 alert-rules:{tenantId}:{metric}         — rule đã resolve scope+recipient, TTL 60s
+```
+
+Pub/sub channel (không có TTL, publish-only):
+
+```text
+realtime:{tenantId}:{tenantNodeId}      — Processing Service publish sensor/external reading mới, Backend subscribe (RedisRealtimeBridge) fan-out STOMP topic /topic/realtime/{tenantId}/{tenantNodeId}
+                                           payload: {gatewayId, metric, pinNumber, pinType, value, measuredAt}
 ```
 
 Mất Redis → giảm hiệu năng, KHÔNG mất cấu hình nguồn (Postgres).
