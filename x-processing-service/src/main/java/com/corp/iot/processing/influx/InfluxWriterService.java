@@ -38,4 +38,19 @@ public class InfluxWriterService {
                 .time(measuredAt, WritePrecision.NS);
         influxDBClient.getWriteApiBlocking().writePoint(bucket, org, point);
     }
+
+    // Ghi InfluxDB measurement external_reading (xem DATABASE.md §4) — luồng External source
+    // polling (Phase 5, ARCHITECTURE.md § Flow: External source data). source_id = externalSourceJobId.
+    public void writeExternalReading(
+            Long tenantId, Long tenantNodeId, Long externalSourceJobId, String metricCode, Double value, Instant measuredAt) {
+        Point point = Point.measurement("external_reading")
+                .addTag("tenant_id", String.valueOf(tenantId))
+                .addTag("tenant_node_id", String.valueOf(tenantNodeId))
+                .addTag("source_id", String.valueOf(externalSourceJobId))
+                .addTag("metric", metricCode)
+                .addField("value_float", value)
+                .addField("quality", "GOOD")
+                .time(measuredAt, WritePrecision.NS);
+        influxDBClient.getWriteApiBlocking().writePoint(bucket, org, point);
+    }
 }

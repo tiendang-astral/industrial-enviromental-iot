@@ -16,3 +16,37 @@ export interface CreateTenantRequest {
   adminEmail?: string
   adminPassword: string
 }
+
+export type NodeType = 'TENANT_ROOT' | 'BRANCH' | 'PRODUCTION_AREA' | 'SITE'
+
+export interface TenantNodeSummary {
+  id: number
+  parentId: number | null
+  nodeType: NodeType
+  name: string
+  path: string
+  depth: number
+}
+
+export interface GatewaySummary {
+  id: number
+  tenantNodeId: number
+  name: string
+  macAddress: string
+  lastSeenAt: string | null
+}
+
+export interface TenantUserSummary {
+  id: number
+  username: string
+  fullName: string
+  email: string
+  status: TenantStatus
+}
+
+export interface TenantDetail {
+  tenant: Tenant
+  nodes: TenantNodeSummary[]
+  gateways: GatewaySummary[]
+  users: TenantUserSummary[]
+}

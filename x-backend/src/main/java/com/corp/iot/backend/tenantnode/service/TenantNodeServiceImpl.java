@@ -4,11 +4,17 @@ import com.corp.iot.backend.common.exception.BusinessException;
 import com.corp.iot.backend.common.scope.ScopeService;
 import com.corp.iot.backend.common.security.AppUserPrincipal;
 import com.corp.iot.backend.common.tenant.TenantContext;
+import com.corp.iot.backend.externalsource.entity.ExternalSource;
+import com.corp.iot.backend.externalsource.repository.ExternalSourceRepository;
 import com.corp.iot.backend.gateway.repository.GatewayRepository;
+import com.corp.iot.backend.tenant.entity.Tenant;
+import com.corp.iot.backend.tenant.repository.TenantRepository;
 import com.corp.iot.backend.tenantnode.dto.CreateTenantNodeRequest;
 import com.corp.iot.backend.tenantnode.dto.MoveTenantNodeRequest;
+import com.corp.iot.backend.tenantnode.dto.TenantNodeOverviewResponse;
 import com.corp.iot.backend.tenantnode.dto.TenantNodeResponse;
 import com.corp.iot.backend.tenantnode.dto.UpdateTenantNodeRequest;
+import com.corp.iot.backend.tenantnode.dto.UpdateTenantNodeStatusRequest;
 import com.corp.iot.backend.tenantnode.entity.NodeType;
 import com.corp.iot.backend.tenantnode.entity.TenantNode;
 import com.corp.iot.backend.tenantnode.mapper.TenantNodeMapper;
@@ -36,8 +42,31 @@ public class TenantNodeServiceImpl implements TenantNodeService {
 
     private final TenantNodeRepository tenantNodeRepository;
     private final GatewayRepository gatewayRepository;
+    private final TenantRepository tenantRepository;
+    private final ExternalSourceRepository externalSourceRepository;
     private final TenantNodeMapper tenantNodeMapper;
     private final ScopeService scopeService;
+
+    @Override
+    public TenantNodeOverviewResponse overview(Long id) {
+        TenantNode node = getOrThrow(id);
+        List<Long> subtreeNodeIds = tenantNodeRepository.findDescendantIdsIncludingSelf(TenantContext.getTenantId(), node.getPath());
+
+        List<TenantNodeOverviewResponse.ExternalSourceSummary> sources = externalSourceRepository.findByTenantNodeIdIn(subtreeNodeIds).stream()
+                .map(this::toSourceSummary)
+                .toList();
+        List<TenantNodeOverviewResponse.SiteSummary> sites = tenantNodeRepository.findAllById(subtreeNodeIds).stream()
+                .filter(n -> n.getNodeType() == NodeType.SITE)
+                .map(n -> new TenantNodeOverviewResponse.SiteSummary(n.getId(), n.getName(), n.getPath()))
+                .toList();
+
+        return new TenantNodeOverviewResponse(sources, sites);
+    }
+
+    private TenantNodeOverviewResponse.ExternalSourceSummary toSourceSummary(ExternalSource source) {
+        String path = tenantNodeRepository.findById(source.getTenantNodeId()).map(TenantNode::getPath).orElse(null);
+        return new TenantNodeOverviewResponse.ExternalSourceSummary(source.getId(), source.getName(), source.getTenantNodeId(), path);
+    }
 
     @Override
     public List<TenantNodeResponse> list() {
@@ -58,6 +87,9 @@ public class TenantNodeServiceImpl implements TenantNodeService {
         }
         TenantNode parent = getOrThrow(request.parentId());
         validateHierarchy(nodeType, parent.getNodeType());
+        if (!parent.isEnabled()) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "PARENT_NODE_DISABLED", "Không thể tạo node con dưới node đã tắt");
+        }
 
         TenantNode node = new TenantNode();
         node.setParentId(parent.getId());
@@ -80,6 +112,16 @@ public class TenantNodeServiceImpl implements TenantNodeService {
         TenantNode node = getOrThrow(id);
         node.setName(request.name());
         tenantNodeRepository.save(node);
+
+        // TENANT_ROOT = "tên công ty" hiển thị ở Tổ chức — đồng bộ luôn tenant.name
+        // để platform (bảng Tenant) thấy đúng tên mới (xem DATABASE.md § tenant).
+        if (node.getNodeType() == NodeType.TENANT_ROOT) {
+            Tenant tenant = tenantRepository.findById(TenantContext.getTenantId())
+                    .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "TENANT_NOT_FOUND", "Không tìm thấy tenant"));
+            tenant.setName(request.name());
+            tenantRepository.save(tenant);
+        }
+
         return tenantNodeMapper.toResponse(node);
     }
 
@@ -109,6 +151,15 @@ public class TenantNodeServiceImpl implements TenantNodeService {
         node.setParentId(newParent.getId());
         node.setPath(newParent.getPath() + "." + node.getId());
         node.setDepth(newSelfDepth);
+        return tenantNodeMapper.toResponse(node);
+    }
+
+    @Override
+    @Transactional
+    public TenantNodeResponse updateStatus(Long id, UpdateTenantNodeStatusRequest request) {
+        TenantNode node = getOrThrow(id);
+        node.setEnabled(request.enabled());
+        tenantNodeRepository.save(node);
         return tenantNodeMapper.toResponse(node);
     }
 

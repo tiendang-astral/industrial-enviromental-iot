@@ -10,5 +10,9 @@ export const changePasswordSchema = z
     message: 'Mật khẩu xác nhận không khớp',
     path: ['confirmPassword'],
   })
+  .refine((data) => data.newPassword !== data.currentPassword, {
+    message: 'Mật khẩu mới phải khác mật khẩu hiện tại',
+    path: ['newPassword'],
+  })
 
 export type ChangePasswordFormValues = z.infer<typeof changePasswordSchema>

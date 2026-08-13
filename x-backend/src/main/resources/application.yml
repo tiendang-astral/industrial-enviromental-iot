@@ -31,6 +31,8 @@ influx:
   token: iiot-dev-admin-token
 
 app:
+  encryption:
+    key: ${APP_ENCRYPTION_KEY:htcBFqnfOVeXpRFzOHXr3wAl1qRamivL3PBA5IC+hEY=}
   jwt:
     secret: d8rf3KBI+EEsxzl9qhl4FIq3Byvam9NI0GaYzQSuERo9xTcxYu6yJY9VJ+LRE95X
     access-token-ttl-minutes: 15

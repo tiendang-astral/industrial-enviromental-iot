@@ -15,12 +15,17 @@ export interface PinTelemetry {
   history: ReadingPoint[]
 }
 
-/** Payload nhận qua STOMP /topic/realtime/{tenantId}/{tenantNodeId} — xem ARCHITECTURE.md. */
+/**
+ * Payload nhận qua STOMP /topic/realtime/{tenantId}/{tenantNodeId} — xem ARCHITECTURE.md.
+ * 2 dạng: nguồn gateway (gatewayId+pinType+pinNumber, cần tra datastreamId qua map riêng)
+ * và nguồn external (datastreamId thẳng, không có pin — Phase 5).
+ */
 export interface RealtimeReadingMessage {
-  gatewayId: number
+  gatewayId?: number
+  pinType?: 'AI' | 'DI'
+  pinNumber?: number
+  datastreamId?: number
   metric: string
-  pinType: 'AI' | 'DI'
-  pinNumber: number
   value: number
   measuredAt: string
 }

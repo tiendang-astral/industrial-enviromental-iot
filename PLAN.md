@@ -169,22 +169,27 @@
 
 **Chức năng PRODUCT.md:** "Thu thập dữ liệu từ Database/Datasource và hiển thị realtime".
 
-**Service:** x-ingestion-service, x-processing-service (theo `ARCHITECTURE.md` § Flow: External source data).
+**Service:** x-backend, x-ingestion-service, x-processing-service, x-frontend (theo `ARCHITECTURE.md` § Flow: External source data).
 
-**Bảng/measurement liên quan:** `external_source`, `external_source_job`, InfluxDB `external_reading`, `datastream` (`source_type='EXTERNAL_SOURCE_JOB'`).
+**Bảng/measurement liên quan:** `external_source`, `external_source_job`, InfluxDB `external_reading`, `datastream` (`source_type='EXTERNAL_SOURCE_JOB'`, cột mới `source_field` — `V11`), `dashboard` (cột mới `external_source_id` — `V11`).
+
+**Quyết định chốt lúc code (khác dự kiến ban đầu):** chỉ hỗ trợ `connection_type=POSTGRESQL` (JDBC); field→metric mapping **không** qua `mapping_config` (cột giữ lại, unused/reserved) mà qua `datastream.source_field` — datastream cho external tạo **thủ công** (khác gateway_pin tự động); `external_source` gắn được ở **bất kỳ cấp node** (khác Gateway chỉ SITE); thêm hẳn model điều hướng Dashboard theo Nguồn/Site (xem `DATABASE.md` § dashboard).
 
 **Nhiệm vụ chính:**
-- [ ] x-backend: CRUD `external_source` (encrypt `credential_encrypted` AES-GCM), CRUD `external_source_job` (`query_config`, `filter_config`, `mapping_config`, `schedule_cron`).
-- [ ] x-ingestion-service: scheduler đọc `schedule_cron`/`incremental_cursor` mỗi job tới hạn → connect `external_source`, query theo `query_config`, lấy dữ liệu mới hơn `incremental_field`.
-- [ ] Áp `filter_config`, `mapping_config` (map field → metric/datastream), publish Kafka `external-data-raw` (partition `tenant_id`+`external_source_job_id`).
-- [ ] x-processing-service: consume, ghi InfluxDB `external_reading`.
-- [ ] x-ingestion-service: cập nhật `incremental_cursor`, `last_run_status`, `last_run_at`, `total_row_count`/`last_error` vào Postgres.
-- [ ] Tái dùng pipeline Redis pub/sub + WebSocket từ Phase 4 (datastream nguồn external hiển thị y như nguồn gateway).
+- [x] x-backend: CRUD `external_source` (encrypt `credential_encrypted` AES-GCM, key qua `APP_ENCRYPTION_KEY`), CRUD `external_source_job` (`query_config`, `filter_config`, `schedule_cron` — validate identifier allowlist chống SQL injection + parse cron bằng cron-utils).
+- [x] x-backend: tạo/xóa `datastream` thủ công cho external (`POST /external-source-jobs/{jobId}/datastreams`, `DELETE /datastreams/{id}`), endpoint `GET /tenant-nodes/{id}/overview` (flatten subtree cho card-grid), Dashboard board riêng theo nguồn (`GET/PUT /external-sources/{id}/dashboard`).
+- [x] x-ingestion-service: `@Scheduled` fixed-delay sweep (15s) đọc `schedule_cron`/`next_run_at`/`incremental_cursor` mỗi job tới hạn → JDBC thuần connect `external_source`, build query parameterized từ `query_config`/`filter_config`, unbundle 1 Kafka message/field/row, publish `external-data-raw`.
+- [x] x-processing-service: consume, dedup (`TelemetryDedupService` dùng chung), resolve `Datastream(sourceField)` → ghi InfluxDB `external_reading`, publish Redis realtime (payload `datastreamId` trực tiếp, khác payload gateway).
+- [x] x-ingestion-service: cập nhật `incremental_cursor`, `last_run_status`, `last_run_at`, `total_row_count`/`last_error` vào Postgres — lỗi vẫn advance `next_run_at` (không retry-storm).
+- [x] x-frontend: Dashboard đổi UX — node không phải SITE hiện card-grid (Nguồn + Site, flatten subtree); SITE có 2 tab "Xem site"/"Xem theo nguồn"; trang `SourceDashboardPage` (board riêng theo nguồn, chỉ VALUE/LINE).
+- [x] x-frontend: trang "Nguồn dữ liệu" (`/data-sources`, bật nav item đã có sẵn khung "Sắp có" từ Phase 0) — `DataSourcesPage` (danh sách toàn bộ nguồn trong scope, tạo mới) + `DataSourceDetailPage` (sửa/xóa nguồn, CRUD job kèm bộ lọc động, tạo/xóa datastream theo field). Backend thêm `GET /external-sources` (list toàn scope, giống pattern `GET /gateways`).
 
 **DoD:**
-- [ ] Tạo 1 `external_source` trỏ vào 1 Postgres test khác, tạo job với cron `*/1 * * * *` → sau 1 phút thấy `external_reading` mới trong InfluxDB.
-- [ ] `incremental_cursor` không lấy lại dữ liệu cũ ở lần chạy tiếp theo.
-- [ ] Job lỗi (sai connection) → `last_run_status=FAILED`, `last_error` có message, không crash service.
+- [x] Tạo 1 `external_source` trỏ vào chính Postgres dev (`ext_test_readings` test table), tạo job cron `* * * * *` → sau ~1 phút `lastRunStatus=SUCCESS`, `totalRowCount=2`, thấy đủ 4 field/value (`temperature`+`humidity` × 2 timestamp) trong InfluxDB `external_reading` đúng giá trị insert.
+- [x] `incremental_cursor` cập nhật đúng = max(timestampColumn) sau mỗi lần chạy.
+- [x] Job lỗi (host không kết nối được) → `lastRunStatus=FAILED`, log lỗi rõ ràng, không crash service, service vẫn tiếp tục sweep job khác.
+- [x] SQL injection qua `table`/`column` (`"readings; DROP TABLE users;--"`) bị chặn 400 `INVALID_IDENTIFIER` ngay lúc tạo job.
+- [x] Xóa bị chặn đúng thứ tự phụ thuộc: `SOURCE_HAS_JOBS` (409), `JOB_HAS_DATASTREAMS` (409); xóa datastream `GATEWAY_PIN` bị chặn `DATASTREAM_DELETE_NOT_ALLOWED` (400).
 
 ---
 

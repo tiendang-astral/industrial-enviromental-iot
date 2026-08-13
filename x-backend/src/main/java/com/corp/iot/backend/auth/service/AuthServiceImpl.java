@@ -14,6 +14,10 @@ import com.corp.iot.backend.platformuser.repository.PlatformUserRepository;
 import com.corp.iot.backend.refreshtoken.entity.RefreshToken;
 import com.corp.iot.backend.refreshtoken.repository.RefreshTokenRepository;
 import com.corp.iot.backend.role.repository.TenantRoleRepository;
+import com.corp.iot.backend.tenant.entity.Tenant;
+import com.corp.iot.backend.tenant.repository.TenantRepository;
+import com.corp.iot.backend.tenantnode.entity.TenantNode;
+import com.corp.iot.backend.tenantnode.repository.TenantNodeRepository;
 import com.corp.iot.backend.tenantuser.entity.TenantUser;
 import com.corp.iot.backend.tenantuser.repository.TenantUserRepository;
 import com.corp.iot.backend.userrolescope.entity.UserRoleScope;
@@ -28,7 +32,10 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -36,6 +43,8 @@ public class AuthServiceImpl implements AuthService {
 
     private final PlatformUserRepository platformUserRepository;
     private final TenantUserRepository tenantUserRepository;
+    private final TenantRepository tenantRepository;
+    private final TenantNodeRepository tenantNodeRepository;
     private final TenantRoleRepository tenantRoleRepository;
     private final UserRoleScopeRepository userRoleScopeRepository;
     private final RefreshTokenRepository refreshTokenRepository;
@@ -74,6 +83,7 @@ public class AuthServiceImpl implements AuthService {
         if (user.getStatus() != AccountStatus.ACTIVE || !passwordEncoder.matches(password, user.getPasswordHash())) {
             throw invalidCredentials();
         }
+        verifyTenantActive(user.getTenantId());
         TenantContext.setTenantId(user.getTenantId());
         List<String> authorities = resolveTenantAuthorities(user.getId());
         AppUserPrincipal principal = new AppUserPrincipal(
@@ -102,6 +112,9 @@ public class AuthServiceImpl implements AuthService {
         if (stored.getPlatformUserId() != null) {
             PlatformUser user = platformUserRepository.findById(stored.getPlatformUserId())
                     .orElseThrow(() -> new BusinessException(HttpStatus.UNAUTHORIZED, "INVALID_REFRESH_TOKEN", "Token không hợp lệ"));
+            if (user.getStatus() != AccountStatus.ACTIVE) {
+                throw new BusinessException(HttpStatus.UNAUTHORIZED, "INVALID_REFRESH_TOKEN", "Token không hợp lệ");
+            }
             AppUserPrincipal principal = new AppUserPrincipal(
                     user.getId(), null, user.getUsername(), UserType.PLATFORM, List.of("PLATFORM_ADMIN")
             );
@@ -112,6 +125,10 @@ public class AuthServiceImpl implements AuthService {
         TenantContext.setTenantId(stored.getTenantId());
         TenantUser user = tenantUserRepository.findById(stored.getUserId())
                 .orElseThrow(() -> new BusinessException(HttpStatus.UNAUTHORIZED, "INVALID_REFRESH_TOKEN", "Token không hợp lệ"));
+        if (user.getStatus() != AccountStatus.ACTIVE) {
+            throw new BusinessException(HttpStatus.UNAUTHORIZED, "INVALID_REFRESH_TOKEN", "Token không hợp lệ");
+        }
+        verifyTenantActive(user.getTenantId());
         List<String> authorities = resolveTenantAuthorities(user.getId());
         AppUserPrincipal principal = new AppUserPrincipal(
                 user.getId(), user.getTenantId(), user.getUsername(), UserType.TENANT, authorities
@@ -148,6 +165,7 @@ public class AuthServiceImpl implements AuthService {
             PlatformUser user = platformUserRepository.findById(principal.userId())
                     .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "USER_NOT_FOUND", "Không tìm thấy user"));
             verifyCurrentPassword(request.currentPassword(), user.getPasswordHash());
+            verifyNewPasswordDiffers(request.newPassword(), user.getPasswordHash());
             user.setPasswordHash(passwordEncoder.encode(request.newPassword()));
             platformUserRepository.save(user);
             refreshTokenRepository.revokeAllByPlatformUserId(user.getId(), Instant.now());
@@ -156,6 +174,7 @@ public class AuthServiceImpl implements AuthService {
         TenantUser user = tenantUserRepository.findById(principal.userId())
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "USER_NOT_FOUND", "Không tìm thấy user"));
         verifyCurrentPassword(request.currentPassword(), user.getPasswordHash());
+        verifyNewPasswordDiffers(request.newPassword(), user.getPasswordHash());
         user.setPasswordHash(passwordEncoder.encode(request.newPassword()));
         tenantUserRepository.save(user);
         refreshTokenRepository.revokeAllByUserId(user.getId(), Instant.now());
@@ -164,6 +183,20 @@ public class AuthServiceImpl implements AuthService {
     private void verifyCurrentPassword(String rawPassword, String storedHash) {
         if (!passwordEncoder.matches(rawPassword, storedHash)) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "INVALID_CURRENT_PASSWORD", "Mật khẩu hiện tại không đúng");
+        }
+    }
+
+    private void verifyNewPasswordDiffers(String newPassword, String currentHash) {
+        if (passwordEncoder.matches(newPassword, currentHash)) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "SAME_AS_OLD_PASSWORD", "Mật khẩu mới phải khác mật khẩu hiện tại");
+        }
+    }
+
+    private void verifyTenantActive(Long tenantId) {
+        Tenant tenant = tenantRepository.findById(tenantId)
+                .orElseThrow(() -> new BusinessException(HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS", "Sai tài khoản hoặc mật khẩu"));
+        if (tenant.getStatus() != AccountStatus.ACTIVE) {
+            throw new BusinessException(HttpStatus.FORBIDDEN, "TENANT_LOCKED", "Tenant đã bị khóa, vui lòng liên hệ quản trị viên");
         }
     }
 
@@ -202,8 +235,42 @@ public class AuthServiceImpl implements AuthService {
                 email,
                 principal.type().name(),
                 principal.tenantId(),
-                principal.authorities()
+                principal.authorities(),
+                resolveOrganizationPath(principal)
         );
+    }
+
+    // "Vai trò" đã có sẵn qua authorities — chỉ cần build "Tổ chức" (đường dẫn
+    // root -> node hiện tại) cho tenant_user, theo từng scope trong user_role_scope.
+    private String resolveOrganizationPath(AppUserPrincipal principal) {
+        if (principal.type() != UserType.TENANT) {
+            return null;
+        }
+        List<UserRoleScope> scopes = userRoleScopeRepository.findByUserId(principal.userId());
+        List<String> paths = scopes.stream()
+                .map(scope -> scope.getTenantNodeId() == null ? rootNodeName() : buildNodePath(scope.getTenantNodeId()))
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        return paths.isEmpty() ? null : String.join("; ", paths);
+    }
+
+    private String rootNodeName() {
+        return tenantNodeRepository.findByParentIdIsNull().map(TenantNode::getName).orElse(null);
+    }
+
+    private String buildNodePath(Long tenantNodeId) {
+        return tenantNodeRepository.findById(tenantNodeId).map(node -> {
+            List<Long> ancestorIds = java.util.Arrays.stream(node.getPath().split("\\."))
+                    .map(Long::valueOf)
+                    .toList();
+            Map<Long, String> namesById = tenantNodeRepository.findAllById(ancestorIds).stream()
+                    .collect(Collectors.toMap(TenantNode::getId, TenantNode::getName));
+            return ancestorIds.stream()
+                    .map(namesById::get)
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.joining(" → "));
+        }).orElse(null);
     }
 
     private BusinessException invalidCredentials() {

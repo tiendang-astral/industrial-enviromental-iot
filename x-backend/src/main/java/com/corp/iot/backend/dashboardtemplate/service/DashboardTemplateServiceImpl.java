@@ -1,6 +1,7 @@
 package com.corp.iot.backend.dashboardtemplate.service;
 
 import com.corp.iot.backend.common.exception.BusinessException;
+import com.corp.iot.backend.common.tenant.TenantContext;
 import com.corp.iot.backend.dashboard.dto.DashboardLayout;
 import com.corp.iot.backend.dashboard.dto.DashboardResponse;
 import com.corp.iot.backend.dashboard.dto.Widget;
@@ -19,6 +20,8 @@ import com.corp.iot.backend.datastream.entity.Datastream;
 import com.corp.iot.backend.datastream.repository.DatastreamRepository;
 import com.corp.iot.backend.metric.entity.Metric;
 import com.corp.iot.backend.metric.repository.MetricRepository;
+import com.corp.iot.backend.tenantnode.entity.TenantNode;
+import com.corp.iot.backend.tenantnode.repository.TenantNodeRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -44,6 +47,7 @@ public class DashboardTemplateServiceImpl implements DashboardTemplateService {
     private final DashboardTemplateMapper dashboardTemplateMapper;
     private final DatastreamRepository datastreamRepository;
     private final MetricRepository metricRepository;
+    private final TenantNodeRepository tenantNodeRepository;
     private final DashboardService dashboardService;
     private final DashboardRepository dashboardRepository;
     private final DashboardMapper dashboardMapper;
@@ -58,7 +62,15 @@ public class DashboardTemplateServiceImpl implements DashboardTemplateService {
     public DashboardResponse applyToNode(Long tenantNodeId, Long templateId) {
         DashboardTemplate template = dashboardTemplateRepository.findById(templateId)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "TEMPLATE_NOT_FOUND", "Không tìm thấy template"));
+        TenantNode node = tenantNodeRepository.findById(tenantNodeId)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "NODE_NOT_FOUND", "Không tìm thấy node"));
         Dashboard dashboard = dashboardService.getOrCreateEntity(tenantNodeId);
+
+        // Datastream chỉ neo vào SITE (xem DATABASE.md § datastream) — node đang xem
+        // dashboard có thể là node gộp (BRANCH/PRODUCTION_AREA/TENANT_ROOT), nên phải
+        // tìm datastream trên toàn subtree thay vì match đúng tenantNodeId, nếu không
+        // áp template ở node gộp sẽ không tạo được widget nào (bug đã gặp).
+        List<Long> subtreeNodeIds = tenantNodeRepository.findDescendantIdsIncludingSelf(TenantContext.getTenantId(), node.getPath());
 
         List<Widget> widgets = new ArrayList<>(dashboard.getLayoutJson().widgets());
         Set<String> existingKeys = widgets.stream().map(this::widgetKey).collect(Collectors.toSet());
@@ -70,7 +82,7 @@ public class DashboardTemplateServiceImpl implements DashboardTemplateService {
             if (metric == null) {
                 continue;
             }
-            List<Datastream> matched = datastreamRepository.findByTenantNodeIdAndMetricId(tenantNodeId, metric.getId());
+            List<Datastream> matched = datastreamRepository.findByTenantNodeIdInAndMetricId(subtreeNodeIds, metric.getId());
             for (Datastream datastream : matched) {
                 String key = templateWidget.widgetType() + ":" + datastream.getId();
                 if (!existingKeys.add(key)) {

@@ -2,7 +2,9 @@ package com.corp.iot.backend.tenant.controller;
 
 import com.corp.iot.backend.common.dto.ApiResponse;
 import com.corp.iot.backend.tenant.dto.CreateTenantRequest;
+import com.corp.iot.backend.tenant.dto.TenantDetailResponse;
 import com.corp.iot.backend.tenant.dto.TenantResponse;
+import com.corp.iot.backend.tenant.dto.UpdateTenantStatusRequest;
 import com.corp.iot.backend.tenant.service.TenantService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -27,5 +29,15 @@ public class TenantController {
     @GetMapping
     public ApiResponse<List<TenantResponse>> list() {
         return ApiResponse.of(tenantService.list());
+    }
+
+    @GetMapping("/{id}")
+    public ApiResponse<TenantDetailResponse> detail(@PathVariable Long id) {
+        return ApiResponse.of(tenantService.detail(id));
+    }
+
+    @PutMapping("/{id}/status")
+    public ApiResponse<TenantResponse> updateStatus(@PathVariable Long id, @Valid @RequestBody UpdateTenantStatusRequest request) {
+        return ApiResponse.of(tenantService.updateStatus(id, request));
     }
 }

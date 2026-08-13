@@ -4,6 +4,7 @@ import { AppShell } from '@/components/layout/AppShell'
 import HomePage from '@/pages/HomePage'
 import LoginPage from '@/pages/LoginPage'
 import TenantsPage from '@/pages/TenantsPage'
+import TenantDetailPage from '@/pages/TenantDetailPage'
 import PlatformUsersPage from '@/pages/PlatformUsersPage'
 
 export const router = createBrowserRouter([
@@ -19,6 +20,7 @@ export const router = createBrowserRouter([
         children: [
           { path: '/', element: <HomePage /> },
           { path: '/tenants', element: <TenantsPage /> },
+          { path: '/tenants/:id', element: <TenantDetailPage /> },
           { path: '/platform-users', element: <PlatformUsersPage /> },
         ],
       },

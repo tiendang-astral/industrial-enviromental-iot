@@ -25,7 +25,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Tổng quan', icon: LayoutDashboard, href: '/dashboard' }, // Phase 4 — Dashboard
   { label: 'Tổ chức', icon: Network, href: '/organization' }, // Phase 2 — tenant_node / Gateway
   { label: 'Thiết bị', icon: Router, href: '/devices' }, // Phase 2 — danh sách toàn bộ gateway
-  { label: 'Nguồn dữ liệu', icon: Database }, // Phase 5 — External source
+  { label: 'Nguồn dữ liệu', icon: Database, href: '/data-sources' }, // Phase 5 — External source
   { label: 'Cảnh báo', icon: AlertTriangle }, // Phase 6 — Alert
   { label: 'Báo cáo', icon: FileBarChart }, // Phase 8 — Report
 ]

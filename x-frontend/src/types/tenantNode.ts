@@ -7,6 +7,7 @@ export interface TenantNode {
   name: string
   path: string
   depth: number
+  enabled: boolean
 }
 
 export interface CreateTenantNodeRequest {
@@ -21,4 +22,8 @@ export interface UpdateTenantNodeRequest {
 
 export interface MoveTenantNodeRequest {
   newParentId: number
+}
+
+export interface UpdateTenantNodeStatusRequest {
+  enabled: boolean
 }

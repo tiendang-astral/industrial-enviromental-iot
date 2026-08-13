@@ -24,6 +24,8 @@ export interface Widget {
 export interface Dashboard {
   id: number
   tenantNodeId: number
+  /** NOT NULL = board riêng theo 1 nguồn, layout riêng (Phase 5, xem DATABASE.md § dashboard). */
+  externalSourceId: number | null
   name: string
   widgets: Widget[]
 }
@@ -37,11 +39,16 @@ export interface Datastream {
   metricUnit: string | null
   sourceType: 'GATEWAY_PIN' | 'EXTERNAL_SOURCE_JOB'
   sourceId: number
+  /** Chỉ có khi sourceType=EXTERNAL_SOURCE_JOB — field trong query_config.valueColumns. */
+  sourceField: string | null
   sourceGatewayId: number | null
   sourcePinType: 'AI' | 'DI' | null
   sourcePinNumber: number | null
   /** gateway_pin.enabled hiện tại — false = "Pin đã tắt", datastream KHÔNG bị xóa (xem DATABASE.md). */
   sourceEnabled: boolean | null
+  /** Chỉ có giá trị khi lấy qua listDatastreamsByExternalSource (đọc InfluxDB) — null ở nơi khác. */
+  latestValue: number | null
+  latestMeasuredAt: string | null
 }
 
 export interface DashboardTemplateWidget {

@@ -6,6 +6,7 @@ public record TenantNodeResponse(
         String nodeType,
         String name,
         String path,
-        int depth
+        int depth,
+        boolean enabled
 ) {
 }

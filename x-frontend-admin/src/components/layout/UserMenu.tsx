@@ -18,7 +18,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
@@ -77,11 +76,6 @@ export function UserMenu() {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-56">
-          <DropdownMenuLabel className="flex flex-col">
-            <span className="font-medium">{me.fullName}</span>
-            <span className="text-xs text-muted-foreground">{me.username}</span>
-          </DropdownMenuLabel>
-          <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={() => setIsInfoOpen(true)}>
             <UserRound />
             Thông tin tài khoản
@@ -133,7 +127,6 @@ function AccountInfoDialog({
           <InfoRow label="Username" value={me.username} />
           <InfoRow label="Họ tên" value={me.fullName} />
           <InfoRow label="Email" value={me.email} />
-          <InfoRow label="Loại tài khoản" value={me.type} />
         </div>
       </DialogContent>
     </Dialog>
@@ -177,6 +170,8 @@ function ChangePasswordDialog({
           const apiError = getApiError(error)
           if (apiError?.code === 'INVALID_CURRENT_PASSWORD') {
             setError('currentPassword', { message: apiError.message })
+          } else if (apiError?.code === 'SAME_AS_OLD_PASSWORD') {
+            setError('newPassword', { message: apiError.message })
           } else {
             toast.error(apiError?.message ?? 'Đổi mật khẩu thất bại, vui lòng thử lại')
           }

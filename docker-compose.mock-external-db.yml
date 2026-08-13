@@ -1,0 +1,45 @@
+# Database ngoài để test tính năng External Source (Phase 5) — KHÔNG phải hạ tầng platform
+# thật (tách riêng khỏi docker-compose.yml chính), mô phỏng đúng kịch bản "khách hàng cho
+# platform quyền đọc 1 Postgres của họ". Chạy: docker compose -f docker-compose.mock-external-db.yml up -d
+# Dừng:  docker compose -f docker-compose.mock-external-db.yml down (thêm -v để xóa luôn data).
+#
+# `name:` bắt buộc phải có — 2 file compose trong cùng thư mục mà không khai project name
+# riêng sẽ bị Docker Compose gộp chung 1 project (theo tên thư mục), khiến `down` trên file
+# này coi container của docker-compose.yml chính là "orphan" và XÓA LUÔN (đã gặp bug thật lúc
+# code — mất hạ tầng chính, may là volume vẫn còn nên khôi phục được không mất dữ liệu).
+name: iiot-mock-external-db
+
+services:
+  mock-external-db:
+    image: postgres:16
+    container_name: mock-external-db
+    environment:
+      POSTGRES_USER: sensors
+      POSTGRES_PASSWORD: sensors
+      POSTGRES_DB: sensors
+    ports:
+      - "5435:5432"
+    volumes:
+      - mock_external_db_data:/var/lib/postgresql/data
+      - ./docker/mock-external-db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sensors -d sensors"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Chèn thêm 1 dòng/20s để test polling incremental thật (không chỉ dữ liệu lịch sử tĩnh).
+  mock-external-db-inserter:
+    image: postgres:16
+    container_name: mock-external-db-inserter
+    depends_on:
+      mock-external-db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://sensors:sensors@mock-external-db:5432/sensors
+    volumes:
+      - ./docker/mock-external-db/insert-loop.sh:/insert-loop.sh:ro
+    entrypoint: ["sh", "/insert-loop.sh"]
+
+volumes:
+  mock_external_db_data:

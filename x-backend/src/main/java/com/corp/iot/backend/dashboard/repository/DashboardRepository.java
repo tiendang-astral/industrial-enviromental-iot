@@ -8,4 +8,6 @@ import java.util.Optional;
 public interface DashboardRepository extends JpaRepository<Dashboard, Long> {
 
     Optional<Dashboard> findByUserIdAndTenantNodeId(Long userId, Long tenantNodeId);
+
+    Optional<Dashboard> findByUserIdAndExternalSourceId(Long userId, Long externalSourceId);
 }

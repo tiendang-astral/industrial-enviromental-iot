@@ -31,13 +31,24 @@ interface AddWidgetDialogProps {
   onOpenChange: (open: boolean) => void
   datastreams: Datastream[]
   onAdd: (input: { type: WidgetType; title: string; datastreamId: number | null }) => void
+  /** false = board theo nguồn (external_source) — không có khái niệm gateway/subtree để tổng hợp. */
+  allowDeviceWidgets?: boolean
 }
 
 type Step = 'type' | 'details'
 
-export function AddWidgetDialog({ open, onOpenChange, datastreams, onAdd }: AddWidgetDialogProps) {
+export function AddWidgetDialog({
+  open,
+  onOpenChange,
+  datastreams,
+  onAdd,
+  allowDeviceWidgets = true,
+}: AddWidgetDialogProps) {
   const [step, setStep] = useState<Step>('type')
   const [selectedType, setSelectedType] = useState<WidgetType | null>(null)
+  const typeOptions = allowDeviceWidgets
+    ? WIDGET_TYPE_OPTIONS
+    : WIDGET_TYPE_OPTIONS.filter((option) => bindsDatastream(option.type))
 
   const form = useForm<AddWidgetFormValues>({
     resolver: zodResolver(addWidgetSchema),
@@ -99,7 +110,7 @@ export function AddWidgetDialog({ open, onOpenChange, datastreams, onAdd }: AddW
         {step === 'type' && (
           <>
             <div className="grid grid-cols-2 gap-2">
-              {WIDGET_TYPE_OPTIONS.map((option) => {
+              {typeOptions.map((option) => {
                 const Icon = option.icon
                 const isSelected = selectedType === option.type
                 return (

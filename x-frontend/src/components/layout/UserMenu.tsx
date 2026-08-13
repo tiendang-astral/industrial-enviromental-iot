@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { isAxiosError } from 'axios'
 import { KeyRound, LogOut, User } from 'lucide-react'
 import { useForm } from 'react-hook-form'
 import { useNavigate } from 'react-router-dom'
@@ -19,17 +18,16 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
+import { getApiError } from '@/lib/apiError'
 import { changePasswordSchema, type ChangePasswordFormValues } from '@/lib/changePasswordSchema'
 import { useChangePasswordMutation } from '@/queries/useChangePasswordMutation'
 import { useLogoutMutation } from '@/queries/useLogoutMutation'
 import { useMeQuery } from '@/queries/useMeQuery'
-import type { ApiEnvelope } from '@/types/api'
 import type { MeResponse } from '@/types/auth'
 
 function getInitials(name: string) {
@@ -74,11 +72,6 @@ export function UserMenu() {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-56">
-          <DropdownMenuLabel className="flex flex-col gap-0.5">
-            <span className="text-sm font-medium text-foreground">{me.fullName}</span>
-            <span className="text-xs text-muted-foreground">{me.username}</span>
-          </DropdownMenuLabel>
-          <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={() => setProfileOpen(true)}>
             <User />
             Thông tin tài khoản
@@ -124,10 +117,12 @@ function ProfileDialog({
           <dd className="col-span-2 text-foreground">{me.fullName}</dd>
           <dt className="text-muted-foreground">Email</dt>
           <dd className="col-span-2 text-foreground">{me.email}</dd>
-          <dt className="text-muted-foreground">Tenant</dt>
+          <dt className="text-muted-foreground">Vai trò</dt>
           <dd className="col-span-2 text-foreground">
-            {me.tenantId != null ? `#${me.tenantId}` : '—'}
+            {me.authorities.length > 0 ? me.authorities.join(', ') : '—'}
           </dd>
+          <dt className="text-muted-foreground">Tổ chức</dt>
+          <dd className="col-span-2 text-foreground">{me.organizationPath ?? '—'}</dd>
         </dl>
       </DialogContent>
     </Dialog>
@@ -166,11 +161,13 @@ function ChangePasswordDialog({
           navigate('/login', { replace: true })
         },
         onError: (error) => {
-          const message =
-            isAxiosError<ApiEnvelope<null>>(error) && error.response?.data?.error?.message
-              ? error.response.data.error.message
-              : 'Đổi mật khẩu thất bại, vui lòng thử lại'
-          form.setError('currentPassword', { type: 'server', message })
+          const apiError = getApiError(error)
+          const message = apiError?.message ?? 'Đổi mật khẩu thất bại, vui lòng thử lại'
+          if (apiError?.code === 'SAME_AS_OLD_PASSWORD') {
+            form.setError('newPassword', { type: 'server', message })
+          } else {
+            form.setError('currentPassword', { type: 'server', message })
+          }
         },
       }
     )

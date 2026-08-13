@@ -35,6 +35,7 @@ app:
   kafka:
     topic:
       sensor-data-raw: sensor-data-raw
+      external-data-raw: external-data-raw
   redis:
     telemetry-dedup-ttl-hours: 6
 

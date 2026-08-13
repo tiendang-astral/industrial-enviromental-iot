@@ -33,8 +33,15 @@ app:
   kafka:
     topic:
       sensor-data-raw: sensor-data-raw
+      external-data-raw: external-data-raw
   redis:
     gw-resolve-ttl-minutes: 10
+  external:
+    sweep-interval-ms: 15000
+    query-timeout-seconds: 30
+    max-rows-per-run: 500
+  encryption:
+    key: ${APP_ENCRYPTION_KEY:htcBFqnfOVeXpRFzOHXr3wAl1qRamivL3PBA5IC+hEY=}
 
 server:
   port: 8081

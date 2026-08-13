@@ -73,6 +73,23 @@ public class GatewayServiceImpl implements GatewayService {
     public GatewayResponse update(Long id, UpdateGatewayRequest request) {
         Gateway gateway = getOrThrow(id);
         gateway.setName(request.name());
+
+        if (request.macAddress() != null && !request.macAddress().equalsIgnoreCase(gateway.getMacAddress())) {
+            if (gatewayRepository.macAddressExistsPlatformWideExcludingId(request.macAddress(), id)) {
+                throw new BusinessException(HttpStatus.CONFLICT, "MAC_ADDRESS_TAKEN", "MAC address đã được sử dụng");
+            }
+            gateway.setMacAddress(request.macAddress());
+        }
+
+        if (request.tenantNodeId() != null) {
+            TenantNode node = tenantNodeRepository.findById(request.tenantNodeId())
+                    .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "NODE_NOT_FOUND", "Không tìm thấy node"));
+            if (node.getNodeType() != NodeType.SITE) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "INVALID_GATEWAY_NODE", "Gateway chỉ có thể gán vào node kiểu SITE");
+            }
+            gateway.setTenantNodeId(node.getId());
+        }
+
         gatewayRepository.save(gateway);
         return gatewayMapper.toResponse(gateway);
     }

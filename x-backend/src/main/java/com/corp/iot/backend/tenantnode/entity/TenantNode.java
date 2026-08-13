@@ -48,6 +48,9 @@ public class TenantNode {
     @Column(nullable = false)
     private Integer depth;
 
+    @Column(nullable = false)
+    private boolean enabled = true;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;

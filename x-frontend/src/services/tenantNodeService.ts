@@ -1,14 +1,21 @@
 import { httpClient } from '@/services/httpClient'
 import type { ApiEnvelope } from '@/types/api'
+import type { TenantNodeOverview } from '@/types/overview'
 import type {
   CreateTenantNodeRequest,
   MoveTenantNodeRequest,
   TenantNode,
   UpdateTenantNodeRequest,
+  UpdateTenantNodeStatusRequest,
 } from '@/types/tenantNode'
 
 export async function listTenantNodes(): Promise<TenantNode[]> {
   const { data } = await httpClient.get<ApiEnvelope<TenantNode[]>>('/tenant-nodes')
+  return data.data!
+}
+
+export async function getTenantNodeOverview(id: number): Promise<TenantNodeOverview> {
+  const { data } = await httpClient.get<ApiEnvelope<TenantNodeOverview>>(`/tenant-nodes/${id}/overview`)
   return data.data!
 }
 
@@ -29,4 +36,12 @@ export async function moveTenantNode(id: number, payload: MoveTenantNodeRequest)
 
 export async function deleteTenantNode(id: number): Promise<void> {
   await httpClient.delete(`/tenant-nodes/${id}`)
+}
+
+export async function updateTenantNodeStatus(
+  id: number,
+  payload: UpdateTenantNodeStatusRequest
+): Promise<TenantNode> {
+  const { data } = await httpClient.put<ApiEnvelope<TenantNode>>(`/tenant-nodes/${id}/status`, payload)
+  return data.data!
 }

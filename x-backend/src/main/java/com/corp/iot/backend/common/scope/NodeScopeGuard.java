@@ -2,6 +2,9 @@ package com.corp.iot.backend.common.scope;
 
 import com.corp.iot.backend.common.security.AppUserPrincipal;
 import com.corp.iot.backend.datastream.repository.DatastreamRepository;
+import com.corp.iot.backend.externalsource.repository.ExternalSourceRepository;
+import com.corp.iot.backend.externalsourcejob.entity.ExternalSourceJob;
+import com.corp.iot.backend.externalsourcejob.repository.ExternalSourceJobRepository;
 import com.corp.iot.backend.gateway.repository.GatewayRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -19,6 +22,8 @@ public class NodeScopeGuard {
     private final ScopeService scopeService;
     private final GatewayRepository gatewayRepository;
     private final DatastreamRepository datastreamRepository;
+    private final ExternalSourceRepository externalSourceRepository;
+    private final ExternalSourceJobRepository externalSourceJobRepository;
 
     public boolean canAccess(Long tenantNodeId) {
         if (tenantNodeId == null) {
@@ -43,6 +48,25 @@ public class NodeScopeGuard {
         }
         return datastreamRepository.findById(datastreamId)
                 .map(datastream -> canAccess(datastream.getTenantNodeId()))
+                .orElse(false);
+    }
+
+    public boolean canAccessSource(Long externalSourceId) {
+        if (externalSourceId == null) {
+            return false;
+        }
+        return externalSourceRepository.findById(externalSourceId)
+                .map(source -> canAccess(source.getTenantNodeId()))
+                .orElse(false);
+    }
+
+    public boolean canAccessJob(Long jobId) {
+        if (jobId == null) {
+            return false;
+        }
+        return externalSourceJobRepository.findById(jobId)
+                .map(ExternalSourceJob::getExternalSourceId)
+                .map(this::canAccessSource)
                 .orElse(false);
     }
 

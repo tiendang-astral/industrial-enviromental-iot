@@ -9,6 +9,7 @@ public record MeResponse(
         String email,
         String type,
         Long tenantId,
-        List<String> authorities
+        List<String> authorities,
+        String organizationPath
 ) {
 }

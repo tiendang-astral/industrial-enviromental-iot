@@ -3,12 +3,15 @@ import { RequireAuth } from '@/app/RequireAuth'
 import AppShell from '@/components/layout/AppShell'
 import DashboardOverviewRedirect from '@/pages/DashboardOverviewRedirect'
 import DashboardPage from '@/pages/DashboardPage'
+import DataSourceDetailPage from '@/pages/DataSourceDetailPage'
+import DataSourcesPage from '@/pages/DataSourcesPage'
 import DevicesPage from '@/pages/DevicesPage'
 import GatewayDetailPage from '@/pages/GatewayDetailPage'
 import HomePage from '@/pages/HomePage'
 import LoginPage from '@/pages/LoginPage'
 import OrganizationPage from '@/pages/OrganizationPage'
 import SiteDetailPage from '@/pages/SiteDetailPage'
+import SourceDashboardPage from '@/pages/SourceDashboardPage'
 
 export const router = createBrowserRouter([
   {
@@ -42,12 +45,24 @@ export const router = createBrowserRouter([
             element: <GatewayDetailPage />,
           },
           {
+            path: '/data-sources',
+            element: <DataSourcesPage />,
+          },
+          {
+            path: '/data-sources/:sourceId',
+            element: <DataSourceDetailPage />,
+          },
+          {
             path: '/dashboard',
             element: <DashboardOverviewRedirect />,
           },
           {
             path: '/dashboard/:nodeId',
             element: <DashboardPage />,
+          },
+          {
+            path: '/dashboard/source/:sourceId',
+            element: <SourceDashboardPage />,
           },
         ],
       },

@@ -12,4 +12,9 @@ public interface DashboardService {
 
     /** Dùng nội bộ bởi DashboardTemplateService để append widget vào board hiện có. */
     Dashboard getOrCreateEntity(Long tenantNodeId);
+
+    /** Board riêng theo 1 external_source (layout riêng, chỉ VALUE/LINE) — xem DATABASE.md § dashboard. */
+    DashboardResponse getOrCreateForSource(Long externalSourceId);
+
+    DashboardResponse saveForSource(Long externalSourceId, UpdateDashboardRequest request);
 }

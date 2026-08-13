@@ -43,6 +43,11 @@ public class Datastream {
     @Column(name = "source_id", nullable = false, updatable = false)
     private Long sourceId;
 
+    // Chỉ có giá trị khi sourceType=EXTERNAL_SOURCE_JOB (CHECK ck_datastream_source_field,
+    // V11) — field trong query_config.valueColumns mà datastream này bind vào.
+    @Column(name = "source_field", updatable = false)
+    private String sourceField;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;

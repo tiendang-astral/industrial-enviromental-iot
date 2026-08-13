@@ -2,7 +2,7 @@
 
 > Nguồn schema duy nhất là **Flyway**; Hibernate chạy `ddl-auto: validate`.
 > Tenant isolation: **Hibernate multi-tenancy DISCRIMINATOR** (bỏ RLS).
-> Migration đã squash thành baseline (2026-06-30): `V1__baseline_schema.sql`; các thay đổi sau baseline theo từng version riêng (`V2__auth_seed.sql`, `V3__refresh_token_platform_user.sql`, `V4__phase2_metric_seed.sql`, `V5__dev_seed_credentials.sql`, `V6__backfill_datastream_from_gateway_pin.sql`, `V7__phase4_dashboard_template_seed.sql`, `V8__weather_and_gas_metric_seed.sql`...).
+> Migration đã squash thành baseline (2026-06-30): `V1__baseline_schema.sql`; các thay đổi sau baseline theo từng version riêng (`V2__auth_seed.sql`, `V3__refresh_token_platform_user.sql`, `V4__phase2_metric_seed.sql`, `V5__dev_seed_credentials.sql`, `V6__backfill_datastream_from_gateway_pin.sql`, `V7__phase4_dashboard_template_seed.sql`, `V8__weather_and_gas_metric_seed.sql`, `V9__platform_user_soft_delete.sql`, `V10__tenant_node_enabled.sql`, `V11__external_source_polling.sql`...).
 
 ## 1. ERD
 
@@ -101,20 +101,23 @@ erDiagram
 | updated_at | timestamptz | NOT NULL | |
 | deleted_at | timestamptz | | Soft delete |
 
+- `name` đồng bộ tự động với `tenant_node` (`node_type='TENANT_ROOT'`) `.name` khi Tenant Admin đổi tên ở trang Tổ chức (`TenantNodeServiceImpl.rename()` cập nhật luôn `tenant.name` cùng transaction) — 1 chiều `tenant_node → tenant`, không có chiều ngược (chưa có endpoint platform sửa `tenant.name` trực tiếp).
+- `status = LOCKED` chặn toàn bộ `tenant_user` thuộc tenant đăng nhập và refresh token (`AuthServiceImpl.loginAsTenantUser()`/`refresh()`).
+
 ### platform_user
 **Vì sao cần:** Tài khoản quản trị nền tảng. Không `tenant_id` → cross-tenant.
 
 | Column | Type | Constraint | Mô tả |
 |--------|------|------------|-------|
 | id | bigint | PK auto increment | Platform user ID |
-| username | varchar | NOT NULL, UNIQUE lower(username) toàn cục | Định danh đăng nhập |
+| username | varchar | NOT NULL, UNIQUE lower(username) trong số user chưa xóa (partial index `WHERE deleted_at IS NULL`, đổi từ unique toàn cục ở `V9__platform_user_soft_delete.sql`) | Định danh đăng nhập — username được tái sử dụng sau khi user cũ bị xóa |
 | full_name | varchar | NOT NULL | Họ tên |
-| email | varchar | NULLABLE, UNIQUE toàn cục | Email liên hệ |
+| email | varchar | NULLABLE, UNIQUE toàn cục | Email liên hệ — optional lúc tạo, FE gửi `null` thay vì `''` để tránh đụng UNIQUE khi nhiều user cùng bỏ trống |
 | password_hash | varchar | NOT NULL | BCrypt |
 | status | varchar | NOT NULL DEFAULT 'ACTIVE', CHECK IN ('ACTIVE','LOCKED') | |
 | created_at | timestamptz | NOT NULL | |
 | updated_at | timestamptz | NOT NULL | |
-| deleted_at | timestamptz | | Soft delete |
+| deleted_at | timestamptz | | Soft delete — map vào Entity qua `@SQLRestriction("deleted_at IS NULL")` (từ V9, trước đó cột có trong DB nhưng chưa map JPA) |
 
 ### tenant_user
 **Vì sao cần:** Người dùng trong tenant. Đăng nhập bằng `username` (unique toàn cục).
@@ -205,6 +208,7 @@ erDiagram
 | name | varchar | NOT NULL | |
 | path | ltree | NOT NULL | Materialized path |
 | depth | int | NOT NULL | Độ sâu |
+| enabled | boolean | NOT NULL DEFAULT true | `V10` — false = tổ chức "tắt": FE ẩn/đánh dấu, chặn tạo node con mới; KHÔNG chặn data/alert đang chạy qua gateway/datastream bên dưới (ngoài phạm vi bảng này) |
 | created_at | timestamptz | NOT NULL | |
 | created_by | bigint | | |
 | updated_at | timestamptz | NOT NULL | |
@@ -280,17 +284,17 @@ erDiagram
 - System seed data: temperature, humidity, pressure, pm25, co2, light, voltage, current, power... — seed ở `V4__phase2_metric_seed.sql` (Phase 2).
 
 ### external_source
-**Vì sao cần:** Kết nối CSDL ngoài. Mỗi source = 1 nguồn dữ liệu có Dashboard riêng.
+**Vì sao cần:** Kết nối CSDL ngoài. Mỗi source = 1 nguồn dữ liệu có Dashboard riêng (xem bảng `dashboard`).
 
 | Column | Type | Constraint | Mô tả |
 |--------|------|------------|-------|
 | id | bigint | PK auto increment | |
 | tenant_id | bigint | NOT NULL, FK tenant | |
-| tenant_node_id | bigint | NOT NULL, FK tenant_node | Source thuộc node |
+| tenant_node_id | bigint | NOT NULL, FK tenant_node | Source thuộc node — **bất kỳ cấp nào** (TENANT_ROOT/BRANCH/PRODUCTION_AREA/SITE), khác Gateway (chỉ SITE) |
 | name | varchar | NOT NULL | Tên hiển thị |
-| connection_type | varchar | NOT NULL | Loại kết nối (POSTGRESQL, MYSQL, MONGODB...) |
-| connection_config | jsonb | NOT NULL | Cấu hình kết nối (host, port, db...) |
-| credential_encrypted | text | NOT NULL | Credential AES-GCM encrypted |
+| connection_type | varchar | NOT NULL, CHECK IN ('POSTGRESQL') — `V11` | Loại kết nối. Chỉ PostgreSQL ở Phase 5, mở rộng MySQL/MongoDB bằng migration sau |
+| connection_config | jsonb | NOT NULL | `{host, port, database, sslMode}` |
+| credential_encrypted | text | NOT NULL | AES-GCM encrypt JSON `{username, password}` (key `app.encryption.key`/env `APP_ENCRYPTION_KEY`, dùng chung 1 key toàn platform) — API không bao giờ trả giá trị decrypt |
 | last_sync_status | varchar | | Trạng thái sync gần nhất |
 | last_sync_at | timestamptz | | Lần sync gần nhất |
 | last_error | text | | Lỗi gần nhất |
@@ -302,6 +306,7 @@ erDiagram
 
 - Composite FK `(tenant_id, tenant_node_id) → tenant_node`.
 - Unique `(tenant_id, id)`.
+- Xóa bị chặn 409 nếu còn `external_source_job` (giống `NODE_HAS_CHILDREN`).
 
 ### external_source_job
 **Vì sao cần:** Task scrape/pull dữ liệu từ external_source. Mỗi job chạy 1 logic lọc/map riêng.
@@ -312,10 +317,10 @@ erDiagram
 | tenant_id | bigint | NOT NULL, FK tenant | |
 | external_source_id | bigint | NOT NULL, FK external_source ON DELETE CASCADE | Nguồn dữ liệu |
 | name | varchar | NOT NULL | Tên job |
-| query_config | jsonb | NOT NULL | Cấu hình query (SELECT, table, params...) |
-| filter_config | jsonb | | Bộ lọc dữ liệu sau khi query |
-| mapping_config | jsonb | | Map field → metric, chuyển đổi type |
-| schedule_cron | varchar | | Cron expression hoặc interval (e.g. '*/30 * * * *') |
+| query_config | jsonb | NOT NULL | `{table, timestampColumn, valueColumns: []}` — table/column name validate allowlist `^[a-zA-Z_][a-zA-Z0-9_]{0,62}$` cả lúc tạo (x-backend) lẫn lúc build query (x-ingestion-service), vì identifier không parameterize được trong JDBC |
+| filter_config | jsonb | | `[{column, operator, value}]`, `operator` ∈ `=,!=,>,<,>=,<=` — value bind qua `?`, column validate cùng allowlist trên |
+| mapping_config | jsonb | | **Không dùng ở Phase 5** — field→metric mapping thật nằm ở `datastream.source_field`/`metric_id` (xem bảng `datastream`), cột này giữ lại reserved cho transform rule (type coercion) nếu cần sau |
+| schedule_cron | varchar | | Cron expression 5 field chuẩn (VD `*/5 * * * *`), parse bằng `cron-utils` (x-ingestion-service), validate cú pháp ngay lúc tạo job (x-backend) |
 | incremental_field | varchar | | Cột thời gian dùng để incremental reading |
 | incremental_cursor | varchar | | Giá trị cursor hiện tại (timestamp hoặc value) |
 | total_row_count | bigint | NOT NULL DEFAULT 0 | Thống kê số dòng luỹ kế |
@@ -331,6 +336,8 @@ erDiagram
 
 - Composite FK `(tenant_id, external_source_id) → external_source`.
 - Unique `(tenant_id, id)`.
+- Scheduler: `x-ingestion-service` chạy 1 `@Scheduled` fixed-delay sweep (~15s) quét `next_run_at <= now()`, không cache Redis (khác `gw-resolve`) vì tần suất thấp (theo lịch job, không phải mỗi message MQTT). Sửa `query_config`/`filter_config`/`schedule_cron` → reset `incremental_cursor = NULL` (cursor cũ có thể không còn hợp lệ với query mới).
+- Xóa bị chặn 409 nếu còn `datastream` gắn vào (`source_type='EXTERNAL_SOURCE_JOB', source_id=job.id`).
 
 ### dashboard
 **Vì sao cần:** Bảng điều khiển. Widget + layout lưu JSONB (`layout_json`).
@@ -340,7 +347,8 @@ erDiagram
 | id | bigint | PK auto increment | |
 | tenant_id | bigint | NOT NULL, FK tenant | |
 | user_id | bigint | NOT NULL, FK tenant_user | Chủ board |
-| tenant_node_id | bigint | NULLABLE, FK tenant_node | Anchor node (site hoặc node gộp) |
+| tenant_node_id | bigint | NULLABLE, FK tenant_node | Anchor node (site) — khi `external_source_id NOT NULL` thì đây là node của source đó (denormalize để tái dùng `@nodeScope.canAccess`) |
+| external_source_id | bigint | NULLABLE, FK external_source — `V11` | NOT NULL = board riêng theo 1 nguồn (layout riêng, không gộp với board của node); NULL = board theo node (site) như trước |
 | name | varchar | NOT NULL | Tên board |
 | layout_json | jsonb | NOT NULL | `{widgets:[{id,type,layout,title,binding,config}]}` |
 | created_at | timestamptz | NOT NULL | |
@@ -348,8 +356,9 @@ erDiagram
 | updated_at | timestamptz | NOT NULL | |
 | updated_by | bigint | | |
 
-- Unique `(tenant_id, user_id, tenant_node_id)`.
-- WidgetType: VALUE/LINE/SWITCH (gắn nguồn); DEVICE_COUNT/DEVICES_ONLINE/DEVICE_TABLE/EVENT_* (tổng hợp theo node).
+- Unique `(tenant_id, user_id, tenant_node_id, COALESCE(external_source_id, 0))` — `V11` đổi từ unique `(tenant_id, user_id, tenant_node_id)` cũ, vì Postgres coi nhiều `NULL` là phân biệt nên phải `COALESCE` (giống pattern `uq_user_role_scope`).
+- WidgetType: VALUE/LINE/SWITCH (gắn nguồn); DEVICE_COUNT/DEVICES_ONLINE/DEVICE_TABLE/EVENT_* (tổng hợp theo node) — **board theo nguồn (`external_source_id NOT NULL`) chỉ cho phép VALUE/LINE**, không có khái niệm gateway/subtree để tổng hợp DEVICE_COUNT/DEVICES_ONLINE.
+- Điều hướng FE (từ `V11`): vào node không phải SITE → card-grid flatten toàn bộ subtree (tất cả `external_source` + tất cả `SITE` bên dưới, bất kể sâu bao nhiêu cấp) thay vì dashboard trực tiếp; vào SITE → 2 tab "Xem site" (board theo node, như cũ) / "Xem theo nguồn" (card các source gắn tại chính site đó → board riêng từng nguồn).
 
 ### dashboard_template
 **Vì sao cần:** Template dashboard. Global seed data — mọi tenant đều dùng được. Template chỉ định loại widget + metric, khi áp dụng vào node thì hệ thống tự tìm tất cả datastream có metric đó và tạo widget cho từng datastream.
@@ -389,6 +398,7 @@ Template layout = [
 | metric_id | bigint | NOT NULL, FK metric | Kiểu đo (temperature, humidity...) |
 | source_type | varchar | NOT NULL, CHECK IN ('GATEWAY_PIN','EXTERNAL_SOURCE_JOB') | Loại nguồn |
 | source_id | bigint | NOT NULL | ID nguồn (gateway_pin hoặc external_source_job) |
+| source_field | varchar | NULLABLE — `V11`, CHECK (GATEWAY_PIN ⇒ NULL, EXTERNAL_SOURCE_JOB ⇒ NOT NULL) | Field/cột trong `query_config.valueColumns` mà datastream này bind vào — cần vì 1 `external_source_job` có thể sinh nhiều datastream (khác gateway_pin luôn 1-1) |
 | created_at | timestamptz | NOT NULL | |
 | created_by | bigint | | |
 | updated_at | timestamptz | NOT NULL | |
@@ -398,6 +408,7 @@ Template layout = [
 - Composite FK `(tenant_id, tenant_node_id) → tenant_node`.
 - Unique `(tenant_id, tenant_node_id, lower(name))` = `uq_datastream_name`.
 - **Tự động tạo 1-1** khi tạo `gateway_pin` INPUT (`GatewayPinServiceImpl.create()`, cùng transaction) — không có endpoint tạo/xóa datastream riêng, khớp nguyên tắc "1 gateway_pin → 1 datastream" ở bảng `gateway_pin`. Backfill 1 lần cho pin có trước tính năng Dashboard qua `V6__backfill_datastream_from_gateway_pin.sql`.
+- **`EXTERNAL_SOURCE_JOB` — tạo/xóa thủ công** (`V11`, khác gateway_pin): `POST /external-source-jobs/{jobId}/datastreams` (chọn `metricId` + `sourceField` khớp `query_config.valueColumns` của job), `DELETE /datastreams/{id}` chỉ cho phép khi `sourceType=EXTERNAL_SOURCE_JOB` (400 nếu là `GATEWAY_PIN`, giữ nguyên invariant lifecycle gateway_pin sở hữu ở trên).
 - **KHÔNG bị xóa khi pin bị tắt** (`gateway_pin.enabled=false`) — `id` phải ổn định để widget Dashboard đang bind không mất liên kết khi user bật lại pin; lúc pin tắt chỉ dừng nhận data (Processing Service đã skip từ Phase 3), Backend expose thêm `sourceEnabled` (API.md) để FE hiện badge "Pin đã tắt" thay vì hiển thị âm thầm dữ liệu cũ.
 
 ### alert_rule
@@ -524,7 +535,8 @@ Template layout = [
 | `ix_gateway_node` | gateway | `(tenant_id, tenant_node_id)` | Gateway theo node |
 | `uq_gateway_pin` | gateway_pin | `(tenant_id, gateway_id, type, pin_number)` | Chân vật lý duy nhất TRONG mỗi type/gateway |
 | `uq_datastream_name` | datastream | `(tenant_id, tenant_node_id, lower(name))` | Tên kênh duy nhất trong anchor node |
-| `uq_dashboard_user_node` | dashboard | `(tenant_id, user_id, tenant_node_id)` | 1 board/user/node |
+| `uq_datastream_external_field` | datastream | `(tenant_id, source_type, source_id, source_field) WHERE source_type='EXTERNAL_SOURCE_JOB'` | Chặn map trùng 1 field vào 2 datastream — `V11` |
+| `uq_dashboard_user_node` | dashboard | `(tenant_id, user_id, tenant_node_id, COALESCE(external_source_id, 0))` | 1 board/user/node **hoặc** 1 board/user/nguồn — `V11` |
 | `uq_alert_open` | alert | `(tenant_id, fingerprint) WHERE status IN ('PENDING','ACTIVE')` | 1 alert đang mở/fingerprint |
 | `ix_alert_rule_node_metric` | alert_rule | `(tenant_id, tenant_node_id, metric_id, enabled)` | Alert rule theo node + metric |
 | `ix_command_pending` | command | `(status, timeout_at) WHERE status IN ('PENDING','DISPATCHED')` | Timeout worker |

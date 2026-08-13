@@ -11,6 +11,7 @@ public class DashboardMapper {
         return new DashboardResponse(
                 dashboard.getId(),
                 dashboard.getTenantNodeId(),
+                dashboard.getExternalSourceId(),
                 dashboard.getName(),
                 dashboard.getLayoutJson().widgets()
         );

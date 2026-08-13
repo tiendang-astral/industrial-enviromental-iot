@@ -36,6 +36,11 @@ public class Dashboard {
     @Column(name = "tenant_node_id", updatable = false)
     private Long tenantNodeId;
 
+    // NOT NULL = board riêng theo 1 nguồn (layout riêng) — V11, xem DATABASE.md § dashboard.
+    // tenantNodeId vẫn set = node của nguồn đó (denormalize để tái dùng @nodeScope.canAccess).
+    @Column(name = "external_source_id", updatable = false)
+    private Long externalSourceId;
+
     @Column(nullable = false)
     private String name;
 

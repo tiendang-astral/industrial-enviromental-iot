@@ -31,7 +31,25 @@ public class RealtimePublisher {
         }
     }
 
+    // Payload khác luồng sensor (có datastreamId thẳng thay vì gatewayId/pinType/pinNumber) vì
+    // external không có khái niệm pin — FE match trực tiếp theo datastreamId (xem ARCHITECTURE.md
+    // § Flow: External source data).
+    public void publishExternalReading(Long tenantId, Long tenantNodeId, Long datastreamId, String metricCode, Double value, Instant measuredAt) {
+        String channel = "realtime:" + tenantId + ":" + tenantNodeId;
+        try {
+            String payload = objectMapper.writeValueAsString(
+                    new RealtimeExternalReadingPayload(datastreamId, metricCode, value, measuredAt));
+            redisTemplate.convertAndSend(channel, payload);
+        } catch (Exception e) {
+            log.error("Failed to publish realtime external event to channel={}", channel, e);
+        }
+    }
+
     private record RealtimeReadingPayload(
             Long gatewayId, String metric, String pinType, Integer pinNumber, Double value, Instant measuredAt) {
+    }
+
+    private record RealtimeExternalReadingPayload(
+            Long datastreamId, String metric, Double value, Instant measuredAt) {
     }
 }

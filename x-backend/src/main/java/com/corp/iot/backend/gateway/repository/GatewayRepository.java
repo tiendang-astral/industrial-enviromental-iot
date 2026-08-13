@@ -23,4 +23,8 @@ public interface GatewayRepository extends JpaRepository<Gateway, Long> {
      */
     @Query(value = "SELECT count(*) > 0 FROM gateway WHERE lower(mac_address) = lower(:mac)", nativeQuery = true)
     boolean macAddressExistsPlatformWide(@Param("mac") String mac);
+
+    /** Giống macAddressExistsPlatformWide nhưng loại trừ chính gateway đang sửa (update MAC). */
+    @Query(value = "SELECT count(*) > 0 FROM gateway WHERE lower(mac_address) = lower(:mac) AND id != :id", nativeQuery = true)
+    boolean macAddressExistsPlatformWideExcludingId(@Param("mac") String mac, @Param("id") Long id);
 }

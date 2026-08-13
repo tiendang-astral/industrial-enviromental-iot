@@ -8,6 +8,7 @@ export interface MeResponse {
   type: UserType
   tenantId: number | null
   authorities: string[]
+  organizationPath: string | null
 }
 
 export interface LoginRequest {

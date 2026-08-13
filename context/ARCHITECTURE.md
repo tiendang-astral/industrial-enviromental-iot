@@ -111,19 +111,34 @@ Payload:
 ### Flow: External source data (polling)
 
 ```text
-[Ingestion Service] → [External Database] → [Kafka: external-data-raw] → [Processing Service] → [InfluxDB] → [Redis pub/sub] → [Backend] → [Frontend]
+[Ingestion Service: scheduler] → [External PostgreSQL] → [Kafka: external-data-raw] → [Processing Service] → [InfluxDB] → [Redis pub/sub] → [Backend] → [Frontend]
 ```
+
+**Quyết định chốt ở Phase 5** (khác Phase 3): chỉ hỗ trợ `connection_type=POSTGRESQL` (JDBC), field→metric mapping **không** qua `mapping_config` nữa mà qua `datastream.source_field` (datastream tạo thủ công, xem `DATABASE.md` § datastream) — vì vậy Ingestion không tự "map field → metric", chỉ publish field thô kèm `sourceField`, Processing Service mới resolve `Datastream`/`Metric`.
 
 | Bước | Service | Xử lý gì |
 |------|---------|-----------|
-| 1 | Ingestion Service | Scheduler đọc `schedule_cron`/`incremental_cursor` của từng `external_source_job`, tới hạn thì trigger job |
-| 2 | Ingestion Service | Kết nối `external_source` bằng `connection_config` + credential (AES-GCM decrypt), chạy query theo `query_config`, lấy dữ liệu mới hơn `incremental_field`/cursor |
-| 3 | Ingestion Service | Áp `filter_config` lọc dữ liệu, `mapping_config` map field → `metric`/`datastream`, publish Kafka `external-data-raw` (partition `tenant_id`+`external_source_job_id`) |
-| 4 | Kafka | Buffer `external-data-raw` riêng khỏi luồng gateway (đặc tính khác: theo cron, không push liên tục) |
-| 5 | Processing Service | Validate, chuẩn hóa, ghi InfluxDB measurement `external_reading` (tag `tenant_id`, `tenant_node_id`, `source_id`, `metric`) |
-| 6 | Ingestion Service | Cập nhật `incremental_cursor`, `last_run_status`, `last_run_at`, `total_row_count` (hoặc `last_error` nếu FAILED) vào Postgres |
-| 7 | Processing Service | Publish event realtime lên Redis pub/sub |
-| 8 | Backend → Frontend | Giống bước 8-9 flow sensor — push realtime tới Dashboard đang xem node/datastream đó |
+| 1 | Ingestion Service | `@Scheduled` fixed-delay sweep (~15s, `ExternalSourceSchedulerService`) quét `external_source_job` có `next_run_at <= now()` — không cache Redis (khác `gw-resolve`) vì tần suất thấp, 1 query JPA/lần chạy là đủ rẻ |
+| 2 | Ingestion Service | Decrypt `credential_encrypted` (AES-GCM, key `APP_ENCRYPTION_KEY`), mở `java.sql.Connection` JDBC thuần tới `external_source.connection_config` (không qua Hibernate — schema DB ngoài không biết trước) |
+| 3 | Ingestion Service | Build SQL parameterized từ `query_config`/`filter_config` (`SELECT {timestampColumn}, {valueColumns...} FROM {table} WHERE {timestampColumn} > ? [AND filter...] ORDER BY {timestampColumn} LIMIT 500`) — identifier (table/column) validate allowlist `^[a-zA-Z_][a-zA-Z0-9_]{0,62}$` cả lúc tạo job lẫn lúc build query (không parameterize được identifier trong JDBC), giá trị filter bind qua `?` |
+| 4 | Ingestion Service | Với mỗi row kết quả, **unbundle 1 Kafka message/field** (giống unbundle batch MQTT ở Phase 3), sinh `messageId = sha256(jobId+sourceField+measuredAt)`, publish Kafka `external-data-raw` (partition `tenant_id`+`external_source_job_id`) |
+| 5 | Kafka | Buffer `external-data-raw` riêng khỏi luồng gateway (đặc tính khác: theo cron, không push liên tục) |
+| 6 | Processing Service | Consume, dedup theo `messageId` (tái dùng `telemetry-dedup` Redis key, TTL 6h — dedup logic không quan tâm nguồn), resolve `Datastream` theo `(sourceType=EXTERNAL_SOURCE_JOB, sourceId=externalSourceJobId, sourceField)` → `metric_id` → `Metric.code`; không tìm thấy → log + skip (giống pattern gateway_pin không khớp) |
+| 7 | Processing Service | Ghi InfluxDB measurement `external_reading` (tag `tenant_id`, `tenant_node_id`, `source_id`=`externalSourceJobId`, `metric`) |
+| 8 | Ingestion Service | Cập nhật `incremental_cursor = max(timestampColumn)`, `total_row_count += n`, `last_run_status=SUCCESS`, `next_run_at` (tính lại qua `cron-utils` từ `schedule_cron`); lỗi JDBC/connection → `last_run_status=FAILED`, `last_error`, vẫn advance `next_run_at` (log + skip, không throw, không retry-storm) |
+| 9 | Processing Service | Publish event realtime lên Redis pub/sub channel `realtime:{tenantId}:{tenantNodeId}` — payload **khác** flow sensor: `{datastreamId, metric, value, measuredAt}` (không có `gatewayId/pinType/pinNumber` vì external không có pin) |
+| 10 | Backend → Frontend | `RedisRealtimeBridge` forward nguyên văn (không phân biệt payload gateway/external) → STOMP topic `/topic/realtime/{tenantId}/{tenantNodeId}`; FE nhận payload có `datastreamId` thì match thẳng, không cần tra theo `gatewayId+pinType+pinNumber` |
+
+**Contract Kafka `external-data-raw`** (JSON string thuần, giống `sensor-data-raw`):
+
+```json
+{
+  "messageId": "sha256-hex(externalSourceJobId+sourceField+measuredAt)",
+  "tenantId": 12, "tenantNodeId": 56, "externalSourceJobId": 7,
+  "sourceField": "temperature_c", "value": 23.5,
+  "measuredAt": "2026-08-13T09:41:00Z"
+}
+```
 
 ### Flow: Alert (threshold, đa kênh)
 

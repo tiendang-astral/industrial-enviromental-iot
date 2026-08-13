@@ -14,7 +14,8 @@ public class TenantNodeMapper {
                 node.getNodeType().name(),
                 node.getName(),
                 node.getPath(),
-                node.getDepth()
+                node.getDepth(),
+                node.isEnabled()
         );
     }
 }

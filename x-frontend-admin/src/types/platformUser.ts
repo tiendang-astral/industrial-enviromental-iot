@@ -12,6 +12,6 @@ export interface PlatformUser {
 export interface CreatePlatformUserRequest {
   username: string
   fullName: string
-  email: string
+  email?: string
   password: string
 }

@@ -7,12 +7,15 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.util.List;
+import java.util.Optional;
 
 public interface TenantNodeRepository extends JpaRepository<TenantNode, Long> {
 
     List<TenantNode> findAllByOrderByPathAsc();
 
     boolean existsByParentId(Long parentId);
+
+    Optional<TenantNode> findByParentIdIsNull();
 
     /**
      * Thiết lập path/depth thật sau khi entity đã có id (chicken-egg của ltree

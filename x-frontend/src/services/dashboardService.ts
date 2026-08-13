@@ -13,3 +13,15 @@ export async function saveDashboardLayout(tenantNodeId: number, widgets: Widget[
   })
   return data.data!
 }
+
+export async function getSourceDashboard(externalSourceId: number): Promise<Dashboard> {
+  const { data } = await httpClient.get<ApiEnvelope<Dashboard>>(`/external-sources/${externalSourceId}/dashboard`)
+  return data.data!
+}
+
+export async function saveSourceDashboardLayout(externalSourceId: number, widgets: Widget[]): Promise<Dashboard> {
+  const { data } = await httpClient.put<ApiEnvelope<Dashboard>>(`/external-sources/${externalSourceId}/dashboard`, {
+    layoutJson: { widgets },
+  })
+  return data.data!
+}

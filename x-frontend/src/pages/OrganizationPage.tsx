@@ -3,7 +3,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useForm } from 'react-hook-form'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Building, Building2, MapPin, MoveRight, Pencil, Plus, Router, Trash2, Warehouse } from 'lucide-react'
+import { Building, Building2, Lock, LockOpen, MapPin, MoveRight, Pencil, Plus, Router, Trash2, Warehouse } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -25,6 +25,7 @@ import {
   TreeTableLevelLabel,
   TreeTableNameCell,
   TreeTableRow,
+  TreeTableStatusBadge,
   useTreeTableRows,
 } from '@/components/shared/TreeTable'
 import { getApiErrorMessage } from '@/lib/apiError'
@@ -34,6 +35,7 @@ import { useDeleteTenantNodeMutation } from '@/queries/useDeleteTenantNodeMutati
 import { useMoveTenantNodeMutation } from '@/queries/useMoveTenantNodeMutation'
 import { useRenameTenantNodeMutation } from '@/queries/useRenameTenantNodeMutation'
 import { useTenantNodesQuery } from '@/queries/useTenantNodesQuery'
+import { useUpdateTenantNodeStatusMutation } from '@/queries/useUpdateTenantNodeStatusMutation'
 import type { NodeType, TenantNode } from '@/types/tenantNode'
 
 const NEXT_TYPE: Partial<Record<NodeType, NodeType>> = {
@@ -86,18 +88,36 @@ export default function OrganizationPage() {
   const [createParent, setCreateParent] = useState<TenantNode | null>(null)
   const [renameTarget, setRenameTarget] = useState<TenantNode | null>(null)
   const [moveTarget, setMoveTarget] = useState<TenantNode | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<TenantNode | null>(null)
 
   const deleteMutation = useDeleteTenantNodeMutation()
+  const updateStatusMutation = useUpdateTenantNodeStatusMutation()
 
-  function handleDelete(node: TenantNode) {
-    if (!window.confirm(`Xóa "${node.name}"? Hành động này không thể hoàn tác.`)) {
-      return
-    }
-    deleteMutation.mutate(node.id, {
+  function handleDelete() {
+    if (!deleteTarget) return
+    deleteMutation.mutate(deleteTarget.id, {
+      onSuccess: () => {
+        setDeleteTarget(null)
+        toast.success('Xóa thành công')
+      },
       onError: (error) => {
         toast.error(getApiErrorMessage(error, 'Xóa thất bại, vui lòng thử lại'))
       },
     })
+  }
+
+  function handleToggleStatus(node: TenantNode) {
+    updateStatusMutation.mutate(
+      { id: node.id, payload: { enabled: !node.enabled } },
+      {
+        onSuccess: () => {
+          toast.success(node.enabled ? 'Đã tắt' : 'Đã bật lại')
+        },
+        onError: (error) => {
+          toast.error(getApiErrorMessage(error, 'Cập nhật trạng thái thất bại'))
+        },
+      }
+    )
   }
 
   return (
@@ -112,20 +132,21 @@ export default function OrganizationPage() {
             <TableRow>
               <TreeTableHead>Tên</TreeTableHead>
               <TreeTableHead>Loại</TreeTableHead>
+              <TreeTableHead>Trạng thái</TreeTableHead>
               <TreeTableHead className="w-56">Hành động</TreeTableHead>
             </TableRow>
           </TreeTableHeader>
           <TableBody>
             {isLoading && (
               <TableRow>
-                <TableCell colSpan={3} className="text-center text-muted-foreground">
+                <TableCell colSpan={4} className="text-center text-muted-foreground">
                   Đang tải...
                 </TableCell>
               </TableRow>
             )}
             {!isLoading && rows.length === 0 && (
               <TableRow>
-                <TableCell colSpan={3} className="text-center text-muted-foreground">
+                <TableCell colSpan={4} className="text-center text-muted-foreground">
                   Chưa có node tổ chức nào
                 </TableCell>
               </TableRow>
@@ -134,7 +155,7 @@ export default function OrganizationPage() {
               const isLeafType = node.nodeType === 'SITE'
               const childType = NEXT_TYPE[node.nodeType]
               return (
-                <TreeTableRow key={node.id}>
+                <TreeTableRow key={node.id} isActive={node.enabled}>
                   <TreeTableNameCell
                     depth={depth}
                     hasChildren={hasChildren}
@@ -144,6 +165,7 @@ export default function OrganizationPage() {
                     leafIcon={MapPin}
                     typeIcon={NODE_ICON[node.nodeType]}
                     childCount={childCount}
+                    isActive={node.enabled}
                   >
                     {isLeafType ? (
                       <Link to={`/organization/sites/${node.id}`} className="hover:underline">
@@ -155,6 +177,9 @@ export default function OrganizationPage() {
                   </TreeTableNameCell>
                   <TableCell>
                     <TreeTableLevelLabel>{NODE_LABEL[node.nodeType]}</TreeTableLevelLabel>
+                  </TableCell>
+                  <TableCell>
+                    <TreeTableStatusBadge active={node.enabled} activeLabel="Hoạt động" inactiveLabel="Đã tắt" />
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1">
@@ -196,13 +221,23 @@ export default function OrganizationPage() {
                           <MoveRight className="size-4" />
                         </Button>
                       )}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-7"
+                        title={node.enabled ? 'Tắt' : 'Bật lại'}
+                        disabled={updateStatusMutation.isPending}
+                        onClick={() => handleToggleStatus(node)}
+                      >
+                        {node.enabled ? <Lock className="size-4" /> : <LockOpen className="size-4" />}
+                      </Button>
                       {node.nodeType !== 'TENANT_ROOT' && (
                         <Button
                           variant="ghost"
                           size="icon"
                           className="size-7 text-destructive hover:text-destructive"
                           title="Xóa"
-                          onClick={() => handleDelete(node)}
+                          onClick={() => setDeleteTarget(node)}
                         >
                           <Trash2 className="size-4" />
                         </Button>
@@ -223,6 +258,25 @@ export default function OrganizationPage() {
         allNodes={nodes ?? []}
         onOpenChange={(open) => !open && setMoveTarget(null)}
       />
+
+      <Dialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Xóa node tổ chức</DialogTitle>
+            <DialogDescription>
+              Xóa "{deleteTarget?.name}"? Hành động này không thể hoàn tác.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteTarget(null)}>
+              Hủy
+            </Button>
+            <Button variant="destructive" disabled={deleteMutation.isPending} onClick={handleDelete}>
+              {deleteMutation.isPending ? 'Đang xóa...' : 'Xóa'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

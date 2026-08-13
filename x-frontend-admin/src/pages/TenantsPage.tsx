@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useForm } from 'react-hook-form'
+import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Plus } from 'lucide-react'
+import { Eye, Lock, LockOpen, Plus } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -24,13 +25,15 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { getApiError } from '@/lib/apiError'
+import { getApiError, getApiErrorMessage } from '@/lib/apiError'
 import {
   createTenantSchema,
   type CreateTenantFormValues,
 } from '@/lib/schemas/createTenantSchema'
 import { useCreateTenantMutation } from '@/queries/useCreateTenantMutation'
 import { useTenantsQuery } from '@/queries/useTenantsQuery'
+import { useUpdateTenantStatusMutation } from '@/queries/useUpdateTenantStatusMutation'
+import type { Tenant } from '@/types/tenant'
 
 function formatDate(value: string) {
   return new Date(value).toLocaleString('vi-VN')
@@ -40,6 +43,7 @@ export default function TenantsPage() {
   const { data: tenants, isLoading } = useTenantsQuery()
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   const createTenantMutation = useCreateTenantMutation()
+  const updateStatusMutation = useUpdateTenantStatusMutation()
 
   const {
     register,
@@ -75,6 +79,21 @@ export default function TenantsPage() {
         }
       },
     })
+  }
+
+  function handleToggleStatus(tenant: Tenant) {
+    const nextStatus = tenant.status === 'ACTIVE' ? 'LOCKED' : 'ACTIVE'
+    updateStatusMutation.mutate(
+      { id: tenant.id, status: nextStatus },
+      {
+        onSuccess: () => {
+          toast.success(nextStatus === 'ACTIVE' ? 'Đã kích hoạt tenant' : 'Đã khóa tenant')
+        },
+        onError: (error) => {
+          toast.error(getApiErrorMessage(error, 'Cập nhật trạng thái thất bại'))
+        },
+      }
+    )
   }
 
   return (
@@ -180,19 +199,20 @@ export default function TenantsPage() {
             <TableHead>Email</TableHead>
             <TableHead>Trạng thái</TableHead>
             <TableHead>Ngày tạo</TableHead>
+            <TableHead className="w-24">Tác vụ</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {isLoading && (
             <TableRow>
-              <TableCell colSpan={4} className="text-center text-muted-foreground">
+              <TableCell colSpan={5} className="text-center text-muted-foreground">
                 Đang tải...
               </TableCell>
             </TableRow>
           )}
           {!isLoading && tenants?.length === 0 && (
             <TableRow>
-              <TableCell colSpan={4} className="text-center text-muted-foreground">
+              <TableCell colSpan={5} className="text-center text-muted-foreground">
                 Chưa có tenant nào
               </TableCell>
             </TableRow>
@@ -207,6 +227,25 @@ export default function TenantsPage() {
                 </Badge>
               </TableCell>
               <TableCell>{formatDate(tenant.createdAt)}</TableCell>
+              <TableCell>
+                <div className="flex items-center gap-1">
+                  <Button variant="ghost" size="icon" className="size-7" title="Xem chi tiết" asChild>
+                    <Link to={`/tenants/${tenant.id}`}>
+                      <Eye className="size-4" />
+                    </Link>
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-7"
+                    title={tenant.status === 'ACTIVE' ? 'Khóa tenant' : 'Kích hoạt tenant'}
+                    disabled={updateStatusMutation.isPending}
+                    onClick={() => handleToggleStatus(tenant)}
+                  >
+                    {tenant.status === 'ACTIVE' ? <Lock className="size-4" /> : <LockOpen className="size-4" />}
+                  </Button>
+                </div>
+              </TableCell>
             </TableRow>
           ))}
         </TableBody>

@@ -14,4 +14,6 @@ export interface CreateGatewayRequest {
 
 export interface UpdateGatewayRequest {
   name: string
+  macAddress?: string
+  tenantNodeId?: number
 }

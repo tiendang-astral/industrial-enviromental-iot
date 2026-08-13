@@ -32,6 +32,7 @@ dependencies {
 	runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.12.6'
 	implementation 'org.postgresql:postgresql'
 	implementation 'com.influxdb:influxdb-client-java:7.3.0'
+	implementation 'com.cronutils:cron-utils:9.2.1'
 	compileOnly 'org.projectlombok:lombok'
 	annotationProcessor 'org.projectlombok:lombok'
 	testImplementation 'org.springframework.boot:spring-boot-starter-test'
