@@ -27,16 +27,13 @@ export default function SourceDashboardPage() {
   // Nguồn external luôn có datastreamId thẳng trong payload realtime (không có pin), xem
   // types/telemetry.ts.
   useRealtimeGatewaySocket(dashboard?.tenantNodeId, (message) => {
-    const datastreamId = message.datastreamId
-    if (datastreamId == null) return
+    const { datastreamId, value, measuredAt } = message
+    if (datastreamId == null || value == null || measuredAt == null) return
     setReadings((prev) => {
-      const history = [
-        ...(prev[datastreamId]?.history ?? []),
-        { value: message.value, measuredAt: message.measuredAt },
-      ].slice(-200)
+      const history = [...(prev[datastreamId]?.history ?? []), { value, measuredAt }].slice(-200)
       return {
         ...prev,
-        [datastreamId]: { latestValue: message.value, latestMeasuredAt: message.measuredAt, history },
+        [datastreamId]: { latestValue: value, latestMeasuredAt: measuredAt, history },
       }
     })
   })

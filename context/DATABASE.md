@@ -358,6 +358,7 @@ erDiagram
 
 - Unique `(tenant_id, user_id, tenant_node_id, COALESCE(external_source_id, 0))` — `V11` đổi từ unique `(tenant_id, user_id, tenant_node_id)` cũ, vì Postgres coi nhiều `NULL` là phân biệt nên phải `COALESCE` (giống pattern `uq_user_role_scope`).
 - WidgetType: VALUE/LINE/SWITCH (gắn nguồn); DEVICE_COUNT/DEVICES_ONLINE/DEVICE_TABLE/EVENT_* (tổng hợp theo node) — **board theo nguồn (`external_source_id NOT NULL`) chỉ cho phép VALUE/LINE**, không có khái niệm gateway/subtree để tổng hợp DEVICE_COUNT/DEVICES_ONLINE.
+- `binding` theo `type` — **`VALUE`/`LINE`**: `{ datastreamId }`; **`SWITCH`** (Phase 7): `{ gatewayId, pinId }` — pin OUTPUT (`DO`/`AO`) không có `datastream` nên không dùng chung shape với VALUE/LINE; **`DEVICE_COUNT`/`DEVICES_ONLINE`**: `null` (tổng hợp theo subtree node, không bind 1 nguồn cụ thể).
 - Điều hướng FE (từ `V11`): vào node không phải SITE → card-grid flatten toàn bộ subtree (tất cả `external_source` + tất cả `SITE` bên dưới, bất kể sâu bao nhiêu cấp) thay vì dashboard trực tiếp; vào SITE → 2 tab "Xem site" (board theo node, như cũ) / "Xem theo nguồn" (card các source gắn tại chính site đó → board riêng từng nguồn).
 
 ### dashboard_template
@@ -485,7 +486,7 @@ Template layout = [
 | gateway_id | bigint | NOT NULL, FK gateway | |
 | tenant_node_id | bigint | NULLABLE | Snapshot (KHÔNG FK — có thể trỏ node đã xóa) |
 | command_type | varchar | NOT NULL, CHECK IN ('TURN_ON','TURN_OFF') | |
-| parameters_json | jsonb | NOT NULL | `{"pin":"2"}` → resolve pin DO |
+| parameters_json | jsonb | NOT NULL | `{"pinType":"DO","pinNumber":2}` → định danh duy nhất pin OUTPUT (khớp unique key `gateway_pin`) |
 | status | varchar | NOT NULL, CHECK IN ('PENDING','DISPATCHED','ACKNOWLEDGED','FAILED','TIMED_OUT') | |
 | requested_by | bigint | NOT NULL | |
 | requested_at | timestamptz | NOT NULL | |

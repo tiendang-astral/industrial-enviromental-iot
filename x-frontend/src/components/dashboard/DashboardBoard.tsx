@@ -9,9 +9,11 @@ import { AddWidgetDialog } from '@/components/widgets/AddWidgetDialog'
 import { DeviceListWidget } from '@/components/widgets/DeviceListWidget'
 import { DevicesOnlineWidget } from '@/components/widgets/DevicesOnlineWidget'
 import { LineWidget } from '@/components/widgets/LineWidget'
+import { SwitchWidget } from '@/components/widgets/SwitchWidget'
 import { ValueWidget } from '@/components/widgets/ValueWidget'
 import { nextWidgetLayout } from '@/lib/dashboardLayout'
 import { useDashboardStore } from '@/stores/useDashboardStore'
+import type { CommandUpdate } from '@/types/command'
 import type { Dashboard, Datastream, DatastreamReading, Widget as WidgetT, WidgetType } from '@/types/dashboard'
 
 const GRID_COLS = 12
@@ -29,6 +31,8 @@ interface DashboardBoardProps {
   /** false = board theo nguồn (external_source) — không có khái niệm gateway/subtree. */
   allowDeviceWidgets: boolean
   readings: Record<number, DatastreamReading>
+  /** Không truyền = board không có widget SWITCH (VD board theo nguồn — allowDeviceWidgets=false). */
+  commandUpdates?: Record<string, CommandUpdate>
   onSaveDebounced: (widgets: WidgetT[]) => void
   onSaveNow: (widgets: WidgetT[]) => void
 }
@@ -46,6 +50,7 @@ export function DashboardBoard({
   tenantNodeId,
   allowDeviceWidgets,
   readings,
+  commandUpdates = {},
   onSaveDebounced,
   onSaveNow,
 }: DashboardBoardProps) {
@@ -95,13 +100,25 @@ export function DashboardBoard({
     setActiveWidgetId(null)
   }
 
-  function handleAddWidget(input: { type: WidgetType; title: string; datastreamId: number | null }) {
+  function handleAddWidget(input: {
+    type: WidgetType
+    title: string
+    datastreamId: number | null
+    gatewayId: number | null
+    pinId: number | null
+  }) {
+    let binding: WidgetT['binding'] = null
+    if (input.datastreamId != null) {
+      binding = { datastreamId: input.datastreamId }
+    } else if (input.gatewayId != null && input.pinId != null) {
+      binding = { gatewayId: input.gatewayId, pinId: input.pinId }
+    }
     const widget: WidgetT = {
       id: crypto.randomUUID(),
       type: input.type,
       layout: nextWidgetLayout(widgets),
       title: input.title,
-      binding: input.datastreamId != null ? { datastreamId: input.datastreamId } : null,
+      binding,
       config: {},
     }
     const updated = [...widgets, widget]
@@ -198,8 +215,11 @@ export function DashboardBoard({
                   <WidgetRenderer
                     widget={widget}
                     tenantNodeId={tenantNodeId}
-                    datastream={widget.binding ? datastreamById.get(widget.binding.datastreamId) : undefined}
-                    reading={widget.binding ? readings[widget.binding.datastreamId] : undefined}
+                    datastream={
+                      widget.binding?.datastreamId != null ? datastreamById.get(widget.binding.datastreamId) : undefined
+                    }
+                    reading={widget.binding?.datastreamId != null ? readings[widget.binding.datastreamId] : undefined}
+                    commandUpdates={commandUpdates}
                   />
                 </div>
               ))}
@@ -212,6 +232,7 @@ export function DashboardBoard({
         open={isAddWidgetOpen}
         onOpenChange={setIsAddWidgetOpen}
         datastreams={datastreams}
+        tenantNodeId={tenantNodeId}
         onAdd={handleAddWidget}
         allowDeviceWidgets={allowDeviceWidgets}
       />
@@ -227,11 +248,13 @@ const WidgetRenderer = memo(function WidgetRenderer({
   tenantNodeId,
   datastream,
   reading,
+  commandUpdates,
 }: {
   widget: WidgetT
   tenantNodeId: number
   datastream?: Datastream
   reading?: DatastreamReading
+  commandUpdates: Record<string, CommandUpdate>
 }) {
   switch (widget.type) {
     case 'VALUE':
@@ -242,6 +265,8 @@ const WidgetRenderer = memo(function WidgetRenderer({
       return <DeviceListWidget widget={widget} tenantNodeId={tenantNodeId} />
     case 'DEVICES_ONLINE':
       return <DevicesOnlineWidget widget={widget} tenantNodeId={tenantNodeId} />
+    case 'SWITCH':
+      return <SwitchWidget widget={widget} commandUpdates={commandUpdates} />
     default:
       return null
   }

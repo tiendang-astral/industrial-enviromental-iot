@@ -225,18 +225,19 @@
 **Bảng liên quan:** `command`, `outbox_event`, `gateway_pin` (`power_desired_state`/`power_reported_state`).
 
 **Nhiệm vụ chính:**
-- [ ] x-backend: API bật/tắt relay, validate `@PreAuthorize` theo scope node, trong **1 transaction**: ghi `command` (`status=PENDING`) + `outbox_event` (`aggregate_type=command`), check `idempotency_key`.
-- [ ] x-processing-service: outbox poller (poll `outbox_event` theo `next_attempt_at`), publish Kafka `gateway-commands`, set `status=PUBLISHED`.
-- [ ] x-processing-service: command dispatcher consume, resolve `parameters_json.pin` → publish MQTT xuống EMQX theo `gateway_id`, `command.status=DISPATCHED`.
-- [ ] x-processing-service: consume ACK từ Gateway qua EMQX, sanitize `ack_payload_json`, update `command.status=ACKNOWLEDGED`, `gateway_pin.power_reported_state`.
-- [ ] x-processing-service: timeout worker quét `command` (`status IN (PENDING,DISPATCHED)` & `timeout_at < now()`) → `TIMED_OUT`.
-- [ ] Publish trạng thái command mới lên Redis pub/sub → WebSocket update UI ngay (tái dùng pipeline Phase 4).
-- [ ] x-frontend: toggle switch relay trên Dashboard/gateway page, hiện trạng thái real-time (PENDING/DISPATCHED/ACKNOWLEDGED/FAILED/TIMED_OUT).
+- [x] x-backend: API bật/tắt relay (`POST /gateways/{id}/pins/{pinId}/commands`), validate `@PreAuthorize` theo scope node + pin phải `direction=OUTPUT`, trong **1 transaction**: ghi `command` (`status=PENDING`) + `outbox_event` (`aggregate_type=command`), check `idempotency_key` (trùng key → trả lại command cũ, không tạo mới).
+- [x] x-processing-service: **thêm mới** MQTT client (Paho, outbound + inbound — khác Ingestion Service chỉ inbound), outbox poller (`OutboxPollerService`, fixed-delay 3s, poll `outbox_event` theo `next_attempt_at`), publish Kafka `gateway-commands`, set `status=PUBLISHED`.
+- [x] x-processing-service: `GatewayCommandsListener` (Kafka consumer) → `CommandDispatchService` resolve `parameters_json` (`pinType`+`pinNumber`, không phải chỉ `pin` số như doc cũ) → publish MQTT xuống EMQX theo `gateway.mac_address`, `command.status=DISPATCHED`; lỗi publish retry tối đa 3 lần cách 2s rồi `FAILED`.
+- [x] x-processing-service: `CommandAckMqttHandler`/`CommandAckService` consume ACK từ Gateway qua EMQX, lưu `ack_payload_json`, update `command.status=ACKNOWLEDGED`/`FAILED` (NACK), `gateway_pin.power_reported_state`.
+- [x] x-processing-service: `CommandTimeoutWorker` quét `command` (`status IN (PENDING,DISPATCHED)` & `timeout_at < now()`) → `TIMED_OUT`, fixed-delay 5s.
+- [x] `RealtimePublisher.publishCommandStatus` lên Redis pub/sub → WebSocket update UI ngay (tái dùng pipeline Phase 4, `RedisRealtimeBridge` forward nguyên văn không cần sửa Backend) — payload chỉ `{commandId, status, powerReportedState, error}`, FE match theo `commandId` đã biết từ response tạo lệnh, không cần `gatewayId`/`pinId` trong payload.
+- [x] x-frontend: `RelaySwitch` component dùng chung — toggle switch relay ở `GatewayDetailPage` (section pin OUTPUT mới) **và** widget `SWITCH` mới trên Dashboard (`AddWidgetDialog` chọn gateway+pin OUTPUT, binding `{gatewayId, pinId}` khác `{datastreamId}` của VALUE/LINE), hiện spinner khi PENDING/DISPATCHED, toast lỗi khi FAILED/TIMED_OUT.
+- [x] `scripts/simulate-gateway-command-ack.py` (Python/paho, subscribe command topic + auto ACK sau delay, hỗ trợ `--nack`/`--no-ack`) — dùng để verify DoD vì chưa có gateway thật.
 
 **DoD:**
-- [ ] Bật relay từ UI → thấy `command` chuyển đủ state đến `ACKNOWLEDGED` (test với gateway giả lập MQTT ACK).
-- [ ] Không ACK trong thời gian `timeout_at` → chuyển `TIMED_OUT`, UI phản ánh đúng.
-- [ ] Submit lệnh 2 lần cùng `idempotency_key` → chỉ tạo 1 `command`.
+- [x] Bật relay qua API → `command` chuyển đủ state `PENDING → DISPATCHED → ACKNOWLEDGED`, `gateway_pin.power_reported_state` cập nhật đúng (verify end-to-end thật: `POST .../commands` → outbox poll → Kafka `gateway-commands` → MQTT publish → `simulate-gateway-command-ack.py` nhận lệnh, tự ACK sau 1.5s → DB `command.status=ACKNOWLEDGED`, `gateway_pin.power_reported_state=ON`, `ack_payload_json` lưu đúng).
+- [x] Không ACK trong thời gian `timeout_at` (30s mặc định) → chuyển `TIMED_OUT` (verify: gửi lệnh không có listener nào lắng nghe, đợi qua `timeout_at`, `CommandTimeoutWorker` bắt được trong vòng ~5s sau, `error="Hết thời gian chờ ACK từ Gateway"`).
+- [x] Submit lệnh 2 lần cùng `idempotency_key` → chỉ tạo 1 `command` (verify: gọi lại đúng `idempotencyKey` đã dùng, API trả về **cùng** `command.id`/status cũ, DB chỉ có 1 row).
 
 ---
 

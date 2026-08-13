@@ -5,12 +5,15 @@ export interface WidgetLayout {
   h: number
 }
 
+/** VALUE/LINE dùng datastreamId; SWITCH (Phase 7) dùng gatewayId+pinId — pin OUTPUT không có datastream. */
 export interface WidgetBinding {
-  datastreamId: number
+  datastreamId?: number
+  gatewayId?: number
+  pinId?: number
 }
 
-/** Đợt 1 (PLAN.md Phase 4) — SWITCH/EVENT_* để phase sau. */
-export type WidgetType = 'VALUE' | 'LINE' | 'DEVICE_LIST' | 'DEVICES_ONLINE'
+/** VALUE/LINE/DEVICE_LIST/DEVICES_ONLINE (Phase 4) + SWITCH (Phase 7) — EVENT_* để phase sau. */
+export type WidgetType = 'VALUE' | 'LINE' | 'DEVICE_LIST' | 'DEVICES_ONLINE' | 'SWITCH'
 
 export interface Widget {
   id: string

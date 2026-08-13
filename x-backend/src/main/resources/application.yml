@@ -42,6 +42,8 @@ app:
     allowed-origins: http://localhost:5173,http://localhost:5174
   device:
     online-threshold-minutes: 5
+  command:
+    timeout-seconds: 30
 
 server:
   port: 8080

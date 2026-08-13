@@ -37,4 +37,8 @@ public class GatewayPin {
 
     @Column(nullable = false)
     private boolean enabled;
+
+    // OUTPUT only — ACK từ Gateway ghi vào đây (Phase 7, xem ARCHITECTURE.md § Flow: Command).
+    @Column(name = "power_reported_state")
+    private String powerReportedState;
 }

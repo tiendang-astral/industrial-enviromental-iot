@@ -185,7 +185,7 @@ Scope theo node như module Gateway ở trên. Mỗi user tối đa 1 board/node
 | GET | /api/v1/external-sources/{sourceId}/dashboard | — | `{ data: DashboardResponse }` | **Mới — Phase 5.** Board riêng theo nguồn — tự tạo rỗng nếu chưa có |
 | PUT | /api/v1/external-sources/{sourceId}/dashboard | `{ layoutJson }` | `{ data: DashboardResponse }` | **Mới — Phase 5.** Ghi đè layout board theo nguồn |
 
-`DashboardResponse`: `{ id, tenantNodeId, externalSourceId, name, widgets: [{ id, type, layout, title, binding, config }] }`. `type` ∈ `VALUE`/`LINE`/`DEVICE_COUNT`/`DEVICES_ONLINE` (đợt 1 — `SWITCH`/`DEVICE_TABLE`/`EVENT_*` để phase sau, xem `PLAN.md`). `binding = { datastreamId }` cho `VALUE`/`LINE`, `null` cho 2 loại còn lại. Board theo nguồn (`externalSourceId != null`) chỉ cho phép `type` `VALUE`/`LINE` — không có khái niệm gateway/subtree để tổng hợp `DEVICE_COUNT`/`DEVICES_ONLINE`.
+`DashboardResponse`: `{ id, tenantNodeId, externalSourceId, name, widgets: [{ id, type, layout, title, binding, config }] }`. `type` ∈ `VALUE`/`LINE`/`DEVICE_COUNT`/`DEVICES_ONLINE`/`SWITCH` (`SWITCH` — Phase 7; `DEVICE_TABLE`/`EVENT_*` để phase sau, xem `PLAN.md`). `binding = { datastreamId }` cho `VALUE`/`LINE`; `binding = { gatewayId, pinId }` cho `SWITCH` (pin `OUTPUT`, không có `datastream`); `null` cho `DEVICE_COUNT`/`DEVICES_ONLINE`. Board theo nguồn (`externalSourceId != null`) chỉ cho phép `type` `VALUE`/`LINE` — không có khái niệm gateway/subtree để tổng hợp `DEVICE_COUNT`/`DEVICES_ONLINE`/`SWITCH`.
 
 ### Module: Dashboard Template (`DashboardTemplateController`)
 
@@ -204,6 +204,16 @@ Scope theo node như module Gateway ở trên. Mỗi user tối đa 1 board/node
 
 `DeviceSummaryResponse`: `{ id, name, macAddress, lastSeenAt, online }`. `online` = `last_seen_at` trong ngưỡng cấu hình (`app.device.online-threshold-minutes`, mặc định 5').
 
+### Module: Command (`CommandController`, nested dưới gateway pin)
+
+Scope theo gateway như module Gateway ở trên (`@nodeScope.canAccessGateway`) — chỉ cho pin `direction=OUTPUT` (`DO`/`AO`).
+
+| Method | Path | Body / Query | Response mẫu | Mô tả |
+|--------|------|--------------|--------------|-------|
+| POST | /api/v1/gateways/{gatewayId}/pins/{pinId}/commands | `{ commandType: "TURN_ON"\|"TURN_OFF", idempotencyKey }` | `{ data: CommandResponse }` | Tạo lệnh bật/tắt relay — 400 nếu pin không phải `OUTPUT`; trong 1 transaction ghi `command(status=PENDING)` + `outbox_event`; trùng `idempotencyKey` (cùng `requested_by`) → trả về `command` đã tồn tại thay vì tạo mới |
+
+`CommandResponse`: `{ id, gatewayId, pinId, commandType, status, requestedAt, timeoutAt, error }`. `status` ∈ `PENDING`/`DISPATCHED`/`ACKNOWLEDGED`/`FAILED`/`TIMED_OUT` — cập nhật tiếp theo qua WebSocket, xem `ARCHITECTURE.md` § Flow Command.
+
 ---
 
-> Các module còn lại (Alert/Command/Report ở Phase 6-8) chưa có endpoint — cập nhật bảng tương ứng khi Phase đó implement, theo `PLAN.md`.
+> Module Alert/Report (Phase 6/8) chưa có endpoint — cập nhật bảng tương ứng khi Phase đó implement, theo `PLAN.md`.

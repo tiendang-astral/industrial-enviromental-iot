@@ -9,6 +9,10 @@ spring:
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       auto-offset-reset: earliest
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
 
   datasource:
     url: jdbc:postgresql://localhost:5433/iiot
@@ -31,13 +35,24 @@ influx:
   bucket: raw
   token: iiot-dev-admin-token
 
+mqtt:
+  broker-url: tcp://localhost:1883
+  client-id: processing-service
+  ack-topic-filter: gateway/+/ack
+
 app:
   kafka:
     topic:
       sensor-data-raw: sensor-data-raw
       external-data-raw: external-data-raw
+      gateway-commands: gateway-commands
   redis:
     telemetry-dedup-ttl-hours: 6
+  command:
+    outbox-poll-interval-ms: 3000
+    timeout-worker-interval-ms: 5000
+    mqtt-publish-max-retries: 3
+    mqtt-publish-retry-delay-ms: 2000
 
 server:
   port: 8082

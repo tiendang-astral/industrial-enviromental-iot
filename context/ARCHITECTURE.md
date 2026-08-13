@@ -176,6 +176,46 @@ Payload:
 | 8 | Processing Service | Timeout worker quét `command` có `status IN (PENDING, DISPATCHED)` và `timeout_at < now()` → set `TIMED_OUT` |
 | 9 | Processing Service → Backend | Publish trạng thái command + `power_reported_state` mới lên Redis pub/sub → push WebSocket để UI cập nhật ngay |
 
+**Contract MQTT Command/ACK (Processing Service ↔ Gateway qua EMQX), chốt ở Phase 7** — khác chiều với MQTT sensor data (Ingestion chỉ subscribe): Processing Service **vừa publish (lệnh) vừa subscribe (ACK)**, cần thêm MQTT client (Paho outbound + inbound) riêng cho Processing Service, độc lập với MQTT client của Ingestion Service.
+
+```text
+Topic lệnh: gateway/{mac_address}/command   (QoS 1, Processing Service publish)
+Payload:
+{
+  "commandId": "3fa85f64-...",
+  "pinType": "DO", "pinNumber": 2,
+  "commandType": "TURN_ON"
+}
+
+Topic ACK: gateway/{mac_address}/ack        (QoS 1, Gateway publish, Processing Service subscribe)
+Payload:
+{
+  "commandId": "3fa85f64-...",
+  "pinType": "DO", "pinNumber": 2,
+  "result": "ACK" | "NACK",
+  "state": "ON" | "OFF"
+}
+```
+
+`command.parameters_json` lưu `{"pinType":"DO","pinNumber":2}` — khớp unique key thật của `gateway_pin` (`type`+`pin_number`), không chỉ số `pin` đơn thuần. `commandId` = `command.id` (uuid), dùng luôn làm `correlation_id` xuyên Kafka `gateway-commands` (header) → MQTT — trace được 1 lệnh qua cả 2 network hop.
+
+**Chính sách retry/timeout (giữ đơn giản, không exponential backoff):**
+
+- `app.command.timeout-seconds` (Backend, mặc định 30s) — tính `timeout_at` lúc tạo `command`.
+- Outbox poller (Processing Service): fixed-delay 3s.
+- MQTT publish lỗi (EMQX down) → tăng `command.retry_count`, tối đa 3 lần cách nhau 2s, hết lượt → `status=FAILED`, `error` ghi lý do.
+- Timeout worker: fixed-delay 5s, quét `status IN (PENDING, DISPATCHED) AND timeout_at < now()` → `TIMED_OUT`.
+
+**Payload realtime Command** (Redis pub/sub → STOMP, cùng channel `realtime:{tenantId}:{tenantNodeId}` như flow sensor/external — FE phân biệt qua field `commandId` có mặt, match trực tiếp bằng `commandId` đã biết từ response lúc tạo lệnh, không cần `gatewayId`/`pinId`):
+
+```json
+{
+  "commandId": "3fa85f64-...",
+  "status": "ACKNOWLEDGED", "powerReportedState": "ON",
+  "error": null
+}
+```
+
 ### Flow: Report generation
 
 ```text

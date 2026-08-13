@@ -11,6 +11,7 @@ import {
 import { DashboardBoard } from '@/components/dashboard/DashboardBoard'
 import { NodeOverviewCards } from '@/components/dashboard/NodeOverviewCards'
 import { SourceCardGrid } from '@/components/dashboard/SourceCardGrid'
+import { useCommandUpdates } from '@/hooks/useCommandUpdates'
 import { useRealtimeGatewaySocket } from '@/hooks/useRealtimeGatewaySocket'
 import { useApplyTemplateMutation } from '@/queries/useApplyTemplateMutation'
 import { useDashboardQuery } from '@/queries/useDashboardQuery'
@@ -84,24 +85,27 @@ function SiteDashboard({ tenantNodeId, nodePicker }: { tenantNodeId: number; nod
   }, [datastreams])
 
   const [readings, setReadings] = useState<Record<number, DatastreamReading>>({})
+  const { commandUpdates, handleCommandMessage } = useCommandUpdates()
 
-  // Payload realtime có 2 dạng (xem types/telemetry.ts): datastreamId thẳng (nguồn external)
-  // hoặc gatewayId+pinType+pinNumber (nguồn gateway, cần tra map riêng).
+  // Payload realtime có 3 dạng (xem types/telemetry.ts): datastreamId thẳng (nguồn external),
+  // gatewayId+pinType+pinNumber (nguồn gateway, cần tra map riêng), hoặc commandId (Phase 7).
   useRealtimeGatewaySocket(tenantNodeId, (message) => {
+    if (message.commandId) {
+      handleCommandMessage(message)
+      return
+    }
     const datastreamId =
       message.datastreamId ??
       (message.gatewayId != null && message.pinType && message.pinNumber != null
         ? datastreamIdByPin.get(`${message.gatewayId}:${message.pinType}:${message.pinNumber}`)
         : undefined)
-    if (datastreamId == null) return
+    const { value, measuredAt } = message
+    if (datastreamId == null || value == null || measuredAt == null) return
     setReadings((prev) => {
-      const history = [
-        ...(prev[datastreamId]?.history ?? []),
-        { value: message.value, measuredAt: message.measuredAt },
-      ].slice(-200)
+      const history = [...(prev[datastreamId]?.history ?? []), { value, measuredAt }].slice(-200)
       return {
         ...prev,
-        [datastreamId]: { latestValue: message.value, latestMeasuredAt: message.measuredAt, history },
+        [datastreamId]: { latestValue: value, latestMeasuredAt: measuredAt, history },
       }
     })
   })
@@ -156,6 +160,7 @@ function SiteDashboard({ tenantNodeId, nodePicker }: { tenantNodeId: number; nod
           tenantNodeId={tenantNodeId}
           allowDeviceWidgets
           readings={readings}
+          commandUpdates={commandUpdates}
           onSaveDebounced={saveDebounced}
           onSaveNow={saveNow}
         />

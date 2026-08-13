@@ -17,10 +17,13 @@ import { cn } from '@/lib/utils'
 import {
   addWidgetSchema,
   bindsDatastream,
+  bindsGatewayPin,
   WIDGET_TYPE_LABELS,
   WIDGET_TYPE_OPTIONS,
   type AddWidgetFormValues,
 } from '@/lib/addWidgetSchema'
+import { useGatewayPinsQuery } from '@/queries/useGatewayPinsQuery'
+import { useGatewaysQuery } from '@/queries/useGatewaysQuery'
 import type { Datastream, WidgetType } from '@/types/dashboard'
 
 const selectClassName =
@@ -30,7 +33,15 @@ interface AddWidgetDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   datastreams: Datastream[]
-  onAdd: (input: { type: WidgetType; title: string; datastreamId: number | null }) => void
+  /** Chỉ cần khi allowDeviceWidgets — dùng để load danh sách gateway/pin OUTPUT cho SWITCH. */
+  tenantNodeId?: number
+  onAdd: (input: {
+    type: WidgetType
+    title: string
+    datastreamId: number | null
+    gatewayId: number | null
+    pinId: number | null
+  }) => void
   /** false = board theo nguồn (external_source) — không có khái niệm gateway/subtree để tổng hợp. */
   allowDeviceWidgets?: boolean
 }
@@ -41,6 +52,7 @@ export function AddWidgetDialog({
   open,
   onOpenChange,
   datastreams,
+  tenantNodeId,
   onAdd,
   allowDeviceWidgets = true,
 }: AddWidgetDialogProps) {
@@ -52,9 +64,15 @@ export function AddWidgetDialog({
 
   const form = useForm<AddWidgetFormValues>({
     resolver: zodResolver(addWidgetSchema),
-    defaultValues: { type: 'VALUE', datastreamId: '', title: '' },
+    defaultValues: { type: 'VALUE', datastreamId: '', gatewayId: '', pinId: '', title: '' },
   })
   const datastreamId = form.watch('datastreamId')
+  const gatewayId = form.watch('gatewayId')
+  const pinId = form.watch('pinId')
+
+  const { data: gateways } = useGatewaysQuery(tenantNodeId ?? 0)
+  const { data: gatewayPins } = useGatewayPinsQuery(gatewayId ? Number(gatewayId) : 0)
+  const outputPins = gatewayPins?.filter((pin) => pin.direction === 'OUTPUT') ?? []
 
   useEffect(() => {
     if (!selectedType || !bindsDatastream(selectedType)) {
@@ -67,17 +85,36 @@ export function AddWidgetDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [datastreamId])
 
+  useEffect(() => {
+    if (!selectedType || !bindsGatewayPin(selectedType)) {
+      return
+    }
+    const pin = outputPins.find((p) => String(p.id) === pinId)
+    if (pin) {
+      form.setValue('title', pin.name)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pinId])
+
+  // Đổi gateway -> pin cũ (thuộc gateway khác) không còn hợp lệ, reset lại.
+  useEffect(() => {
+    form.setValue('pinId', '')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gatewayId])
+
   function reset() {
     setStep('type')
     setSelectedType(null)
-    form.reset({ type: 'VALUE', datastreamId: '', title: '' })
+    form.reset({ type: 'VALUE', datastreamId: '', gatewayId: '', pinId: '', title: '' })
   }
 
   function goToDetails() {
     if (!selectedType) return
     form.setValue('type', selectedType)
     form.setValue('datastreamId', '')
-    form.setValue('title', bindsDatastream(selectedType) ? '' : WIDGET_TYPE_LABELS[selectedType])
+    form.setValue('gatewayId', '')
+    form.setValue('pinId', '')
+    form.setValue('title', bindsDatastream(selectedType) || bindsGatewayPin(selectedType) ? '' : WIDGET_TYPE_LABELS[selectedType])
     setStep('details')
   }
 
@@ -86,6 +123,8 @@ export function AddWidgetDialog({
       type: values.type,
       title: values.title,
       datastreamId: bindsDatastream(values.type) && values.datastreamId ? Number(values.datastreamId) : null,
+      gatewayId: bindsGatewayPin(values.type) && values.gatewayId ? Number(values.gatewayId) : null,
+      pinId: bindsGatewayPin(values.type) && values.pinId ? Number(values.pinId) : null,
     })
     reset()
     onOpenChange(false)
@@ -165,6 +204,55 @@ export function AddWidgetDialog({
                     </FormItem>
                   )}
                 />
+              )}
+
+              {bindsGatewayPin(selectedType) && (
+                <>
+                  <FormField
+                    control={form.control}
+                    name="gatewayId"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Gateway</FormLabel>
+                        <FormControl>
+                          <select className={selectClassName} {...field}>
+                            <option value="">-- Chọn gateway --</option>
+                            {gateways?.map((gw) => (
+                              <option key={gw.id} value={gw.id}>
+                                {gw.name}
+                              </option>
+                            ))}
+                          </select>
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="pinId"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Pin OUTPUT</FormLabel>
+                        <FormControl>
+                          <select className={selectClassName} disabled={!gatewayId} {...field}>
+                            <option value="">-- Chọn pin --</option>
+                            {outputPins.map((pin) => (
+                              <option key={pin.id} value={pin.id}>
+                                {pin.name} ({pin.type} {pin.pinNumber})
+                              </option>
+                            ))}
+                          </select>
+                        </FormControl>
+                        <FormMessage />
+                        {gatewayId && outputPins.length === 0 && (
+                          <p className="text-xs text-muted-foreground">Gateway này chưa có pin OUTPUT nào.</p>
+                        )}
+                      </FormItem>
+                    )}
+                  />
+                </>
               )}
 
               <FormField
