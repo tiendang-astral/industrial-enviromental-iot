@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import type { ComponentType, ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 
 interface WidgetRootProps {
@@ -19,10 +19,21 @@ function WidgetRoot({ children, className }: WidgetRootProps) {
   )
 }
 
-function WidgetHeader({ title, badge }: { title: string; badge?: ReactNode }) {
+interface WidgetHeaderProps {
+  title: string
+  /** Icon nhấn theo loại widget (VALUE/LINE/SWITCH/...) — xem WIDGET_TYPE_ACCENT ở từng widget cụ thể. */
+  icon?: ComponentType<{ className?: string }>
+  iconClassName?: string
+  badge?: ReactNode
+}
+
+function WidgetHeader({ title, icon: Icon, iconClassName, badge }: WidgetHeaderProps) {
   return (
     <div className="flex min-w-0 shrink-0 items-center justify-between gap-2">
-      <p className="min-w-0 flex-1 truncate text-sm font-medium">{title}</p>
+      <div className="flex min-w-0 items-center gap-1.5">
+        {Icon && <Icon className={cn('size-3.5 shrink-0', iconClassName)} />}
+        <p className="min-w-0 flex-1 truncate text-sm font-medium">{title}</p>
+      </div>
       {badge}
     </div>
   )

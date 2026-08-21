@@ -5,40 +5,97 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* =============================================================================
+   HỆ MÀU DÙNG CHUNG
+   File này giữ GIỐNG HỆT nhau ở x-frontend và x-frontend-admin. Khác biệt duy
+   nhất giữa 2 app nằm ở chế độ khởi tạo (stores/useThemeStore.ts): tenant mặc
+   định dark, admin mặc định light.
+
+   Thương hiệu là **cyan** (hue 218) trên nền neutral navy (hue 254).
+
+   Cyan được chọn vì nó nằm xa cả 3 màu trạng thái trên vòng hue — ok 145, warning
+   75, critical 25 — nên không bao giờ có chuyện nhìn nhầm màu thương hiệu thành
+   trạng thái. Đây là ràng buộc quan trọng hơn chroma: bản trước dùng lục xám cùng
+   họ với `--ok` nên phải hạ chroma primary xuống 0.065 để tách, đổi lại thương hiệu
+   trông nhợt. Với cyan thì tách bằng hue, primary được phép đậm bình thường.
+
+   Ràng buộc còn lại: chroma primary (0.12–0.135) **không được vượt** critical
+   (0.175) — cảnh báo vẫn phải là thứ nổi nhất màn hình.
+
+   Phân lớp chiều sâu ở chế độ tối: TOÀN BỘ dải sidebar (L 0.142–0.196) nằm hẳn
+   dưới mức sáng của body (L 0.242). Bản trước sidebar chạy 0.166–0.300 cắt ngang
+   qua body 0.218 nên nửa trên sidebar sáng hơn body, nửa dưới tối hơn, hai mảng
+   hoà vào nhau. Vệt sáng của body cũng đẩy sang góc PHẢI để không giáp sidebar.
+
+   3 lớp gradient (`--gradient-sidebar`, `--gradient-chrome`, `--gradient-body`)
+   tạo chiều sâu, và CẢ BA đều đổi theo theme. Quan hệ giữ nguyên ở cả 2 chế độ:
+   khung app (sidebar/topbar) luôn tối hơn body một bậc, nên thứ bậc lớp không bị
+   đảo khi chuyển sáng/tối.
+
+   Mọi giá trị dùng oklch để chroma đồng đều theo cảm nhận mắt, và đã kiểm tra
+   tương phản WCAG AA (>= 4.5:1 cho chữ thường) ở cả 2 chế độ.
+   ============================================================================= */
+
 @theme inline {
     --font-heading: var(--font-sans);
     --font-sans: 'Geist Variable', sans-serif;
-    --color-sidebar-ring: var(--sidebar-ring);
-    --color-sidebar-border: var(--sidebar-border);
-    --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-    --color-sidebar-accent: var(--sidebar-accent);
-    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-    --color-sidebar-primary: var(--sidebar-primary);
-    --color-sidebar-foreground: var(--sidebar-foreground);
-    --color-sidebar: var(--sidebar);
-    --color-chart-5: var(--chart-5);
-    --color-chart-4: var(--chart-4);
-    --color-chart-3: var(--chart-3);
-    --color-chart-2: var(--chart-2);
-    --color-chart-1: var(--chart-1);
-    --color-ring: var(--ring);
-    --color-input: var(--input);
-    --color-border: var(--border);
-    --color-destructive: var(--destructive);
-    --color-accent-foreground: var(--accent-foreground);
-    --color-accent: var(--accent);
-    --color-muted-foreground: var(--muted-foreground);
-    --color-muted: var(--muted);
-    --color-secondary-foreground: var(--secondary-foreground);
-    --color-secondary: var(--secondary);
-    --color-primary-foreground: var(--primary-foreground);
-    --color-primary: var(--primary);
-    --color-popover-foreground: var(--popover-foreground);
-    --color-popover: var(--popover);
-    --color-card-foreground: var(--card-foreground);
-    --color-card: var(--card);
-    --color-foreground: var(--foreground);
+
     --color-background: var(--background);
+    --color-foreground: var(--foreground);
+    --color-card: var(--card);
+    --color-card-foreground: var(--card-foreground);
+    --color-popover: var(--popover);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-primary: var(--primary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-secondary: var(--secondary);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-muted: var(--muted);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-accent: var(--accent);
+    --color-accent-foreground: var(--accent-foreground);
+    --color-destructive: var(--destructive);
+    --color-destructive-foreground: var(--destructive-foreground);
+    --color-border: var(--border);
+    --color-input: var(--input);
+    --color-field: var(--field);
+    --color-ring: var(--ring);
+
+    /* Trạng thái ngữ nghĩa — dùng qua Badge/StatusBadge, chấm trạng thái, ngưỡng
+       metric. Cấm dùng màu Tailwind thô (bg-green-500) ở bất kỳ đâu. */
+    --color-ok: var(--ok);
+    --color-warning: var(--warning);
+    --color-critical: var(--critical);
+    --color-info: var(--info);
+
+    /* Tầng bề mặt — background < surface < surface-raised (nổi lên: popover,
+       dialog, dropdown). surface-deep là bậc sâu nhất của thang neutral, làm nền
+       cho khung app (sidebar/topbar) bên dưới lớp gradient. */
+    --color-surface: var(--surface);
+    --color-surface-raised: var(--surface-raised);
+    --color-surface-deep: var(--surface-deep);
+    --color-surface-deep-foreground: var(--surface-deep-foreground);
+    --color-surface-deep-muted: var(--surface-deep-muted);
+    --color-surface-deep-hover: var(--surface-deep-hover);
+    --color-surface-deep-active: var(--surface-deep-active);
+    --color-surface-deep-border: var(--surface-deep-border);
+
+    --color-sidebar: var(--sidebar);
+    --color-sidebar-foreground: var(--sidebar-foreground);
+    --color-sidebar-primary: var(--sidebar-primary);
+    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+    --color-sidebar-accent: var(--sidebar-accent);
+    --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+    --color-sidebar-border: var(--sidebar-border);
+    --color-sidebar-ring: var(--sidebar-ring);
+
+    --color-chart-1: var(--chart-1);
+    --color-chart-2: var(--chart-2);
+    --color-chart-3: var(--chart-3);
+    --color-chart-4: var(--chart-4);
+    --color-chart-5: var(--chart-5);
+    --color-chart-6: var(--chart-6);
+
     --radius-sm: calc(var(--radius) * 0.6);
     --radius-md: calc(var(--radius) * 0.8);
     --radius-lg: var(--radius);
@@ -48,83 +105,268 @@
     --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/* Thang chuyển động duy nhất. Cấm duration rời rạc trong component. */
 :root {
-    --background: oklch(1 0 0);
-    --foreground: oklch(0.145 0 0);
-    --card: oklch(1 0 0);
-    --card-foreground: oklch(0.145 0 0);
-    --popover: oklch(1 0 0);
-    --popover-foreground: oklch(0.145 0 0);
-    --primary: oklch(0.205 0 0);
-    --primary-foreground: oklch(0.985 0 0);
-    --secondary: oklch(0.97 0 0);
-    --secondary-foreground: oklch(0.205 0 0);
-    --muted: oklch(0.97 0 0);
-    --muted-foreground: oklch(0.556 0 0);
-    --accent: oklch(0.97 0 0);
-    --accent-foreground: oklch(0.205 0 0);
-    --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.922 0 0);
-    --input: oklch(0.922 0 0);
-    --ring: oklch(0.708 0 0);
-    --chart-1: oklch(0.87 0 0);
-    --chart-2: oklch(0.556 0 0);
-    --chart-3: oklch(0.439 0 0);
-    --chart-4: oklch(0.371 0 0);
-    --chart-5: oklch(0.269 0 0);
+    --motion-fast: 120ms;
+    --motion-base: 180ms;
+    --motion-slow: 280ms;
+    --motion-ease: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+/* ---------------------------------------------------------------------------
+   Thang neutral navy (hue 254) cho chế độ sáng.
+   --------------------------------------------------------------------------- */
+:root {
+    --n-0: oklch(0.995 0.002 254);
+    --n-1: oklch(0.972 0.003 254);
+    --n-2: oklch(0.950 0.005 254);
+    --n-3: oklch(0.922 0.007 254);
+    --n-4: oklch(0.886 0.009 254);
+    --n-5: oklch(0.830 0.011 254);
+    --n-6: oklch(0.722 0.014 254);
+    --n-7: oklch(0.604 0.017 254);
+    --n-8: oklch(0.482 0.020 254);
+    --n-9: oklch(0.388 0.023 254);
+    --n-10: oklch(0.296 0.026 254);
+    --n-11: oklch(0.220 0.028 254);
+    --n-12: oklch(0.166 0.030 254);
+
     --radius: 0.625rem;
-    --sidebar: oklch(0.985 0 0);
-    --sidebar-foreground: oklch(0.145 0 0);
-    --sidebar-primary: oklch(0.205 0 0);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.97 0 0);
-    --sidebar-accent-foreground: oklch(0.205 0 0);
-    --sidebar-border: oklch(0.922 0 0);
-    --sidebar-ring: oklch(0.708 0 0);
+
+    --background: var(--n-1);
+    --foreground: var(--n-11);
+    --surface: var(--n-0);
+    --surface-raised: var(--n-0);
+    --card: var(--n-0);
+    --card-foreground: var(--n-11);
+    --popover: var(--n-0);
+    --popover-foreground: var(--n-11);
+
+    --primary: oklch(0.49 0.135 232);
+    --primary-foreground: oklch(0.985 0.006 232);
+    --secondary: var(--n-2);
+    --secondary-foreground: var(--n-10);
+    --muted: var(--n-2);
+    --muted-foreground: var(--n-8);
+
+    /* Nền hover/selected của menu, nav, dòng bảng. Ám teal rất nhạt thay vì xám
+       trung tính — đây là nơi thương hiệu hiện diện nhiều nhất mà vẫn kín đáo. */
+    --accent: oklch(0.940 0.024 228);
+    --accent-foreground: oklch(0.35 0.095 228);
+
+    --border: var(--n-4);
+    --input: var(--n-4);
+    /* Nền ô nhập tách khỏi --input (--input là màu VIỀN). Sáng: trắng, nổi lên trên mọi mặt nền
+       xám nhạt. Tối: lõm hẳn xuống dưới mặt nền chứa nó. */
+    --field: oklch(1 0 0);
+    --ring: oklch(0.49 0.135 232);
+
+    --ok: oklch(0.48 0.145 145);
+    --warning: oklch(0.48 0.125 55);
+    --critical: oklch(0.49 0.175 27);
+    --info: oklch(0.49 0.14 255);
+    --destructive: var(--critical);
+    --destructive-foreground: oklch(0.99 0.004 254);
+
+    /* Khung app (sidebar/topbar) đổi theo theme như phần nội dung. Giữ đúng một quan hệ ở cả 2
+       chế độ: khung luôn TỐI HƠN body một bậc, nên thứ bậc lớp không đảo khi chuyển theme. */
+    --gradient-sidebar: linear-gradient(178deg,
+            oklch(0.948 0.014 256) 0%,
+            oklch(0.916 0.019 250) 100%);
+    --gradient-chrome: linear-gradient(101deg,
+            oklch(0.952 0.013 258) 0%,
+            oklch(0.926 0.018 250) 100%);
+
+    --surface-deep: oklch(0.930 0.016 254);
+    --surface-deep-foreground: var(--n-11);
+    /* n-9 chứ không phải n-8: nền khung sáng hơn nền body nên chữ phụ phải đậm thêm một bậc
+       mới đạt 4.5:1. */
+    --surface-deep-muted: var(--n-9);
+    --surface-deep-hover: oklch(0 0 0 / 5%);
+    --surface-deep-active: oklch(0 0 0 / 9%);
+    --surface-deep-border: var(--n-4);
+
+    --sidebar: var(--surface-deep);
+    --sidebar-foreground: var(--n-11);
+    --sidebar-primary: oklch(0.49 0.135 232);
+    --sidebar-primary-foreground: oklch(0.985 0.006 232);
+    --sidebar-accent: oklch(0.882 0.048 230);
+    --sidebar-accent-foreground: oklch(0.33 0.105 230);
+    --sidebar-border: var(--n-4);
+    --sidebar-ring: oklch(0.49 0.135 232);
+
+    /* Vùng nội dung dùng gradient DỌC trải đều thay vì một vệt sáng: dashboard này đầy biểu đồ
+       và đèn trạng thái, thiếu chỗ cho một điểm sáng tranh sự chú ý. Đỉnh trên tối hơn để nối
+       liền với topbar, đáy sáng hơn cho đỡ bí. */
+    --gradient-body: linear-gradient(180deg,
+            oklch(0.978 0.003 254) 0%,
+            oklch(0.958 0.006 252) 100%);
+
+    --chart-1: oklch(0.58 0.13 218);
+    --chart-2: oklch(0.58 0.14 278);
+    --chart-3: oklch(0.58 0.14 338);
+    --chart-4: oklch(0.58 0.14 38);
+    --chart-5: oklch(0.58 0.13 98);
+    --chart-6: oklch(0.58 0.14 158);
 }
 
 .dark {
-    --background: oklch(0.145 0 0);
-    --foreground: oklch(0.985 0 0);
-    --card: oklch(0.205 0 0);
-    --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.205 0 0);
-    --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.922 0 0);
-    --primary-foreground: oklch(0.205 0 0);
-    --secondary: oklch(0.269 0 0);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.269 0 0);
-    --muted-foreground: oklch(0.708 0 0);
-    --accent: oklch(0.269 0 0);
-    --accent-foreground: oklch(0.985 0 0);
-    --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.556 0 0);
-    --chart-1: oklch(0.87 0 0);
-    --chart-2: oklch(0.556 0 0);
-    --chart-3: oklch(0.439 0 0);
-    --chart-4: oklch(0.371 0 0);
-    --chart-5: oklch(0.269 0 0);
-    --sidebar: oklch(0.205 0 0);
-    --sidebar-foreground: oklch(0.985 0 0);
-    --sidebar-primary: oklch(0.488 0.243 264.376);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.269 0 0);
-    --sidebar-accent-foreground: oklch(0.985 0 0);
-    --sidebar-border: oklch(1 0 0 / 10%);
-    --sidebar-ring: oklch(0.556 0 0);
+    --n-0: oklch(0.142 0.036 254);
+    --n-1: oklch(0.214 0.022 254);
+    --n-2: oklch(0.250 0.022 254);
+    --n-3: oklch(0.288 0.022 254);
+    --n-4: oklch(0.330 0.022 254);
+    --n-5: oklch(0.390 0.020 254);
+    --n-6: oklch(0.480 0.018 254);
+    --n-7: oklch(0.595 0.015 254);
+    --n-8: oklch(0.735 0.012 254);
+    --n-9: oklch(0.818 0.009 254);
+    --n-10: oklch(0.892 0.006 254);
+    --n-11: oklch(0.968 0.004 254);
+    --n-12: oklch(0.142 0.036 254);
+
+    --background: var(--n-1);
+    --foreground: var(--n-11);
+    --surface: var(--n-2);
+    --surface-raised: var(--n-3);
+    --card: var(--n-2);
+    --card-foreground: var(--n-11);
+    /* popover/dialog nổi hơn card 1 bậc — trước đây bằng nhau nên overlay chìm
+       vào nền ở chế độ tối. */
+    --popover: var(--n-3);
+    --popover-foreground: var(--n-11);
+
+    --primary: oklch(0.76 0.120 218);
+    --primary-foreground: oklch(0.17 0.030 225);
+    --secondary: var(--n-3);
+    --secondary-foreground: var(--n-11);
+    --muted: var(--n-3);
+    --muted-foreground: var(--n-8);
+
+    --accent: oklch(0.320 0.048 234);
+    --accent-foreground: oklch(0.92 0.055 220);
+
+    --border: var(--n-4);
+    /* Viền đậm hơn n-4 một bậc: ở chế độ tối viền là thứ duy nhất vẽ ra hình ô nhập. */
+    --input: oklch(0.385 0.022 254);
+    --field: oklch(0.222 0.020 254);
+    --ring: oklch(0.76 0.120 218);
+
+    --ok: oklch(0.76 0.16 145);
+    --warning: oklch(0.80 0.15 75);
+    --critical: oklch(0.72 0.155 25);
+    --info: oklch(0.76 0.11 255);
+    --destructive: var(--critical);
+    --destructive-foreground: oklch(0.17 0.03 254);
+
+    --gradient-sidebar: linear-gradient(178deg,
+            oklch(0.176 0.046 264) 0%,
+            oklch(0.128 0.036 254) 100%);
+    --gradient-chrome: linear-gradient(101deg,
+            oklch(0.172 0.042 262) 0%,
+            oklch(0.142 0.036 252) 100%);
+
+    --surface-deep: var(--n-0);
+    --surface-deep-foreground: oklch(0.97 0.005 254);
+    --surface-deep-muted: oklch(0.97 0.005 254 / 64%);
+    --surface-deep-hover: oklch(1 0 0 / 7%);
+    --surface-deep-active: oklch(1 0 0 / 12%);
+    --surface-deep-border: oklch(1 0 0 / 9%);
+
+    --sidebar: var(--surface-deep);
+    --sidebar-foreground: var(--surface-deep-foreground);
+    --sidebar-primary: oklch(0.76 0.120 218);
+    --sidebar-primary-foreground: oklch(0.17 0.030 225);
+    --sidebar-accent: oklch(1 0 0 / 11%);
+    --sidebar-accent-foreground: oklch(0.99 0.004 254);
+    --sidebar-border: var(--surface-deep-border);
+    --sidebar-ring: oklch(0.76 0.120 218);
+
+    --gradient-body: linear-gradient(180deg,
+            oklch(0.196 0.024 256) 0%,
+            oklch(0.232 0.020 252) 100%);
+
+    --chart-1: oklch(0.72 0.12 218);
+    --chart-2: oklch(0.72 0.12 278);
+    --chart-3: oklch(0.72 0.13 338);
+    --chart-4: oklch(0.72 0.13 38);
+    --chart-5: oklch(0.72 0.13 98);
+    --chart-6: oklch(0.72 0.13 158);
 }
 
 @layer base {
-  * {
-    @apply border-border outline-ring/50;
+    * {
+        @apply border-border outline-ring/50;
     }
-  body {
-    @apply bg-background text-foreground;
+
+    body {
+        @apply bg-background text-foreground;
+        -webkit-font-smoothing: antialiased;
     }
-  html {
-    @apply font-sans;
+
+    html {
+        @apply font-sans;
+    }
+
+    /* Số liệu đo dùng tabular-nums để chữ số không nhảy ngang khi giá trị đổi. */
+    .tabular {
+        font-variant-numeric: tabular-nums;
+    }
+}
+
+@layer components {
+
+    /* Vùng nội dung. background-attachment: fixed để vệt sáng đứng yên khi cuộn,
+       nếu không nó trôi theo và trông như lỗi render. */
+    .bg-app {
+        background-color: var(--background);
+        background-image: var(--gradient-body);
+        background-attachment: fixed;
+        background-repeat: no-repeat;
+    }
+
+    /* Topbar và các dải khung ngang. */
+    .bg-app-chrome {
+        background-color: var(--surface-deep);
+        background-image: var(--gradient-chrome);
+    }
+}
+
+/* Sidebar của shadcn tô nền ở lớp trong (bg-sidebar) nên không đặt gradient qua
+   className của <Sidebar> được — nhắm thẳng vào slot đó. */
+[data-slot="sidebar-inner"] {
+    background-image: var(--gradient-sidebar);
+}
+
+/* Ô nhập được: có nền riêng (--field) nên tách hẳn khỏi mặt nền chứa nó. Mặc định của shadcn là
+   `bg-transparent` + `dark:bg-input/30`, ở chế độ tối cho ra ô chỉ sáng hơn nền modal ~0.02 —
+   nhìn như không có ô nào cả. */
+[data-slot="input"],
+[data-slot="input-group"],
+[data-slot="textarea"],
+[data-slot="native-select"] {
+    background-color: var(--field);
+}
+
+/* Ô chỉ đọc: viền nét liền như ô thường, nhưng BỎ NỀN và chữ mờ — nền là thứ phân biệt chính,
+   ô nhập được có --field còn ô này trong suốt nên chìm vào mặt nền chứa nó.
+   Giữ opacity 1 vì đây là dữ liệu thật cần đọc được, không phải nút bị vô hiệu hoá. */
+[data-slot="input"]:disabled,
+[data-slot="input"][readonly] {
+    background-color: transparent;
+    color: var(--muted-foreground);
+    opacity: 1;
+    cursor: default;
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
     }
 }

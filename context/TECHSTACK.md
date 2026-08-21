@@ -6,17 +6,18 @@
 
 | Đầu mục | Thư viện | Version | Ghi chú |
 |---------|----------|---------|---------|
-| Framework | React + Vite | React 18, Vite 5 | SPA sau login, không cần SSR/SEO |
-| Routing | React Router v6 | 6.x | SPA routing, nested route, lazy loading theo role |
-| UI Library | shadcn/ui (Radix UI + Tailwind CSS) | — | Component library tùy biến, linh hoạt, xây dựng UI quản trị tenant nhiều cấp |
-| State Management | Zustand + TanStack Query | Zustand 4.x, TanStack Query 5.x | Zustand cho local/UI state, TanStack Query cho server state + cache + realtime invalidation |
-| Form / Validation | React Hook Form + Zod | RHF 7.x, Zod 3.x | |
+| Framework | React + Vite | React 19, Vite 8 | SPA sau login, không cần SSR/SEO |
+| Routing | React Router | 7.x | SPA routing, nested route, lazy loading theo role |
+| UI Library | shadcn/ui (`radix-ui` + `@base-ui/react` + Tailwind CSS 4) | shadcn CLI 4.x | Đã cài **đủ 62 component** của registry `@shadcn` cho cả 2 app (2026-08-14). Style `radix-nova`, baseColor neutral, token OKLCH trong `src/index.css` (Tailwind 4 CSS-first, không có `tailwind.config`). Component thế hệ mới (`Field`, `Empty`, `Item`, `Spinner`, `InputGroup`) chạy trên Base UI nên `radix-ui` và `@base-ui/react` cùng tồn tại — chú ý `asChild` (radix) vs `render` (base) khi viết custom trigger |
+| State Management | Zustand + TanStack Query | Zustand 5.x, TanStack Query 5.x | Zustand cho local/UI state (`useUiStore`, `useThemeStore`, `useRealtimeStore`), TanStack Query cho server state + cache + realtime invalidation |
+| Form / Validation | React Hook Form + Zod | RHF 7.x, Zod 4.x | Dùng `Field`/`FieldGroup`/`FieldError` — `@shadcn/form` (`Form`/`FormField`) đã bị shadcn khai tử, registry item nay rỗng |
 | Call API | Axios | 1.x | Interceptor cho JWT refresh, multi-tenant header |
 | Icon | Lucide | | Icon library cho shadcn/ui |
 | Chart | Apache ECharts | 5.x | Time-series lớn, zoom/pan/brush mượt hơn Chart.js/Recharts cho dashboard IoT |
 | Canvas / Rich Editor | react-grid-layout | 1.x | Widget kéo-thả, resize, lưu layout per-site/per-user |
 | Realtime | @stomp/stompjs | 7.x | STOMP-over-WebSocket, khớp `Spring WebSocket` ở Backend — không dùng socket.io vì Spring không có server socket.io chính thức (quyết định chốt khi làm trang Chi tiết Gateway, ban đầu doc ghi nhầm socket.io-client) |
-| Bundler | Vite | 5.x | |
+| Bundler | Vite | 8.x | |
+| Animation | tw-animate-css + biến `--motion-*` | 1.x | Không dùng thư viện animation JS (Motion/GSAP) — dashboard đọc số realtime cần animation kín đáo, xem `CONVENTIONS.md` § Quy tắc styling |
 | Testing | Vitest + React Testing Library | | |
 
 ## 2. Backend

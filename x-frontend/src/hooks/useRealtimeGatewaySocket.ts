@@ -3,6 +3,7 @@ import { Client } from '@stomp/stompjs'
 import { WS_BASE_URL } from '@/lib/constants'
 import { getAccessToken } from '@/services/httpClient'
 import { useAuthStore } from '@/stores/useAuthStore'
+import { useRealtimeStore } from '@/stores/useRealtimeStore'
 import type { RealtimeReadingMessage } from '@/types/telemetry'
 
 /**
@@ -23,19 +24,27 @@ export function useRealtimeGatewaySocket(
       return
     }
 
+    const { setStatus, markMessage } = useRealtimeStore.getState()
+    setStatus('connecting')
+
     const client = new Client({
       brokerURL: WS_BASE_URL,
       connectHeaders: { Authorization: `Bearer ${getAccessToken() ?? ''}` },
       reconnectDelay: 5000,
       onConnect: () => {
+        setStatus('connected')
         client.subscribe(`/topic/realtime/${tenantId}/${tenantNodeId}`, (message) => {
+          markMessage()
           onMessageRef.current(JSON.parse(message.body) as RealtimeReadingMessage)
         })
       },
+      onWebSocketClose: () => setStatus('disconnected'),
+      onStompError: () => setStatus('disconnected'),
     })
     client.activate()
 
     return () => {
+      setStatus('idle')
       void client.deactivate()
     }
   }, [tenantId, tenantNodeId])

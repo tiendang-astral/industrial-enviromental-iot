@@ -6,12 +6,15 @@ import { queryClient } from '@/app/queryClient'
 import { router } from '@/app/router'
 import { httpClient } from '@/services/httpClient'
 import { useAuthStore } from '@/stores/useAuthStore'
+import { useThemeStore } from '@/stores/useThemeStore'
 import type { ApiResponse } from '@/types/api'
 import type { LoginResponse } from '@/types/auth'
 
 function AuthBootstrap() {
   const [isBootstrapping, setIsBootstrapping] = useState(true)
   const setSession = useAuthStore((s) => s.setSession)
+  // sonner mặc định theme="light" — không truyền prop thì toast sai theme khi user bật dark.
+  const theme = useThemeStore((s) => s.theme)
 
   useEffect(() => {
     let isMounted = true
@@ -50,7 +53,7 @@ function AuthBootstrap() {
   return (
     <>
       <RouterProvider router={router} />
-      <Toaster richColors position="top-right" />
+      <Toaster theme={theme} richColors closeButton position="top-right" />
     </>
   )
 }

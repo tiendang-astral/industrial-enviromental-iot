@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
+import { Spinner } from '@/components/ui/spinner'
 import { Switch } from '@/components/ui/switch'
+import { ConfirmDialog } from '@/components/patterns/ConfirmDialog'
 import { useCreateCommandMutation } from '@/queries/useCreateCommandMutation'
 import type { CommandUpdate } from '@/types/command'
 import type { GatewayPin } from '@/types/gatewayPin'
@@ -14,6 +15,8 @@ interface RelaySwitchProps {
   /** Map commandId -> update mới nhất, nuôi bởi 1 subscription STOMP duy nhất ở trang cha. */
   commandUpdates: Record<string, CommandUpdate>
   disabled?: boolean
+  /** Tên chân, hiện trong hộp xác nhận để người dùng biết mình đang bật/tắt đúng thiết bị nào. */
+  pinName?: string
 }
 
 const TERMINAL_STATUSES = new Set(['ACKNOWLEDGED', 'FAILED', 'TIMED_OUT'])
@@ -32,8 +35,18 @@ const FALLBACK_BUFFER_MS = 8000
  * đứng loading mãi không báo gì. Nên đặt thêm 1 timer fallback theo đúng `timeoutAt` server
  * trả về lúc tạo lệnh — hết hạn mà chưa có update thật thì tự báo lỗi, không phụ thuộc WS.
  */
-export function RelaySwitch({ gatewayId, pinId, powerReportedState, commandUpdates, disabled }: RelaySwitchProps) {
+export function RelaySwitch({
+  gatewayId,
+  pinId,
+  powerReportedState,
+  commandUpdates,
+  disabled,
+  pinName,
+}: RelaySwitchProps) {
   const [pendingCommandId, setPendingCommandId] = useState<string | null>(null)
+  // Switch điều khiển thiết bị vật lý (quạt, bơm, đèn) và nằm trên board kéo-thả nên rất dễ
+  // bấm nhầm — hỏi lại trước khi gửi lệnh, khác hẳn các toggle chỉ đổi cấu hình.
+  const [confirmTarget, setConfirmTarget] = useState<boolean | null>(null)
   const createCommandMutation = useCreateCommandMutation(gatewayId, pinId)
   const queryClient = useQueryClient()
   const fallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -68,7 +81,7 @@ export function RelaySwitch({ gatewayId, pinId, powerReportedState, commandUpdat
 
   const isBusy = pendingCommandId != null && (!pendingUpdate || !TERMINAL_STATUSES.has(pendingUpdate.status))
 
-  function handleToggle(checked: boolean) {
+  function sendCommand(checked: boolean) {
     createCommandMutation.mutate(
       { commandType: checked ? 'TURN_ON' : 'TURN_OFF', idempotencyKey: crypto.randomUUID() },
       {
@@ -89,13 +102,35 @@ export function RelaySwitch({ gatewayId, pinId, powerReportedState, commandUpdat
     )
   }
 
+  const target = confirmTarget ?? false
+  const deviceLabel = pinName ? `"${pinName}"` : 'thiết bị này'
+
   return (
     <div className="flex items-center gap-2">
-      {isBusy && <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />}
+      {isBusy && <Spinner className="size-3.5 shrink-0 text-muted-foreground" />}
       <Switch
         checked={powerReportedState === 'ON'}
         disabled={disabled || isBusy || createCommandMutation.isPending}
-        onCheckedChange={handleToggle}
+        onCheckedChange={(checked) => setConfirmTarget(checked)}
+        aria-label={pinName ? `Bật/tắt ${pinName}` : 'Bật/tắt relay'}
+      />
+
+      <ConfirmDialog
+        open={confirmTarget !== null}
+        onOpenChange={(open) => !open && setConfirmTarget(null)}
+        title={target ? `Bật ${deviceLabel}?` : `Tắt ${deviceLabel}?`}
+        description={
+          target
+            ? `Lệnh bật sẽ được gửi xuống gateway ngay lập tức và thiết bị ngoài hiện trường sẽ chạy.`
+            : `Lệnh tắt sẽ được gửi xuống gateway ngay lập tức và thiết bị ngoài hiện trường sẽ dừng.`
+        }
+        confirmLabel={target ? 'Bật' : 'Tắt'}
+        destructive={!target}
+        isPending={createCommandMutation.isPending}
+        onConfirm={() => {
+          sendCommand(target)
+          setConfirmTarget(null)
+        }}
       />
     </div>
   )

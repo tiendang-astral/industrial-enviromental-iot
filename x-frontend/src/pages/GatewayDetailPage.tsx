@@ -1,25 +1,67 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
-import ReactECharts from 'echarts-for-react'
-import { ArrowLeft } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import { useParams } from 'react-router-dom'
+import { Gauge, ToggleLeft } from 'lucide-react'
+import { Card, CardContent } from '@/components/ui/card'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { EmptyState } from '@/components/patterns/EmptyState'
+import { PageHeader } from '@/components/patterns/PageHeader'
+import { StatusBadge } from '@/components/patterns/StatusBadge'
 import { RelaySwitch } from '@/components/RelaySwitch'
+import { PinTelemetryCard, PinTelemetryCardSkeleton } from '@/components/devices/PinTelemetryCard'
 import { useCommandUpdates } from '@/hooks/useCommandUpdates'
 import { useRealtimeGatewaySocket } from '@/hooks/useRealtimeGatewaySocket'
-import { buildSparklineOption } from '@/lib/echarts'
 import { useAllGatewaysQuery } from '@/queries/useGatewaysQuery'
 import { useGatewayPinsQuery } from '@/queries/useGatewayPinsQuery'
 import { useGatewayTelemetryQuery } from '@/queries/useGatewayTelemetryQuery'
+import { useMetricsQuery } from '@/queries/useMetricsQuery'
 import type { GatewayPin } from '@/types/gatewayPin'
+import type { Metric } from '@/types/metric'
 import type { PinTelemetry } from '@/types/telemetry'
+
+function RelayPinCard({
+  gatewayId,
+  pin,
+  commandUpdates,
+}: {
+  gatewayId: number
+  pin: GatewayPin
+  commandUpdates: ReturnType<typeof useCommandUpdates>['commandUpdates']
+}) {
+  return (
+    <Card>
+      <CardContent className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 flex-col gap-1">
+          <p className="truncate font-medium">{pin.name}</p>
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <span className="tabular">
+              {pin.type} · Chân {pin.pinNumber}
+            </span>
+            <StatusBadge
+              status={pin.powerReportedState === 'ON' ? 'ENABLED' : 'DISABLED'}
+              label={pin.powerReportedState === 'ON' ? 'Đang bật' : 'Đang tắt'}
+            />
+            {!pin.enabled && <StatusBadge status="DISABLED" label="Pin đã tắt" />}
+          </div>
+        </div>
+        <RelaySwitch
+          gatewayId={gatewayId}
+          pinId={pin.id}
+          pinName={pin.name}
+          powerReportedState={pin.powerReportedState}
+          commandUpdates={commandUpdates}
+          disabled={!pin.enabled}
+        />
+      </CardContent>
+    </Card>
+  )
+}
 
 export default function GatewayDetailPage() {
   const { gatewayId } = useParams()
   const id = Number(gatewayId)
 
   const { data: gateways } = useAllGatewaysQuery()
-  const gateway = gateways?.find((g) => g.id === id)
+  const gateway = gateways?.find((item) => item.id === id)
 
   const { data: telemetry, isLoading } = useGatewayTelemetryQuery(id)
   const [pins, setPins] = useState<PinTelemetry[]>([])
@@ -27,6 +69,13 @@ export default function GatewayDetailPage() {
   const { data: gatewayPins } = useGatewayPinsQuery(id)
   const outputPins = gatewayPins?.filter((pin) => pin.direction === 'OUTPUT') ?? []
   const { commandUpdates, handleCommandMessage } = useCommandUpdates()
+
+  const { data: metrics } = useMetricsQuery()
+  const metricByCode = useMemo(() => {
+    const map = new Map<string, Metric>()
+    metrics?.forEach((metric) => map.set(metric.code, metric))
+    return map
+  }, [metrics])
 
   useEffect(() => {
     if (telemetry) {
@@ -48,7 +97,10 @@ export default function GatewayDetailPage() {
               latestMeasuredAt: message.measuredAt ?? pin.latestMeasuredAt,
               history:
                 message.value != null && message.measuredAt != null
-                  ? [...pin.history, { value: message.value, measuredAt: message.measuredAt }].slice(-200)
+                  ? [
+                      ...pin.history,
+                      { value: message.value, measuredAt: message.measuredAt },
+                    ].slice(-200)
                   : pin.history,
             }
           : pin
@@ -57,108 +109,65 @@ export default function GatewayDetailPage() {
   })
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-2">
-        <Button variant="ghost" size="icon" className="size-7" asChild>
-          <Link to="/devices">
-            <ArrowLeft className="size-4" />
-          </Link>
-        </Button>
-        <div>
-          <h2 className="text-lg font-semibold">{gateway?.name ?? 'Gateway'}</h2>
-          {gateway && <p className="text-xs text-muted-foreground">{gateway.macAddress}</p>}
-        </div>
-      </div>
-
-      {isLoading && <p className="text-sm text-muted-foreground">Đang tải...</p>}
-      {!isLoading && pins.length === 0 && (
-        <p className="text-sm text-muted-foreground">Gateway chưa có pin INPUT nào gắn metric</p>
-      )}
-
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {pins.map((pin) => (
-          <PinTelemetryCard key={pin.pinId} pin={pin} />
-        ))}
-      </div>
-
-      {outputPins.length > 0 && (
-        <div className="space-y-3">
-          <h3 className="text-sm font-medium text-muted-foreground">Relay (chân OUTPUT)</h3>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {outputPins.map((pin) => (
-              <RelayPinCard key={pin.id} gatewayId={id} pin={pin} commandUpdates={commandUpdates} />
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-function RelayPinCard({
-  gatewayId,
-  pin,
-  commandUpdates,
-}: {
-  gatewayId: number
-  pin: GatewayPin
-  commandUpdates: ReturnType<typeof useCommandUpdates>['commandUpdates']
-}) {
-  return (
-    <div className="flex items-center justify-between gap-2 rounded-xl border border-border p-4">
-      <div className="min-w-0">
-        <p className="truncate font-medium">{pin.name}</p>
-        <p className="text-xs text-muted-foreground">
-          {pin.type} · Chân {pin.pinNumber} · {pin.powerReportedState === 'ON' ? 'Đang bật' : 'Đang tắt'}
-        </p>
-      </div>
-      <RelaySwitch
-        gatewayId={gatewayId}
-        pinId={pin.id}
-        powerReportedState={pin.powerReportedState}
-        commandUpdates={commandUpdates}
-        disabled={!pin.enabled}
+    <div className="flex flex-col gap-6">
+      <PageHeader
+        title={gateway?.name ?? 'Gateway'}
+        description={gateway ? `MAC ${gateway.macAddress}` : undefined}
+        backTo="/devices"
+        backLabel="Thiết bị"
       />
-    </div>
-  )
-}
 
-function PinTelemetryCard({ pin }: { pin: PinTelemetry }) {
-  const chartOption = useMemo(() => buildSparklineOption(pin.history), [pin.history])
+      <Tabs defaultValue="sensors" className="gap-6">
+        <TabsList>
+          <TabsTrigger value="sensors">
+            Cảm biến
+            {pins.length > 0 && <span className="tabular text-muted-foreground">{pins.length}</span>}
+          </TabsTrigger>
+          <TabsTrigger value="relays">
+            Điều khiển
+            {outputPins.length > 0 && (
+              <span className="tabular text-muted-foreground">{outputPins.length}</span>
+            )}
+          </TabsTrigger>
+        </TabsList>
 
-  return (
-    <div className="space-y-3 rounded-xl border border-border p-4">
-      <div className="flex items-center justify-between gap-2">
-        <div>
-          <p className="font-medium">{pin.name}</p>
-          <p className="text-xs text-muted-foreground">
-            {pin.type} · Chân {pin.pinNumber}
-          </p>
-        </div>
-        <Badge variant="outline">{pin.metricCode ?? 'Chưa gán metric'}</Badge>
-      </div>
-
-      <div>
-        <p className="text-3xl font-semibold tabular-nums">
-          {pin.latestValue != null ? pin.latestValue : '—'}
-          {pin.unit && pin.latestValue != null && (
-            <span className="ml-1 text-base font-normal text-muted-foreground">{pin.unit}</span>
+        <TabsContent value="sensors" className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {isLoading &&
+            Array.from({ length: 3 }).map((_, index) => <PinTelemetryCardSkeleton key={index} />)}
+          {!isLoading &&
+            pins.map((pin) => (
+              <PinTelemetryCard
+                key={pin.pinId}
+                pin={pin}
+                metric={pin.metricCode ? metricByCode.get(pin.metricCode) : undefined}
+              />
+            ))}
+          {!isLoading && pins.length === 0 && (
+            <div className="md:col-span-2 xl:col-span-3">
+              <EmptyState
+                icon={Gauge}
+                title="Chưa có chân đọc dữ liệu nào"
+                description="Gateway này chưa có pin INPUT nào được gắn metric, nên chưa có số liệu để theo dõi. Khai báo pin ở trang xưởng/chuồng trại chứa gateway."
+              />
+            </div>
           )}
-        </p>
-        <p className="text-xs text-muted-foreground">
-          {pin.latestMeasuredAt
-            ? `Cập nhật lúc ${new Date(pin.latestMeasuredAt).toLocaleTimeString('vi-VN')}`
-            : 'Chưa có dữ liệu'}
-        </p>
-      </div>
+        </TabsContent>
 
-      {pin.history.length > 1 ? (
-        <ReactECharts option={chartOption} style={{ height: 120 }} notMerge />
-      ) : (
-        <div className="flex h-[120px] items-center justify-center text-xs text-muted-foreground">
-          Chưa đủ dữ liệu để vẽ biểu đồ
-        </div>
-      )}
+        <TabsContent value="relays" className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {outputPins.map((pin) => (
+            <RelayPinCard key={pin.id} gatewayId={id} pin={pin} commandUpdates={commandUpdates} />
+          ))}
+          {outputPins.length === 0 && (
+            <div className="md:col-span-2 xl:col-span-3">
+              <EmptyState
+                icon={ToggleLeft}
+                title="Chưa có chân điều khiển nào"
+                description="Gateway này chưa khai báo pin OUTPUT nên chưa điều khiển được relay từ hệ thống."
+              />
+            </div>
+          )}
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }

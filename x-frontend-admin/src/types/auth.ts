@@ -25,3 +25,8 @@ export interface ChangePasswordRequest {
   currentPassword: string
   newPassword: string
 }
+
+export interface UpdateMeRequest {
+  fullName: string
+  email: string | null
+}

@@ -1,5 +1,7 @@
 import { useNavigate } from 'react-router-dom'
 import { LayoutGrid, MapPin } from 'lucide-react'
+import { Skeleton } from '@/components/ui/skeleton'
+import { EmptyState } from '@/components/patterns/EmptyState'
 import { SourceCardGrid } from '@/components/dashboard/SourceCardGrid'
 import { useTenantNodeOverviewQuery } from '@/queries/useTenantNodeOverviewQuery'
 
@@ -13,7 +15,13 @@ export function NodeOverviewCards({ nodeId }: { nodeId: number }) {
   const { data: overview, isLoading } = useTenantNodeOverviewQuery(nodeId)
 
   if (isLoading) {
-    return <p className="text-sm text-muted-foreground">Đang tải...</p>
+    return (
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {Array.from({ length: 3 }).map((_, index) => (
+          <Skeleton key={index} className="h-20 rounded-xl" />
+        ))}
+      </div>
+    )
   }
 
   const hasSources = (overview?.sources.length ?? 0) > 0
@@ -21,24 +29,25 @@ export function NodeOverviewCards({ nodeId }: { nodeId: number }) {
 
   if (!hasSources && !hasSites) {
     return (
-      <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border py-16 text-center">
-        <LayoutGrid className="size-8 text-muted-foreground" />
-        <p className="text-sm text-muted-foreground">Chưa có site hoặc nguồn dữ liệu nào trong tổ chức này</p>
-      </div>
+      <EmptyState
+        icon={LayoutGrid}
+        title="Chưa có gì để theo dõi ở đây"
+        description="Đơn vị này chưa có xưởng/chuồng trại hay nguồn dữ liệu nào bên dưới. Thêm chúng ở trang Tổ chức và Nguồn dữ liệu."
+      />
     )
   }
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col gap-6">
       {hasSources && (
-        <section className="space-y-3">
+        <section className="flex flex-col gap-3">
           <h3 className="text-sm font-medium text-muted-foreground">Nguồn dữ liệu</h3>
           <SourceCardGrid sources={overview!.sources} />
         </section>
       )}
 
       {hasSites && (
-        <section className="space-y-3">
+        <section className="flex flex-col gap-3">
           <h3 className="text-sm font-medium text-muted-foreground">Site</h3>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {overview!.sites.map((site) => (
@@ -46,7 +55,7 @@ export function NodeOverviewCards({ nodeId }: { nodeId: number }) {
                 key={site.id}
                 type="button"
                 onClick={() => navigate(`/dashboard/${site.id}`)}
-                className="flex items-start gap-3 rounded-xl border border-border p-4 text-left transition-colors hover:bg-muted/50"
+                className="flex items-start gap-3 rounded-xl border border-border p-4 text-left transition-colors duration-(--motion-fast) hover:bg-muted/50 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
               >
                 <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted">
                   <MapPin className="size-4 text-muted-foreground" />

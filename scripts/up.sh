@@ -56,8 +56,8 @@ cat <<EOF
   Backend              http://localhost:8080
   Ingestion Service    http://localhost:8081
   Processing Service   http://localhost:8082
-  Frontend (tenant)    http://localhost:5173
-  Frontend (admin)     http://localhost:5174
+  Frontend (tenant)    http://localhost:7100
+  Frontend (admin)     http://localhost:7200
   EMQX Dashboard       http://localhost:18083 (admin/public)
   MinIO Console        http://localhost:19001 (iiot/iiot12345)
   InfluxDB UI          http://localhost:8086

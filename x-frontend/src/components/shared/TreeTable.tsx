@@ -1,5 +1,6 @@
 import * as React from 'react'
 import { ChevronDown, ChevronRight, type LucideIcon } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 
@@ -196,7 +197,7 @@ export function TreeTableNameCell({
         >
           {children}
         </span>
-        {hasChildren && <span className="font-mono text-xs tabular-nums text-muted-foreground">({childCount})</span>}
+        {hasChildren && <span className="font-mono text-xs tabular text-muted-foreground">({childCount})</span>}
       </div>
     </TableCell>
   )
@@ -218,17 +219,9 @@ export function TreeTableStatusBadge({
   className?: string
 }) {
   return (
-    <span
-      className={cn(
-        'inline-flex w-fit items-center rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap',
-        active
-          ? 'border-green-200 bg-green-50 text-green-700 dark:border-green-500/25 dark:bg-green-500/10 dark:text-green-400'
-          : 'border-border bg-muted text-muted-foreground',
-        className
-      )}
-    >
+    <Badge variant={active ? 'ok' : 'outline'} className={className}>
       {active ? activeLabel : inactiveLabel}
-    </span>
+    </Badge>
   )
 }
 

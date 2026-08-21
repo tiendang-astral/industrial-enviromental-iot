@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useForm } from 'react-hook-form'
+import { Controller, useForm } from 'react-hook-form'
 import { ArrowLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -11,8 +11,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 import {
   addWidgetSchema,
@@ -25,9 +33,6 @@ import {
 import { useGatewayPinsQuery } from '@/queries/useGatewayPinsQuery'
 import { useGatewaysQuery } from '@/queries/useGatewaysQuery'
 import type { Datastream, WidgetType } from '@/types/dashboard'
-
-const selectClassName =
-  'h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50'
 
 interface AddWidgetDialogProps {
   open: boolean
@@ -66,9 +71,17 @@ export function AddWidgetDialog({
     resolver: zodResolver(addWidgetSchema),
     defaultValues: { type: 'VALUE', datastreamId: '', gatewayId: '', pinId: '', title: '' },
   })
-  const datastreamId = form.watch('datastreamId')
-  const gatewayId = form.watch('gatewayId')
-  const pinId = form.watch('pinId')
+  const {
+    register,
+    control,
+    watch,
+    setValue,
+    handleSubmit,
+    formState: { errors },
+  } = form
+  const datastreamId = watch('datastreamId')
+  const gatewayId = watch('gatewayId')
+  const pinId = watch('pinId')
 
   const { data: gateways } = useGatewaysQuery(tenantNodeId ?? 0)
   const { data: gatewayPins } = useGatewayPinsQuery(gatewayId ? Number(gatewayId) : 0)
@@ -78,9 +91,9 @@ export function AddWidgetDialog({
     if (!selectedType || !bindsDatastream(selectedType)) {
       return
     }
-    const ds = datastreams.find((d) => String(d.id) === datastreamId)
-    if (ds) {
-      form.setValue('title', ds.name)
+    const datastream = datastreams.find((item) => String(item.id) === datastreamId)
+    if (datastream) {
+      setValue('title', datastream.name)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [datastreamId])
@@ -89,16 +102,16 @@ export function AddWidgetDialog({
     if (!selectedType || !bindsGatewayPin(selectedType)) {
       return
     }
-    const pin = outputPins.find((p) => String(p.id) === pinId)
+    const pin = outputPins.find((item) => String(item.id) === pinId)
     if (pin) {
-      form.setValue('title', pin.name)
+      setValue('title', pin.name)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pinId])
 
   // Đổi gateway -> pin cũ (thuộc gateway khác) không còn hợp lệ, reset lại.
   useEffect(() => {
-    form.setValue('pinId', '')
+    setValue('pinId', '')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gatewayId])
 
@@ -110,11 +123,16 @@ export function AddWidgetDialog({
 
   function goToDetails() {
     if (!selectedType) return
-    form.setValue('type', selectedType)
-    form.setValue('datastreamId', '')
-    form.setValue('gatewayId', '')
-    form.setValue('pinId', '')
-    form.setValue('title', bindsDatastream(selectedType) || bindsGatewayPin(selectedType) ? '' : WIDGET_TYPE_LABELS[selectedType])
+    setValue('type', selectedType)
+    setValue('datastreamId', '')
+    setValue('gatewayId', '')
+    setValue('pinId', '')
+    setValue(
+      'title',
+      bindsDatastream(selectedType) || bindsGatewayPin(selectedType)
+        ? ''
+        : WIDGET_TYPE_LABELS[selectedType]
+    )
     setStep('details')
   }
 
@@ -122,7 +140,8 @@ export function AddWidgetDialog({
     onAdd({
       type: values.type,
       title: values.title,
-      datastreamId: bindsDatastream(values.type) && values.datastreamId ? Number(values.datastreamId) : null,
+      datastreamId:
+        bindsDatastream(values.type) && values.datastreamId ? Number(values.datastreamId) : null,
       gatewayId: bindsGatewayPin(values.type) && values.gatewayId ? Number(values.gatewayId) : null,
       pinId: bindsGatewayPin(values.type) && values.pinId ? Number(values.pinId) : null,
     })
@@ -140,9 +159,13 @@ export function AddWidgetDialog({
     >
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>{step === 'type' ? 'Thêm widget — chọn loại' : 'Thêm widget — thông tin'}</DialogTitle>
+          <DialogTitle>
+            {step === 'type' ? 'Thêm widget — chọn loại' : 'Thêm widget — thông tin'}
+          </DialogTitle>
           <DialogDescription>
-            {step === 'type' ? 'Chọn loại widget muốn thêm vào dashboard.' : 'Gắn datastream (nếu cần) và đặt tên widget.'}
+            {step === 'type'
+              ? 'Mỗi loại widget hiển thị dữ liệu theo một cách khác nhau.'
+              : 'Gắn dữ liệu cho widget và đặt tên hiển thị trên bảng điều khiển.'}
           </DialogDescription>
         </DialogHeader>
 
@@ -156,10 +179,14 @@ export function AddWidgetDialog({
                   <button
                     key={option.type}
                     type="button"
+                    aria-pressed={isSelected}
                     onClick={() => setSelectedType(option.type)}
+                    onDoubleClick={goToDetails}
                     className={cn(
-                      'flex flex-col items-start gap-1.5 rounded-lg border p-3 text-left transition-colors',
-                      isSelected ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'border-input hover:bg-muted/50'
+                      'flex flex-col items-start gap-1.5 rounded-lg border p-3 text-left transition-colors duration-(--motion-fast) focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none',
+                      isSelected
+                        ? 'border-primary bg-primary/5 ring-1 ring-primary'
+                        : 'border-input hover:bg-muted/50'
                     )}
                   >
                     <Icon className={cn('size-5', isSelected ? 'text-primary' : 'text-muted-foreground')} />
@@ -170,6 +197,9 @@ export function AddWidgetDialog({
               })}
             </div>
             <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+                Hủy
+              </Button>
               <Button type="button" disabled={!selectedType} onClick={goToDetails}>
                 Tiếp theo
               </Button>
@@ -178,106 +208,138 @@ export function AddWidgetDialog({
         )}
 
         {step === 'details' && selectedType && (
-          <Form {...form}>
-            <form className="space-y-4" onSubmit={form.handleSubmit(onSubmit)}>
+          <form className="flex flex-col gap-6" onSubmit={handleSubmit(onSubmit)} noValidate>
+            <FieldGroup>
               {bindsDatastream(selectedType) && (
-                <FormField
-                  control={form.control}
-                  name="datastreamId"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Datastream</FormLabel>
-                      <FormControl>
-                        <select className={selectClassName} {...field}>
-                          <option value="">-- Chọn datastream --</option>
-                          {datastreams.map((ds) => (
-                            <option key={ds.id} value={ds.id}>
-                              {ds.name} ({ds.metricCode ?? 'chưa gán metric'})
-                            </option>
-                          ))}
-                        </select>
-                      </FormControl>
-                      <FormMessage />
-                      {datastreams.length === 0 && (
-                        <p className="text-xs text-muted-foreground">Node này chưa có datastream nào.</p>
-                      )}
-                    </FormItem>
+                <Field data-invalid={!!errors.datastreamId}>
+                  <FieldLabel htmlFor="widget-datastream">Datastream</FieldLabel>
+                  <Controller
+                    control={control}
+                    name="datastreamId"
+                    render={({ field }) => (
+                      <Select
+                        value={field.value}
+                        onValueChange={field.onChange}
+                        disabled={datastreams.length === 0}
+                      >
+                        <SelectTrigger
+                          id="widget-datastream"
+                          aria-invalid={!!errors.datastreamId}
+                          className="w-full"
+                        >
+                          <SelectValue placeholder="Chọn datastream" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectGroup>
+                            {datastreams.map((datastream) => (
+                              <SelectItem key={datastream.id} value={String(datastream.id)}>
+                                {datastream.name} ({datastream.metricCode ?? 'chưa gán metric'})
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                    )}
+                  />
+                  {datastreams.length === 0 && (
+                    <FieldDescription>
+                      Node này chưa có datastream nào — khai báo pin INPUT trên gateway hoặc thêm
+                      datastream cho nguồn dữ liệu trước.
+                    </FieldDescription>
                   )}
-                />
+                  <FieldError errors={[errors.datastreamId]} />
+                </Field>
               )}
 
               {bindsGatewayPin(selectedType) && (
                 <>
-                  <FormField
-                    control={form.control}
-                    name="gatewayId"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Gateway</FormLabel>
-                        <FormControl>
-                          <select className={selectClassName} {...field}>
-                            <option value="">-- Chọn gateway --</option>
-                            {gateways?.map((gw) => (
-                              <option key={gw.id} value={gw.id}>
-                                {gw.name}
-                              </option>
-                            ))}
-                          </select>
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
+                  <Field data-invalid={!!errors.gatewayId}>
+                    <FieldLabel htmlFor="widget-gateway">Gateway</FieldLabel>
+                    <Controller
+                      control={control}
+                      name="gatewayId"
+                      render={({ field }) => (
+                        <Select value={field.value} onValueChange={field.onChange}>
+                          <SelectTrigger
+                            id="widget-gateway"
+                            aria-invalid={!!errors.gatewayId}
+                            className="w-full"
+                          >
+                            <SelectValue placeholder="Chọn gateway" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectGroup>
+                              {gateways?.map((gateway) => (
+                                <SelectItem key={gateway.id} value={String(gateway.id)}>
+                                  {gateway.name}
+                                </SelectItem>
+                              ))}
+                            </SelectGroup>
+                          </SelectContent>
+                        </Select>
+                      )}
+                    />
+                    <FieldError errors={[errors.gatewayId]} />
+                  </Field>
 
-                  <FormField
-                    control={form.control}
-                    name="pinId"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Pin OUTPUT</FormLabel>
-                        <FormControl>
-                          <select className={selectClassName} disabled={!gatewayId} {...field}>
-                            <option value="">-- Chọn pin --</option>
-                            {outputPins.map((pin) => (
-                              <option key={pin.id} value={pin.id}>
-                                {pin.name} ({pin.type} {pin.pinNumber})
-                              </option>
-                            ))}
-                          </select>
-                        </FormControl>
-                        <FormMessage />
-                        {gatewayId && outputPins.length === 0 && (
-                          <p className="text-xs text-muted-foreground">Gateway này chưa có pin OUTPUT nào.</p>
-                        )}
-                      </FormItem>
+                  <Field data-invalid={!!errors.pinId}>
+                    <FieldLabel htmlFor="widget-pin">Chân điều khiển</FieldLabel>
+                    <Controller
+                      control={control}
+                      name="pinId"
+                      render={({ field }) => (
+                        <Select
+                          value={field.value}
+                          onValueChange={field.onChange}
+                          disabled={!gatewayId || outputPins.length === 0}
+                        >
+                          <SelectTrigger
+                            id="widget-pin"
+                            aria-invalid={!!errors.pinId}
+                            className="w-full"
+                          >
+                            <SelectValue placeholder="Chọn chân OUTPUT" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectGroup>
+                              {outputPins.map((pin) => (
+                                <SelectItem key={pin.id} value={String(pin.id)}>
+                                  {pin.name} ({pin.type} {pin.pinNumber})
+                                </SelectItem>
+                              ))}
+                            </SelectGroup>
+                          </SelectContent>
+                        </Select>
+                      )}
+                    />
+                    {gatewayId && outputPins.length === 0 && (
+                      <FieldDescription>Gateway này chưa có chân OUTPUT nào.</FieldDescription>
                     )}
-                  />
+                    <FieldError errors={[errors.pinId]} />
+                  </Field>
                 </>
               )}
 
-              <FormField
-                control={form.control}
-                name="title"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Tên widget</FormLabel>
-                    <FormControl>
-                      <Input autoFocus {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+              <Field data-invalid={!!errors.title}>
+                <FieldLabel htmlFor="widget-title">Tên widget</FieldLabel>
+                <Input
+                  id="widget-title"
+                  autoFocus
+                  aria-invalid={!!errors.title}
+                  {...register('title')}
+                />
+                <FieldError errors={[errors.title]} />
+              </Field>
+            </FieldGroup>
 
-              <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setStep('type')}>
-                  <ArrowLeft />
-                  Quay lại
-                </Button>
-                <Button type="submit">Thêm</Button>
-              </DialogFooter>
-            </form>
-          </Form>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setStep('type')}>
+                <ArrowLeft data-icon="inline-start" />
+                Quay lại
+              </Button>
+              <Button type="submit">Thêm widget</Button>
+            </DialogFooter>
+          </form>
         )}
       </DialogContent>
     </Dialog>

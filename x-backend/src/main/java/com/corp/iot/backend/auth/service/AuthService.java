@@ -2,6 +2,7 @@ package com.corp.iot.backend.auth.service;
 
 import com.corp.iot.backend.auth.dto.ChangePasswordRequest;
 import com.corp.iot.backend.auth.dto.MeResponse;
+import com.corp.iot.backend.auth.dto.UpdateMeRequest;
 import com.corp.iot.backend.common.security.AppUserPrincipal;
 
 public interface AuthService {
@@ -15,6 +16,8 @@ public interface AuthService {
     void logout(String rawRefreshToken);
 
     MeResponse me(AppUserPrincipal principal);
+
+    MeResponse updateMe(AppUserPrincipal principal, UpdateMeRequest request);
 
     void changePassword(AppUserPrincipal principal, ChangePasswordRequest request);
 }

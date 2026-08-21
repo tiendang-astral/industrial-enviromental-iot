@@ -1,75 +1,89 @@
-import type { ComponentType } from 'react'
-import { Link, useLocation } from 'react-router-dom'
-import { AlertTriangle, Database, FileBarChart, LayoutDashboard, Network, Router } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
+import { NavLink, useLocation } from 'react-router-dom'
+import { Activity } from 'lucide-react'
+import { NAV_GROUPS } from '@/components/layout/navConfig'
 import {
   Sidebar,
   SidebarContent,
   SidebarGroup,
   SidebarGroupContent,
+  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
 } from '@/components/ui/sidebar'
-import { useMeQuery } from '@/queries/useMeQuery'
+import { cn } from '@/lib/utils'
 
-interface NavItem {
-  label: string
-  icon: ComponentType<{ className?: string }>
-  href?: string
-}
-
-// Item chưa có href = chưa triển khai (theo roadmap PLAN.md), hiện disable + badge "Sắp có".
-const NAV_ITEMS: NavItem[] = [
-  { label: 'Tổng quan', icon: LayoutDashboard, href: '/dashboard' }, // Phase 4 — Dashboard
-  { label: 'Tổ chức', icon: Network, href: '/organization' }, // Phase 2 — tenant_node / Gateway
-  { label: 'Thiết bị', icon: Router, href: '/devices' }, // Phase 2 — danh sách toàn bộ gateway
-  { label: 'Nguồn dữ liệu', icon: Database, href: '/data-sources' }, // Phase 5 — External source
-  { label: 'Cảnh báo', icon: AlertTriangle }, // Phase 6 — Alert
-  { label: 'Báo cáo', icon: FileBarChart }, // Phase 8 — Report
-]
-
+/**
+ * Nav chức năng. Thu gọn kiểu icon-rail — mỗi mục có icon riêng nên rail vẫn nhận ra được.
+ * Chữ để ở 15px/medium và độ mờ 85% thay vì 14px/70%: đây là đích bấm chính của cả app,
+ * mờ hơn nữa thì đọc lướt không ra mục nào đang mở.
+ */
 export function AppSidebar() {
-  const { data: me } = useMeQuery()
-  const location = useLocation()
+  const { pathname } = useLocation()
 
   return (
-    <Sidebar>
-      <SidebarHeader>
-        <div className="flex h-8 items-center px-2 text-sm font-semibold text-sidebar-foreground">
-          {me?.tenantId ? `Tenant #${me.tenantId}` : '—'}
-        </div>
+    <Sidebar collapsible="icon">
+      <SidebarHeader className="h-14 justify-center border-b border-sidebar-border px-4 group-data-[collapsible=icon]:px-0">
+        <NavLink
+          to="/dashboard"
+          className="flex items-center gap-2.5 text-sidebar-foreground group-data-[collapsible=icon]:justify-center"
+        >
+          <Activity className="size-5 shrink-0 text-sidebar-primary" />
+          <span className="text-[0.9375rem] font-semibold tracking-wide group-data-[collapsible=icon]:hidden">
+            Astralx IoT
+          </span>
+        </NavLink>
       </SidebarHeader>
-      <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {NAV_ITEMS.map((item) =>
-                item.href ? (
-                  <SidebarMenuItem key={item.label}>
-                    <SidebarMenuButton asChild isActive={location.pathname.startsWith(item.href)}>
-                      <Link to={item.href}>
-                        <item.icon />
-                        <span>{item.label}</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ) : (
-                  <SidebarMenuItem key={item.label}>
-                    <SidebarMenuButton disabled aria-disabled title="Sắp có">
-                      <item.icon />
-                      <span>{item.label}</span>
-                      <Badge variant="secondary" className="ml-auto">
-                        Sắp có
-                      </Badge>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                )
-              )}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+
+      <SidebarContent className="pt-2">
+        {NAV_GROUPS.map((group, index) => (
+          <SidebarGroup key={group.label ?? `group-${index}`} className="px-2 py-1">
+            {group.label && (
+              <SidebarGroupLabel className="h-6 px-3 text-[0.6875rem] font-semibold tracking-wider text-sidebar-foreground/45 uppercase">
+                {group.label}
+              </SidebarGroupLabel>
+            )}
+            <SidebarGroupContent>
+              <SidebarMenu className="gap-1">
+                {group.items.map((item) => {
+                  const isActive =
+                    item.href === '/' ? pathname === '/' : pathname.startsWith(item.href)
+                  return (
+                    <SidebarMenuItem key={item.href}>
+                      <SidebarMenuButton
+                        asChild
+                        isActive={isActive}
+                        tooltip={item.label}
+                        className={cn(
+                          'relative h-10 gap-3 rounded-lg px-3 text-[0.9375rem] font-medium',
+                          'text-sidebar-foreground/85 transition-colors duration-[var(--motion-fast)]',
+                          'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+                          'data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground',
+                          '[&_svg]:size-[1.125rem]'
+                        )}
+                      >
+                        <NavLink to={item.href}>
+                          {/* Vạch màu bên trái: dấu hiệu "đang ở đây" đọc được kể cả khi liếc nhanh,
+                              mạnh hơn hẳn việc chỉ đổi nền một chút. */}
+                          <span
+                            aria-hidden
+                            className={cn(
+                              'absolute inset-y-1.5 left-0 w-1 rounded-r-full bg-sidebar-primary transition-opacity duration-[var(--motion-fast)]',
+                              isActive ? 'opacity-100' : 'opacity-0'
+                            )}
+                          />
+                          <item.icon className={cn(isActive && 'text-sidebar-primary')} />
+                          <span>{item.label}</span>
+                        </NavLink>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  )
+                })}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        ))}
       </SidebarContent>
     </Sidebar>
   )

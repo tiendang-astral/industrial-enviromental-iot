@@ -27,7 +27,10 @@ src/
 ├── app/               # App shell, providers (QueryClient, Router, Auth), route config theo role
 ├── pages/              # Trang / route, orchestration
 ├── components/
-│   ├── ui/            # shadcn/ui component (generated, hạn chế sửa tay)
+│   ├── ui/            # shadcn/ui component (generated, hạn chế sửa tay) — đã cài đủ 62 component
+│   ├── patterns/      # Lớp pattern dùng chung: PageHeader, DataTable, FormDialog, ConfirmDialog, StatusBadge, EmptyState, LoadingButton
+│   ├── layout/        # AppShell + shell riêng của từng app (xem § Layout & Auth UX)
+│   ├── <domain>/      # Component theo nghiệp vụ: devices/, datasources/, organization/, dashboard/
 │   └── widgets/       # Widget Dashboard: VALUE/LINE/SWITCH/DEVICE_COUNT/DEVICES_ONLINE/DEVICE_TABLE/EVENT_*
 ├── hooks/             # Custom hooks (useAuth, useWebSocket, useScope...)
 ├── queries/           # TanStack Query hooks (server state) theo domain — useGatewaysQuery, useAlertMutation
@@ -60,12 +63,31 @@ Page → orchestration, layout, route-level state
 Store (Zustand) → chạy song song, chỉ giữ UI/local state, không giữ data từ API
 ```
 
-### Layout & Auth UX (áp dụng cho cả `x-frontend` và `x-frontend-admin`)
+### Lớp pattern dùng chung (`components/patterns/`)
 
-- **Shell:** `AppShell` (`SidebarProvider` + `Sidebar` + `SidebarInset` — block có sẵn của shadcn/ui). Sidebar Header hiện context hiện tại (`x-frontend`: tên tenant đang làm việc; `x-frontend-admin`: badge "Platform Admin" màu riêng để không nhầm 2 app khi mở song song). SidebarContent là menu nhóm theo domain — item chưa triển khai (theo roadmap `PLAN.md`) disable + badge "Sắp có". Topbar trong `SidebarInset` chỉ gồm `SidebarTrigger` + breadcrumb/tiêu đề trang + `UserMenu` — **không** làm global bar 2 tầng kiểu AWS Console, không cần thiết ở quy mô vài mục nav.
-- **UserMenu:** avatar dropdown 3 mục cố định — Thông tin tài khoản (dialog đọc từ `GET /me`), Đổi mật khẩu (dialog form gọi `PUT /auth/password`), Đăng xuất (`POST /auth/logout` → clear store → redirect `/login`).
-- **Auth state:** `stores/useAuthStore.ts` (Zustand) giữ access token + user hiện tại **trong memory**, không persist localStorage. Route chưa auth → redirect `/login` (route guard trong `router.tsx`).
-- **Toast:** `sonner` cho lỗi network/5xx và thông báo thành công (đổi mật khẩu, tạo tenant...); lỗi field-level (401 sai mật khẩu, 400 field cụ thể) hiện inline dưới input qua RHF, không dùng toast cho lỗi field.
+Mỗi app tự có bản riêng (không share code, đúng nguyên tắc ở đầu mục 1). Page **không** tự dựng lại bảng/form/dialog:
+
+| Component | Dùng khi |
+|-----------|----------|
+| `PageHeader` | Mọi page — title + description + actions (+ `backTo` cho trang chi tiết) |
+| `DataTable` | Mọi danh sách — toolbar tìm kiếm, sort, `Skeleton` khi loading, `Empty` khi rỗng, phân trang **client-side** (backend chưa có endpoint phân trang) |
+| `FormDialog` | Mọi form trong dialog — bọc sẵn `FieldGroup` + footer Hủy/Lưu có `Spinner` |
+| `ConfirmDialog` | **Bắt buộc** trước mọi hành động phá hủy (xóa, khóa, gửi lệnh relay); `description` phải nêu hậu quả cụ thể |
+| `StatusBadge` | Mọi mã trạng thái backend → nhãn tiếng Việt + màu semantic. Cấm render thẳng `ACTIVE`/`LOCKED` |
+| `EmptyState` | Trạng thái rỗng, luôn kèm CTA tạo dữ liệu đầu tiên |
+| `LoadingButton` | Nút submit — `Spinner` + `disabled`, giữ nguyên nhãn (không đổi thành "Đang lưu...") |
+
+### Quy tắc styling
+
+- **Form dùng `Field`/`FieldGroup`/`FieldError`** — registry `@shadcn/form` đã rỗng (shadcn bỏ `Form`/`FormField` wrapper). Validate: `data-invalid` trên `Field`, `aria-invalid` trên control.
+- **Khoảng cách:** `gap-*` với flex/grid, **cấm** `space-y-*`/`space-x-*`. Page padding `p-6`, giữa các khối `gap-6`, trong khối `gap-4`, trong nhóm field `gap-2`.
+- **Kích thước bằng nhau** dùng `size-*` (`size-8`), không `w-8 h-8`.
+- **Màu:** chỉ semantic token (`bg-primary`, `text-muted-foreground`, `--ok`, `--warning`, `--critical`, `--info`), cấm `bg-amber-100`/`text-emerald-600`. Sidebar/topbar nằm trên `--surface-deep` nên chữ và hover dùng bộ `--surface-deep-foreground`/`--surface-deep-muted`/`--surface-deep-hover`/`--surface-deep-active`, không dùng `--foreground` (đổi theo theme) và không rải `text-white/85`.
+- **Icon trong `Button`:** `data-icon="inline-start"`/`"inline-end"`, **không** tự set `className="size-4"` (component tự lo). Icon-only button phải có `<span className="sr-only">`.
+- **Tooltip:** dùng component `Tooltip`, cấm thuộc tính `title=`. **Không bọc `Switch` (hoặc primitive Radix có state khác) trong `TooltipTrigger asChild`** — Radix merge `data-state`/`data-slot` của tooltip đè lên của switch, làm mất nền màu trạng thái bật. Đặt chú thích ở header cột hoặc dùng `aria-label`.
+- **Ngày giờ:** dùng `lib/datetime.ts` (`formatDateTime`, `formatRelativeTime`), không gọi `toLocaleString('vi-VN')` rải rác trong page.
+- **Animation:** chỉ dùng 3 biến `--motion-fast|base|slow` + `--motion-ease` khai trong `index.css`, cấm duration rời rạc. Toàn bộ animation tắt dưới `prefers-reduced-motion: reduce`.
+- **Số liệu đo:** thêm class `.tabular` (tabular-nums) để chữ số không nhảy ngang khi giá trị realtime đổi.
 
 ### Đặc điểm riêng
 
@@ -76,6 +98,7 @@ Store (Zustand) → chạy song song, chỉ giữ UI/local state, không giữ d
 - **Realtime (chỉ `x-frontend`):** `@stomp/stompjs` connect endpoint `/ws` (JWT header CONNECT), subscribe STOMP topic `/topic/realtime/{tenantId}/{tenantNodeId}`; khi nhận event → `queryClient.setQueryData`/`invalidateQueries` tương ứng, không tạo state riêng song song với cache
 - **Chart (chỉ `x-frontend`):** Apache ECharts duy nhất cho time-series (zoom/pan/brush); không trộn thêm chart lib khác
 - **Dashboard layout (chỉ `x-frontend`):** `react-grid-layout` cho kéo-thả/resize; lưu `layout_json` lên server qua debounce (tránh gọi API mỗi lần kéo)
+- **Điều khiển relay (chỉ `x-frontend`):** `RelaySwitch` **luôn hỏi xác nhận** qua `ConfirmDialog` trước khi gửi lệnh — switch nằm trên board kéo-thả, bấm nhầm sẽ bật/tắt thiết bị thật ngoài hiện trường. Hộp xác nhận nêu tên chân (`pinName`) để không tắt nhầm thiết bị
 - **Thinking in React:** Chia UI thành hierarchy → build static trước → tìm minimal state → xác định state sống ở đâu → thêm inverse data flow
 
 ---

@@ -36,6 +36,7 @@ Lỗi — `@RestControllerAdvice` (`GlobalExceptionHandler`) trả cùng envelop
 | POST | /api/v1/platform/auth/logout | — (đọc cookie `refresh_token`) | 200, no body | Revoke refresh token, clear cookie |
 | PUT | /api/v1/auth/password | `{ currentPassword, newPassword }` | 200, no body | Đổi mật khẩu — dùng chung 2 app (điều khiển bởi Bearer JWT, không phụ thuộc cookie nên không cần tách path), revoke toàn bộ refresh token khác của user |
 | GET | /api/v1/me | — (JWT) | `{ data: MeResponse }` | Profile user hiện tại |
+| PUT | /api/v1/me | `{ fullName, email? }` | `{ data: MeResponse }` | **Mới.** User tự sửa hồ sơ của chính mình — dùng chung 2 app. Không cho đổi `username` (đã nằm trong JWT đang phát hành) và không cho đổi role/scope (thuộc quyền quản trị viên). `email` bỏ trống → lưu NULL; trùng email của tài khoản khác → 400 `EMAIL_TAKEN` (bắt `DataIntegrityViolationException` vì unique là toàn platform trong khi `TenantUser` gắn `@TenantId` nên query kiểm tra trước chỉ thấy trong 1 tenant) |
 
 `MeResponse`: `{ id, username, fullName, email, type, tenantId, authorities: string[], organizationPath: string | null }` (`type` = `PLATFORM_USER`/`TENANT_USER`, `tenantId` NULL cho platform user). `organizationPath` chỉ có ở `tenant_user` — chuỗi "TênRoot → Tên2 → ... → TênNode hiện tại" build từ `tenant_node.path` theo scope (`user_role_scope`); nhiều scope thì nối bằng `"; "`; full-access (`tenant_node_id NULL`) hiện tên node TENANT_ROOT.
 

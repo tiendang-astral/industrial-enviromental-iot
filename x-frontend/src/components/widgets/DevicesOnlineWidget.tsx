@@ -1,5 +1,5 @@
 import { memo, useState } from 'react'
-import { Wifi, WifiOff } from 'lucide-react'
+import { Activity, Wifi, WifiOff } from 'lucide-react'
 import { Widget } from '@/components/widgets/Widget'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -22,11 +22,11 @@ export const DevicesOnlineWidget = memo(function DevicesOnlineWidget({
 
   return (
     <Widget>
-      <Widget.Header title={widget.title} />
+      <Widget.Header title={widget.title} icon={Activity} iconClassName="text-ok" />
       <Widget.Body className="flex-row items-stretch gap-2">
         <div className="flex min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-lg bg-muted/40 py-2">
-          <Wifi className="size-5 shrink-0 text-emerald-600" />
-          <p className="truncate text-xl font-semibold tabular-nums">{onlineCount}</p>
+          <Wifi className="size-5 shrink-0 text-ok" />
+          <p className="truncate text-xl font-semibold tabular">{onlineCount}</p>
           <p className="text-xs text-muted-foreground">online</p>
         </div>
 
@@ -41,7 +41,7 @@ export const DevicesOnlineWidget = memo(function DevicesOnlineWidget({
                 }`}
               >
                 <WifiOff className={`size-5 shrink-0 ${hasOffline ? 'text-destructive' : 'text-muted-foreground'}`} />
-                <p className="truncate text-xl font-semibold tabular-nums">{offlineDevices.length}</p>
+                <p className="truncate text-xl font-semibold tabular">{offlineDevices.length}</p>
                 <p className="text-xs text-muted-foreground">offline</p>
               </button>
             </TooltipTrigger>

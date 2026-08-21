@@ -6,6 +6,7 @@ import { queryClient } from '@/app/queryClient'
 import { router } from '@/app/router'
 import { refresh } from '@/services/authService'
 import { useAuthStore } from '@/stores/useAuthStore'
+import { useThemeStore } from '@/stores/useThemeStore'
 
 /**
  * Attempts a silent `/auth/refresh` once on app boot, using the httpOnly
@@ -51,12 +52,15 @@ function AuthBootstrap({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
+  // sonner mặc định theme="light" — không truyền prop thì toast trắng lốp trên nền dark.
+  const theme = useThemeStore((state) => state.theme)
+
   return (
     <QueryClientProvider client={queryClient}>
       <AuthBootstrap>
         <RouterProvider router={router} />
       </AuthBootstrap>
-      <Toaster richColors position="top-right" />
+      <Toaster theme={theme} richColors closeButton position="top-right" />
     </QueryClientProvider>
   )
 }

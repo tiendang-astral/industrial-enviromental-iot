@@ -1,15 +1,16 @@
-import { createBrowserRouter } from 'react-router-dom'
+import { Navigate, createBrowserRouter } from 'react-router-dom'
 import { RequireAuth } from '@/app/RequireAuth'
 import AppShell from '@/components/layout/AppShell'
+import AlertsPage from '@/pages/AlertsPage'
 import DashboardOverviewRedirect from '@/pages/DashboardOverviewRedirect'
 import DashboardPage from '@/pages/DashboardPage'
 import DataSourceDetailPage from '@/pages/DataSourceDetailPage'
 import DataSourcesPage from '@/pages/DataSourcesPage'
 import DevicesPage from '@/pages/DevicesPage'
 import GatewayDetailPage from '@/pages/GatewayDetailPage'
-import HomePage from '@/pages/HomePage'
 import LoginPage from '@/pages/LoginPage'
 import OrganizationPage from '@/pages/OrganizationPage'
+import ReportsPage from '@/pages/ReportsPage'
 import SiteDetailPage from '@/pages/SiteDetailPage'
 import SourceDashboardPage from '@/pages/SourceDashboardPage'
 
@@ -26,7 +27,7 @@ export const router = createBrowserRouter([
         children: [
           {
             path: '/',
-            element: <HomePage />,
+            element: <Navigate to="/dashboard" replace />,
           },
           {
             path: '/organization',
@@ -63,6 +64,14 @@ export const router = createBrowserRouter([
           {
             path: '/dashboard/source/:sourceId',
             element: <SourceDashboardPage />,
+          },
+          {
+            path: '/alerts',
+            element: <AlertsPage />,
+          },
+          {
+            path: '/reports',
+            element: <ReportsPage />,
           },
         ],
       },

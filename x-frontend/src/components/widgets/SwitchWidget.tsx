@@ -1,4 +1,5 @@
 import { memo } from 'react'
+import { Power } from 'lucide-react'
 import { Widget } from '@/components/widgets/Widget'
 import { RelaySwitch } from '@/components/RelaySwitch'
 import { useGatewayPinsQuery } from '@/queries/useGatewayPinsQuery'
@@ -19,7 +20,7 @@ export const SwitchWidget = memo(function SwitchWidget({ widget, commandUpdates 
 
   return (
     <Widget>
-      <Widget.Header title={widget.title} />
+      <Widget.Header title={widget.title} icon={Power} iconClassName="text-muted-foreground" />
       <Widget.Body className="flex-row items-center justify-between">
         <p className="text-sm text-muted-foreground">
           {pin ? (pin.powerReportedState === 'ON' ? 'Đang bật' : 'Đang tắt') : 'Chưa có dữ liệu'}

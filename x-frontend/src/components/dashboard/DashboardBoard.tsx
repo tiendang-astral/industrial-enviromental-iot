@@ -5,6 +5,9 @@ import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
 import { LayoutGrid, Pencil, Plus, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { EmptyState } from '@/components/patterns/EmptyState'
 import { AddWidgetDialog } from '@/components/widgets/AddWidgetDialog'
 import { DeviceListWidget } from '@/components/widgets/DeviceListWidget'
 import { DevicesOnlineWidget } from '@/components/widgets/DevicesOnlineWidget'
@@ -15,6 +18,9 @@ import { nextWidgetLayout } from '@/lib/dashboardLayout'
 import { useDashboardStore } from '@/stores/useDashboardStore'
 import type { CommandUpdate } from '@/types/command'
 import type { Dashboard, Datastream, DatastreamReading, Widget as WidgetT, WidgetType } from '@/types/dashboard'
+import type { Metric } from '@/types/metric'
+
+const EMPTY_METRIC_BY_CODE = new Map<string, Metric>()
 
 const GRID_COLS = 12
 const ROW_HEIGHT = 60
@@ -26,6 +32,8 @@ interface DashboardBoardProps {
   dashboard: Dashboard | undefined
   isLoading: boolean
   datastreams: Datastream[]
+  /** metric.code -> Metric — dùng color-code ValueWidget theo minValue/maxValue. Không truyền = không tô màu ngưỡng. */
+  metricByCode?: Map<string, Metric>
   /** Context cho widget DEVICE_LIST/DEVICES_ONLINE — node đứng sau board này. */
   tenantNodeId: number
   /** false = board theo nguồn (external_source) — không có khái niệm gateway/subtree. */
@@ -47,6 +55,7 @@ export function DashboardBoard({
   dashboard,
   isLoading,
   datastreams,
+  metricByCode = EMPTY_METRIC_BY_CODE,
   tenantNodeId,
   allowDeviceWidgets,
   readings,
@@ -138,36 +147,58 @@ export function DashboardBoard({
   const rows = Math.max(2, committedMaxRow, liveMaxRow) + 1
   const gridPixelHeight = rows * ROW_HEIGHT + (rows + 1) * MARGIN[1]
 
+  function startAddingWidget() {
+    if (!editMode) toggleEditMode()
+    setIsAddWidgetOpen(true)
+  }
+
   if (isLoading) {
-    return <p className="text-sm text-muted-foreground">Đang tải...</p>
+    return (
+      <div className="flex flex-col gap-4">
+        <div className="flex items-center justify-between gap-2">
+          {leftHeader}
+          <Skeleton className="h-8 w-24" />
+        </div>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <Skeleton key={index} className="h-32 rounded-xl" />
+          ))}
+        </div>
+      </div>
+    )
   }
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between gap-2">
         {leftHeader}
         <div className="flex items-center gap-2">
           {editMode && (
             <Button size="sm" variant="outline" onClick={() => setIsAddWidgetOpen(true)}>
-              <Plus />
+              <Plus data-icon="inline-start" />
               Thêm widget
             </Button>
           )}
           {extraActions}
           <Button size="sm" variant={editMode ? 'default' : 'outline'} onClick={toggleEditMode}>
-            <Pencil />
+            <Pencil data-icon="inline-start" />
             {editMode ? 'Xong' : 'Chỉnh sửa'}
           </Button>
         </div>
       </div>
 
       {widgets.length === 0 && (
-        <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border py-16 text-center">
-          <LayoutGrid className="size-8 text-muted-foreground" />
-          <p className="text-sm text-muted-foreground">
-            Chưa có widget nào — bấm "Chỉnh sửa" → "Thêm widget" để bắt đầu
-          </p>
-        </div>
+        <EmptyState
+          icon={LayoutGrid}
+          title="Bảng điều khiển đang trống"
+          description="Widget là các ô hiển thị số liệu, biểu đồ và công tắc điều khiển. Thêm widget đầu tiên để bắt đầu theo dõi."
+          action={
+            <Button variant="outline" onClick={startAddingWidget}>
+              <Plus data-icon="inline-start" />
+              Thêm widget
+            </Button>
+          }
+        />
       )}
 
       <div
@@ -203,14 +234,19 @@ export function DashboardBoard({
               {widgets.map((widget) => (
                 <div key={widget.id} className="group relative overflow-hidden">
                   {editMode && (
-                    <button
-                      type="button"
-                      className="absolute -right-2 -top-2 z-10 flex size-6 items-center justify-center rounded-full border border-border bg-background text-muted-foreground opacity-0 shadow-sm transition-opacity hover:text-destructive group-hover:opacity-100"
-                      onClick={() => handleDeleteWidget(widget.id)}
-                      title="Xóa widget"
-                    >
-                      <X className="size-3.5" />
-                    </button>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          className="absolute -top-2 -right-2 z-10 flex size-6 items-center justify-center rounded-full border border-border bg-background text-muted-foreground opacity-0 shadow-sm transition-opacity duration-(--motion-fast) hover:text-destructive focus-visible:opacity-100 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none group-hover:opacity-100"
+                          onClick={() => handleDeleteWidget(widget.id)}
+                        >
+                          <X className="size-3.5" />
+                          <span className="sr-only">Xóa widget {widget.title}</span>
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent>Xóa widget</TooltipContent>
+                    </Tooltip>
                   )}
                   <WidgetRenderer
                     widget={widget}
@@ -219,6 +255,7 @@ export function DashboardBoard({
                       widget.binding?.datastreamId != null ? datastreamById.get(widget.binding.datastreamId) : undefined
                     }
                     reading={widget.binding?.datastreamId != null ? readings[widget.binding.datastreamId] : undefined}
+                    metricByCode={metricByCode}
                     commandUpdates={commandUpdates}
                   />
                 </div>
@@ -248,17 +285,26 @@ const WidgetRenderer = memo(function WidgetRenderer({
   tenantNodeId,
   datastream,
   reading,
+  metricByCode,
   commandUpdates,
 }: {
   widget: WidgetT
   tenantNodeId: number
   datastream?: Datastream
   reading?: DatastreamReading
+  metricByCode: Map<string, Metric>
   commandUpdates: Record<string, CommandUpdate>
 }) {
   switch (widget.type) {
     case 'VALUE':
-      return <ValueWidget widget={widget} datastream={datastream} reading={reading} />
+      return (
+        <ValueWidget
+          widget={widget}
+          datastream={datastream}
+          reading={reading}
+          metric={datastream?.metricCode ? metricByCode.get(datastream.metricCode) : undefined}
+        />
+      )
     case 'LINE':
       return <LineWidget widget={widget} datastream={datastream} reading={reading} />
     case 'DEVICE_LIST':

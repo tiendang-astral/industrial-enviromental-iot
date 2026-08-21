@@ -1,13 +1,16 @@
 import { useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft } from 'lucide-react'
+import { ChevronLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { DashboardBoard } from '@/components/dashboard/DashboardBoard'
 import { useRealtimeGatewaySocket } from '@/hooks/useRealtimeGatewaySocket'
 import { useDatastreamsByExternalSourceQuery } from '@/queries/useDatastreamsByExternalSourceQuery'
+import { useMetricsQuery } from '@/queries/useMetricsQuery'
 import { useSaveSourceDashboardLayoutMutation } from '@/queries/useSaveSourceDashboardLayoutMutation'
 import { useSourceDashboardQuery } from '@/queries/useSourceDashboardQuery'
 import type { DatastreamReading } from '@/types/dashboard'
+import type { Metric } from '@/types/metric'
 
 /**
  * Dashboard riêng theo 1 external_source (layout riêng, chỉ VALUE/LINE) — xem
@@ -19,8 +22,14 @@ export default function SourceDashboardPage() {
 
   const { data: dashboard, isLoading } = useSourceDashboardQuery(externalSourceId)
   const { data: datastreams } = useDatastreamsByExternalSourceQuery(externalSourceId)
+  const { data: metrics } = useMetricsQuery()
   const { saveDebounced, saveNow } = useSaveSourceDashboardLayoutMutation(externalSourceId)
   const datastreamList = useMemo(() => datastreams ?? [], [datastreams])
+  const metricByCode = useMemo(() => {
+    const map = new Map<string, Metric>()
+    metrics?.forEach((metric) => map.set(metric.code, metric))
+    return map
+  }, [metrics])
 
   const [readings, setReadings] = useState<Record<number, DatastreamReading>>({})
 
@@ -39,13 +48,23 @@ export default function SourceDashboardPage() {
   })
 
   const leftHeader = (
-    <div className="flex items-center gap-2">
-      <Button variant="ghost" size="icon" className="size-7" asChild>
-        <Link to={dashboard?.tenantNodeId ? `/dashboard/${dashboard.tenantNodeId}` : '/dashboard'}>
-          <ArrowLeft className="size-4" />
-        </Link>
-      </Button>
-      <h2 className="text-lg font-semibold">{dashboard?.name ?? 'Dashboard theo nguồn'}</h2>
+    <div className="flex min-w-0 items-center gap-2">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button variant="ghost" size="icon" className="size-8 shrink-0" asChild>
+            <Link
+              to={dashboard?.tenantNodeId ? `/dashboard/${dashboard.tenantNodeId}` : '/dashboard'}
+            >
+              <ChevronLeft />
+              <span className="sr-only">Quay lại bảng điều khiển của đơn vị</span>
+            </Link>
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Quay lại bảng điều khiển của đơn vị</TooltipContent>
+      </Tooltip>
+      <h1 className="truncate text-lg font-semibold">
+        {dashboard?.name ?? 'Bảng điều khiển theo nguồn'}
+      </h1>
     </div>
   )
 
@@ -55,6 +74,7 @@ export default function SourceDashboardPage() {
       dashboard={dashboard}
       isLoading={isLoading}
       datastreams={datastreamList}
+      metricByCode={metricByCode}
       tenantNodeId={dashboard?.tenantNodeId ?? 0}
       allowDeviceWidgets={false}
       readings={readings}

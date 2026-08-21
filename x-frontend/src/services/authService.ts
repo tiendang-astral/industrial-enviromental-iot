@@ -1,6 +1,12 @@
 import { httpClient } from '@/services/httpClient'
 import type { ApiEnvelope } from '@/types/api'
-import type { ChangePasswordRequest, LoginRequest, LoginResponse, MeResponse } from '@/types/auth'
+import type {
+  ChangePasswordRequest,
+  LoginRequest,
+  LoginResponse,
+  MeResponse,
+  UpdateMeRequest,
+} from '@/types/auth'
 
 export async function login(payload: LoginRequest): Promise<LoginResponse> {
   const { data } = await httpClient.post<ApiEnvelope<LoginResponse>>('/tenant/auth/login', payload)
@@ -18,6 +24,11 @@ export async function logout(): Promise<void> {
 
 export async function getMe(): Promise<MeResponse> {
   const { data } = await httpClient.get<ApiEnvelope<MeResponse>>('/me')
+  return data.data!
+}
+
+export async function updateMe(payload: UpdateMeRequest): Promise<MeResponse> {
+  const { data } = await httpClient.put<ApiEnvelope<MeResponse>>('/me', payload)
   return data.data!
 }
 

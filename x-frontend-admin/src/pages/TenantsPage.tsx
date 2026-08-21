@@ -3,28 +3,17 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useForm } from 'react-hook-form'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Eye, Lock, LockOpen, Plus } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
+import { Building2, Eye, Lock, LockOpen, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@/components/ui/dialog'
+import { Field, FieldError, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { ConfirmDialog } from '@/components/patterns/ConfirmDialog'
+import { DataTable, type DataTableColumn } from '@/components/patterns/DataTable'
+import { EmptyState } from '@/components/patterns/EmptyState'
+import { FormDialog } from '@/components/patterns/FormDialog'
+import { PageHeader } from '@/components/patterns/PageHeader'
+import { StatusBadge } from '@/components/patterns/StatusBadge'
 import { getApiError, getApiErrorMessage } from '@/lib/apiError'
 import {
   createTenantSchema,
@@ -36,12 +25,13 @@ import { useUpdateTenantStatusMutation } from '@/queries/useUpdateTenantStatusMu
 import type { Tenant } from '@/types/tenant'
 
 function formatDate(value: string) {
-  return new Date(value).toLocaleString('vi-VN')
+  return new Date(value).toLocaleDateString('vi-VN')
 }
 
 export default function TenantsPage() {
   const { data: tenants, isLoading } = useTenantsQuery()
   const [isCreateOpen, setIsCreateOpen] = useState(false)
+  const [statusTarget, setStatusTarget] = useState<Tenant | null>(null)
   const createTenantMutation = useCreateTenantMutation()
   const updateStatusMutation = useUpdateTenantStatusMutation()
 
@@ -63,30 +53,39 @@ export default function TenantsPage() {
     },
   })
 
-  const onSubmit = (values: CreateTenantFormValues) => {
-    createTenantMutation.mutate({ ...values, adminEmail: values.adminEmail || undefined }, {
-      onSuccess: () => {
-        setIsCreateOpen(false)
-        reset()
-        toast.success('Tạo tenant thành công')
-      },
-      onError: (error) => {
-        const apiError = getApiError(error)
-        if (apiError?.code === 'USERNAME_TAKEN') {
-          setError('adminUsername', { message: apiError.message })
-        } else {
-          toast.error(apiError?.message ?? 'Tạo tenant thất bại, vui lòng thử lại')
-        }
-      },
-    })
+  function openCreate(open: boolean) {
+    setIsCreateOpen(open)
+    if (!open) reset()
   }
 
-  function handleToggleStatus(tenant: Tenant) {
-    const nextStatus = tenant.status === 'ACTIVE' ? 'LOCKED' : 'ACTIVE'
-    updateStatusMutation.mutate(
-      { id: tenant.id, status: nextStatus },
+  const onSubmit = (values: CreateTenantFormValues) => {
+    createTenantMutation.mutate(
+      { ...values, adminEmail: values.adminEmail || undefined },
       {
         onSuccess: () => {
+          openCreate(false)
+          toast.success('Tạo tenant thành công')
+        },
+        onError: (error) => {
+          const apiError = getApiError(error)
+          if (apiError?.code === 'USERNAME_TAKEN') {
+            setError('adminUsername', { message: apiError.message })
+          } else {
+            toast.error(apiError?.message ?? 'Tạo tenant thất bại, vui lòng thử lại')
+          }
+        },
+      }
+    )
+  }
+
+  function confirmToggleStatus() {
+    if (!statusTarget) return
+    const nextStatus = statusTarget.status === 'ACTIVE' ? 'LOCKED' : 'ACTIVE'
+    updateStatusMutation.mutate(
+      { id: statusTarget.id, status: nextStatus },
+      {
+        onSuccess: () => {
+          setStatusTarget(null)
           toast.success(nextStatus === 'ACTIVE' ? 'Đã kích hoạt tenant' : 'Đã khóa tenant')
         },
         onError: (error) => {
@@ -96,160 +95,187 @@ export default function TenantsPage() {
     )
   }
 
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Tenant</h2>
-        <Dialog
-          open={isCreateOpen}
-          onOpenChange={(open) => {
-            setIsCreateOpen(open)
-            if (!open) reset()
-          }}
-        >
-          <DialogTrigger asChild>
-            <Button>
-              <Plus />
-              Tạo tenant
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Tạo tenant mới</DialogTitle>
-              <DialogDescription>
-                Tạo tenant và tài khoản Tenant Admin đầu tiên cho tenant này.
-              </DialogDescription>
-            </DialogHeader>
-            <form className="space-y-4" onSubmit={handleSubmit(onSubmit)} noValidate>
-              <div className="space-y-1.5">
-                <Label htmlFor="name">Tên tenant</Label>
-                <Input id="name" aria-invalid={!!errors.name} {...register('name')} />
-                {errors.name && (
-                  <p className="text-sm text-destructive">{errors.name.message}</p>
-                )}
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="email">Email tenant</Label>
-                <Input id="email" aria-invalid={!!errors.email} {...register('email')} />
-                {errors.email && (
-                  <p className="text-sm text-destructive">{errors.email.message}</p>
-                )}
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="col-span-2 space-y-1.5">
-                  <Label htmlFor="adminUsername">Username admin</Label>
-                  <Input
-                    id="adminUsername"
-                    aria-invalid={!!errors.adminUsername}
-                    {...register('adminUsername')}
-                  />
-                  {errors.adminUsername && (
-                    <p className="text-sm text-destructive">{errors.adminUsername.message}</p>
-                  )}
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="adminFullName">Họ tên admin</Label>
-                  <Input
-                    id="adminFullName"
-                    aria-invalid={!!errors.adminFullName}
-                    {...register('adminFullName')}
-                  />
-                  {errors.adminFullName && (
-                    <p className="text-sm text-destructive">{errors.adminFullName.message}</p>
-                  )}
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="adminEmail">Email admin</Label>
-                  <Input
-                    id="adminEmail"
-                    aria-invalid={!!errors.adminEmail}
-                    {...register('adminEmail')}
-                  />
-                  {errors.adminEmail && (
-                    <p className="text-sm text-destructive">{errors.adminEmail.message}</p>
-                  )}
-                </div>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="adminPassword">Mật khẩu admin</Label>
-                <Input
-                  id="adminPassword"
-                  type="password"
-                  aria-invalid={!!errors.adminPassword}
-                  {...register('adminPassword')}
-                />
-                {errors.adminPassword && (
-                  <p className="text-sm text-destructive">{errors.adminPassword.message}</p>
-                )}
-              </div>
-              <DialogFooter>
-                <Button type="submit" disabled={createTenantMutation.isPending}>
-                  {createTenantMutation.isPending ? 'Đang tạo...' : 'Tạo tenant'}
-                </Button>
-              </DialogFooter>
-            </form>
-          </DialogContent>
-        </Dialog>
-      </div>
+  const columns: DataTableColumn<Tenant>[] = [
+    {
+      key: 'name',
+      header: 'Tên tenant',
+      sortValue: (row) => row.name,
+      cell: (row) => (
+        <Link to={`/tenants/${row.id}`} className="font-medium hover:underline">
+          {row.name}
+        </Link>
+      ),
+    },
+    {
+      key: 'email',
+      header: 'Email',
+      sortValue: (row) => row.email,
+      cell: (row) => <span className="text-muted-foreground">{row.email}</span>,
+    },
+    {
+      key: 'status',
+      header: 'Trạng thái',
+      sortValue: (row) => row.status,
+      cell: (row) => <StatusBadge status={row.status} />,
+    },
+    {
+      key: 'createdAt',
+      header: 'Ngày tạo',
+      sortValue: (row) => row.createdAt,
+      cell: (row) => <span className="tabular text-muted-foreground">{formatDate(row.createdAt)}</span>,
+    },
+    {
+      key: 'actions',
+      header: 'Tác vụ',
+      headerClassName: 'w-24 text-right',
+      className: 'text-right',
+      cell: (row) => (
+        <div className="flex items-center justify-end gap-1">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon" className="size-7" asChild>
+                <Link to={`/tenants/${row.id}`}>
+                  <Eye />
+                  <span className="sr-only">Xem chi tiết</span>
+                </Link>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Xem chi tiết</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-7"
+                onClick={() => setStatusTarget(row)}
+              >
+                {row.status === 'ACTIVE' ? <Lock /> : <LockOpen />}
+                <span className="sr-only">
+                  {row.status === 'ACTIVE' ? 'Khóa tenant' : 'Kích hoạt tenant'}
+                </span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {row.status === 'ACTIVE' ? 'Khóa tenant' : 'Kích hoạt tenant'}
+            </TooltipContent>
+          </Tooltip>
+        </div>
+      ),
+    },
+  ]
 
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Tên tenant</TableHead>
-            <TableHead>Email</TableHead>
-            <TableHead>Trạng thái</TableHead>
-            <TableHead>Ngày tạo</TableHead>
-            <TableHead className="w-24">Tác vụ</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {isLoading && (
-            <TableRow>
-              <TableCell colSpan={5} className="text-center text-muted-foreground">
-                Đang tải...
-              </TableCell>
-            </TableRow>
-          )}
-          {!isLoading && tenants?.length === 0 && (
-            <TableRow>
-              <TableCell colSpan={5} className="text-center text-muted-foreground">
-                Chưa có tenant nào
-              </TableCell>
-            </TableRow>
-          )}
-          {tenants?.map((tenant) => (
-            <TableRow key={tenant.id}>
-              <TableCell className="font-medium">{tenant.name}</TableCell>
-              <TableCell>{tenant.email}</TableCell>
-              <TableCell>
-                <Badge variant={tenant.status === 'ACTIVE' ? 'default' : 'outline'}>
-                  {tenant.status}
-                </Badge>
-              </TableCell>
-              <TableCell>{formatDate(tenant.createdAt)}</TableCell>
-              <TableCell>
-                <div className="flex items-center gap-1">
-                  <Button variant="ghost" size="icon" className="size-7" title="Xem chi tiết" asChild>
-                    <Link to={`/tenants/${tenant.id}`}>
-                      <Eye className="size-4" />
-                    </Link>
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="size-7"
-                    title={tenant.status === 'ACTIVE' ? 'Khóa tenant' : 'Kích hoạt tenant'}
-                    disabled={updateStatusMutation.isPending}
-                    onClick={() => handleToggleStatus(tenant)}
-                  >
-                    {tenant.status === 'ACTIVE' ? <Lock className="size-4" /> : <LockOpen className="size-4" />}
-                  </Button>
-                </div>
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+  return (
+    <div className="flex flex-col gap-6">
+      <PageHeader
+        title="Tổ chức"
+        description="Danh sách tenant đang dùng nền tảng và trạng thái truy cập của họ."
+        actions={
+          <Button onClick={() => openCreate(true)}>
+            <Plus data-icon="inline-start" />
+            Tạo tenant
+          </Button>
+        }
+      />
+
+      <DataTable
+        columns={columns}
+        rows={tenants}
+        getRowId={(row) => row.id}
+        isLoading={isLoading}
+        searchable={{
+          placeholder: 'Tìm theo tên hoặc email',
+          getText: (row) => `${row.name} ${row.email}`,
+        }}
+        empty={
+          <EmptyState
+            icon={Building2}
+            title="Chưa có tenant nào"
+            description="Tạo tenant đầu tiên để bắt đầu cấp quyền sử dụng nền tảng."
+            action={
+              <Button onClick={() => openCreate(true)}>
+                <Plus data-icon="inline-start" />
+                Tạo tenant
+              </Button>
+            }
+          />
+        }
+      />
+
+      <FormDialog
+        open={isCreateOpen}
+        onOpenChange={openCreate}
+        title="Tạo tenant mới"
+        description="Tạo tenant và tài khoản Tenant Admin đầu tiên cho tenant này."
+        submitLabel="Tạo tenant"
+        isPending={createTenantMutation.isPending}
+        onSubmit={handleSubmit(onSubmit)}
+      >
+        <Field data-invalid={!!errors.name}>
+          <FieldLabel htmlFor="name">Tên tenant</FieldLabel>
+          <Input id="name" aria-invalid={!!errors.name} {...register('name')} />
+          <FieldError errors={[errors.name]} />
+        </Field>
+        <Field data-invalid={!!errors.email}>
+          <FieldLabel htmlFor="email">Email tenant</FieldLabel>
+          <Input id="email" aria-invalid={!!errors.email} {...register('email')} />
+          <FieldError errors={[errors.email]} />
+        </Field>
+        <Field data-invalid={!!errors.adminUsername}>
+          <FieldLabel htmlFor="adminUsername">Username admin</FieldLabel>
+          <Input
+            id="adminUsername"
+            aria-invalid={!!errors.adminUsername}
+            {...register('adminUsername')}
+          />
+          <FieldError errors={[errors.adminUsername]} />
+        </Field>
+        <div className="grid gap-5 sm:grid-cols-2">
+          <Field data-invalid={!!errors.adminFullName}>
+            <FieldLabel htmlFor="adminFullName">Họ tên admin</FieldLabel>
+            <Input
+              id="adminFullName"
+              aria-invalid={!!errors.adminFullName}
+              {...register('adminFullName')}
+            />
+            <FieldError errors={[errors.adminFullName]} />
+          </Field>
+          <Field data-invalid={!!errors.adminEmail}>
+            <FieldLabel htmlFor="adminEmail">Email admin</FieldLabel>
+            <Input
+              id="adminEmail"
+              aria-invalid={!!errors.adminEmail}
+              {...register('adminEmail')}
+            />
+            <FieldError errors={[errors.adminEmail]} />
+          </Field>
+        </div>
+        <Field data-invalid={!!errors.adminPassword}>
+          <FieldLabel htmlFor="adminPassword">Mật khẩu admin</FieldLabel>
+          <Input
+            id="adminPassword"
+            type="password"
+            aria-invalid={!!errors.adminPassword}
+            {...register('adminPassword')}
+          />
+          <FieldError errors={[errors.adminPassword]} />
+        </Field>
+      </FormDialog>
+
+      <ConfirmDialog
+        open={!!statusTarget}
+        onOpenChange={(open) => !open && setStatusTarget(null)}
+        title={statusTarget?.status === 'ACTIVE' ? 'Khóa tenant này?' : 'Kích hoạt lại tenant?'}
+        description={
+          statusTarget?.status === 'ACTIVE'
+            ? `Toàn bộ người dùng của "${statusTarget?.name}" sẽ không đăng nhập được và phiên đang mở sẽ bị thu hồi. Dữ liệu cảm biến vẫn tiếp tục được thu thập.`
+            : `Người dùng của "${statusTarget?.name}" sẽ đăng nhập lại được ngay sau khi kích hoạt.`
+        }
+        confirmLabel={statusTarget?.status === 'ACTIVE' ? 'Khóa tenant' : 'Kích hoạt'}
+        destructive={statusTarget?.status === 'ACTIVE'}
+        isPending={updateStatusMutation.isPending}
+        onConfirm={confirmToggleStatus}
+      />
     </div>
   )
 }

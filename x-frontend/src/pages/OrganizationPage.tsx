@@ -1,21 +1,24 @@
 import { useMemo, useState } from 'react'
-import { zodResolver } from '@hookform/resolvers/zod'
-import { useForm } from 'react-hook-form'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Building, Building2, Lock, LockOpen, MapPin, MoveRight, Pencil, Plus, Router, Trash2, Warehouse } from 'lucide-react'
-import { Button } from '@/components/ui/button'
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
-import { Input } from '@/components/ui/input'
+  Building,
+  Building2,
+  MapPin,
+  MoveRight,
+  Network,
+  Pencil,
+  Plus,
+  Power,
+  PowerOff,
+  Router,
+  Trash2,
+  Warehouse,
+} from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
 import { TableCell, TableRow } from '@/components/ui/table'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   Table,
   TableBody,
@@ -28,28 +31,20 @@ import {
   TreeTableStatusBadge,
   useTreeTableRows,
 } from '@/components/shared/TreeTable'
+import { ConfirmDialog } from '@/components/patterns/ConfirmDialog'
+import { EmptyState } from '@/components/patterns/EmptyState'
+import { PageHeader } from '@/components/patterns/PageHeader'
+import {
+  CreateNodeDialog,
+  MoveNodeDialog,
+  RenameNodeDialog,
+} from '@/components/organization/NodeDialogs'
 import { getApiErrorMessage } from '@/lib/apiError'
-import { nodeNameSchema, type NodeNameFormValues } from '@/lib/tenantNodeSchema'
-import { useCreateTenantNodeMutation } from '@/queries/useCreateTenantNodeMutation'
+import { NEXT_TYPE, NODE_LABEL } from '@/lib/tenantNodeLabels'
 import { useDeleteTenantNodeMutation } from '@/queries/useDeleteTenantNodeMutation'
-import { useMoveTenantNodeMutation } from '@/queries/useMoveTenantNodeMutation'
-import { useRenameTenantNodeMutation } from '@/queries/useRenameTenantNodeMutation'
 import { useTenantNodesQuery } from '@/queries/useTenantNodesQuery'
 import { useUpdateTenantNodeStatusMutation } from '@/queries/useUpdateTenantNodeStatusMutation'
 import type { NodeType, TenantNode } from '@/types/tenantNode'
-
-const NEXT_TYPE: Partial<Record<NodeType, NodeType>> = {
-  TENANT_ROOT: 'BRANCH',
-  BRANCH: 'PRODUCTION_AREA',
-  PRODUCTION_AREA: 'SITE',
-}
-
-const NODE_LABEL: Record<NodeType, string> = {
-  TENANT_ROOT: 'Công ty',
-  BRANCH: 'Chi nhánh',
-  PRODUCTION_AREA: 'Khu sản xuất',
-  SITE: 'Xưởng/Chuồng trại',
-}
 
 const NODE_ICON: Record<NodeType, typeof Building2> = {
   TENANT_ROOT: Building2,
@@ -80,6 +75,53 @@ function orderNodesDepthFirst(nodes: TenantNode[]): TenantNode[] {
   return result
 }
 
+/** Nút icon trong hàng cây — luôn kèm Tooltip + sr-only để không phải đoán ý nghĩa icon. */
+function RowAction({
+  label,
+  icon: Icon,
+  onClick,
+  to,
+  destructive,
+  disabled,
+}: {
+  label: string
+  icon: typeof Plus
+  onClick?: () => void
+  to?: string
+  destructive?: boolean
+  disabled?: boolean
+}) {
+  const button = (
+    <Button
+      variant="ghost"
+      size="icon"
+      className={destructive ? 'size-7 text-destructive hover:text-destructive' : 'size-7'}
+      disabled={disabled}
+      onClick={onClick}
+      asChild={!!to}
+    >
+      {to ? (
+        <Link to={to}>
+          <Icon />
+          <span className="sr-only">{label}</span>
+        </Link>
+      ) : (
+        <>
+          <Icon />
+          <span className="sr-only">{label}</span>
+        </>
+      )}
+    </Button>
+  )
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{button}</TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  )
+}
+
 export default function OrganizationPage() {
   const { data: nodes, isLoading } = useTenantNodesQuery()
   const orderedNodes = useMemo(() => (nodes ? orderNodesDepthFirst(nodes) : []), [nodes])
@@ -89,42 +131,52 @@ export default function OrganizationPage() {
   const [renameTarget, setRenameTarget] = useState<TenantNode | null>(null)
   const [moveTarget, setMoveTarget] = useState<TenantNode | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<TenantNode | null>(null)
+  const [disableTarget, setDisableTarget] = useState<TenantNode | null>(null)
 
   const deleteMutation = useDeleteTenantNodeMutation()
   const updateStatusMutation = useUpdateTenantNodeStatusMutation()
 
-  function handleDelete() {
+  function confirmDelete() {
     if (!deleteTarget) return
     deleteMutation.mutate(deleteTarget.id, {
       onSuccess: () => {
         setDeleteTarget(null)
         toast.success('Xóa thành công')
       },
-      onError: (error) => {
-        toast.error(getApiErrorMessage(error, 'Xóa thất bại, vui lòng thử lại'))
-      },
+      onError: (error) => toast.error(getApiErrorMessage(error, 'Xóa thất bại, vui lòng thử lại')),
     })
   }
 
-  function handleToggleStatus(node: TenantNode) {
+  function toggleStatus(node: TenantNode, onDone?: () => void) {
     updateStatusMutation.mutate(
       { id: node.id, payload: { enabled: !node.enabled } },
       {
         onSuccess: () => {
-          toast.success(node.enabled ? 'Đã tắt' : 'Đã bật lại')
+          onDone?.()
+          toast.success(node.enabled ? 'Đã tắt đơn vị' : 'Đã bật lại đơn vị')
         },
-        onError: (error) => {
-          toast.error(getApiErrorMessage(error, 'Cập nhật trạng thái thất bại'))
-        },
+        onError: (error) =>
+          toast.error(getApiErrorMessage(error, 'Cập nhật trạng thái thất bại')),
       }
     )
   }
 
+  const rootNode = nodes?.find((node) => node.nodeType === 'TENANT_ROOT')
+
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Tổ chức</h2>
-      </div>
+    <div className="flex flex-col gap-6">
+      <PageHeader
+        title="Tổ chức"
+        description="Cây đơn vị của tenant: Công ty → Chi nhánh → Khu sản xuất → Xưởng/Chuồng trại."
+        actions={
+          rootNode && (
+            <Button onClick={() => setCreateParent(rootNode)}>
+              <Plus data-icon="inline-start" />
+              Thêm chi nhánh
+            </Button>
+          )
+        }
+      />
 
       <TreeTableContainer>
         <Table>
@@ -133,21 +185,35 @@ export default function OrganizationPage() {
               <TreeTableHead>Tên</TreeTableHead>
               <TreeTableHead>Loại</TreeTableHead>
               <TreeTableHead>Trạng thái</TreeTableHead>
-              <TreeTableHead className="w-56">Hành động</TreeTableHead>
+              <TreeTableHead className="w-56 text-right">Tác vụ</TreeTableHead>
             </TableRow>
           </TreeTableHeader>
           <TableBody>
-            {isLoading && (
-              <TableRow>
-                <TableCell colSpan={4} className="text-center text-muted-foreground">
-                  Đang tải...
-                </TableCell>
-              </TableRow>
-            )}
+            {isLoading &&
+              Array.from({ length: 5 }).map((_, index) => (
+                <TableRow key={index} className="h-11">
+                  <TableCell>
+                    <Skeleton className="h-4 w-40" style={{ marginLeft: `${(index % 3) * 16}px` }} />
+                  </TableCell>
+                  <TableCell>
+                    <Skeleton className="h-4 w-20" />
+                  </TableCell>
+                  <TableCell>
+                    <Skeleton className="h-5 w-16 rounded-4xl" />
+                  </TableCell>
+                  <TableCell>
+                    <Skeleton className="ml-auto h-7 w-32" />
+                  </TableCell>
+                </TableRow>
+              ))}
             {!isLoading && rows.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={4} className="text-center text-muted-foreground">
-                  Chưa có node tổ chức nào
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={4} className="py-10">
+                  <EmptyState
+                    icon={Network}
+                    title="Chưa có đơn vị nào"
+                    description="Cây tổ chức bắt đầu từ đơn vị gốc của tenant. Liên hệ quản trị viên nếu bạn không thấy đơn vị gốc."
+                  />
                 </TableCell>
               </TableRow>
             )}
@@ -179,68 +245,56 @@ export default function OrganizationPage() {
                     <TreeTableLevelLabel>{NODE_LABEL[node.nodeType]}</TreeTableLevelLabel>
                   </TableCell>
                   <TableCell>
-                    <TreeTableStatusBadge active={node.enabled} activeLabel="Hoạt động" inactiveLabel="Đã tắt" />
+                    <TreeTableStatusBadge
+                      active={node.enabled}
+                      activeLabel="Đang hoạt động"
+                      inactiveLabel="Đã tắt"
+                    />
                   </TableCell>
                   <TableCell>
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center justify-end gap-1">
                       {childType && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="size-7"
-                          title={`Thêm ${NODE_LABEL[childType].toLowerCase()}`}
+                        <RowAction
+                          label={`Thêm ${NODE_LABEL[childType].toLowerCase()}`}
+                          icon={Plus}
+                          disabled={!node.enabled}
                           onClick={() => setCreateParent(node)}
-                        >
-                          <Plus className="size-4" />
-                        </Button>
+                        />
                       )}
-                      {node.nodeType === 'SITE' && (
-                        <Button variant="ghost" size="icon" className="size-7" title="Quản lý gateway" asChild>
-                          <Link to={`/organization/sites/${node.id}`}>
-                            <Router className="size-4" />
-                          </Link>
-                        </Button>
+                      {isLeafType && (
+                        <RowAction
+                          label="Quản lý gateway"
+                          icon={Router}
+                          to={`/organization/sites/${node.id}`}
+                        />
                       )}
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="size-7"
-                        title="Đổi tên"
+                      <RowAction
+                        label="Đổi tên"
+                        icon={Pencil}
                         onClick={() => setRenameTarget(node)}
-                      >
-                        <Pencil className="size-4" />
-                      </Button>
+                      />
                       {node.nodeType !== 'TENANT_ROOT' && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="size-7"
-                          title="Di chuyển"
+                        <RowAction
+                          label="Di chuyển"
+                          icon={MoveRight}
                           onClick={() => setMoveTarget(node)}
-                        >
-                          <MoveRight className="size-4" />
-                        </Button>
+                        />
                       )}
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="size-7"
-                        title={node.enabled ? 'Tắt' : 'Bật lại'}
+                      <RowAction
+                        label={node.enabled ? 'Tắt đơn vị' : 'Bật lại đơn vị'}
+                        icon={node.enabled ? PowerOff : Power}
                         disabled={updateStatusMutation.isPending}
-                        onClick={() => handleToggleStatus(node)}
-                      >
-                        {node.enabled ? <Lock className="size-4" /> : <LockOpen className="size-4" />}
-                      </Button>
+                        onClick={() =>
+                          node.enabled ? setDisableTarget(node) : toggleStatus(node)
+                        }
+                      />
                       {node.nodeType !== 'TENANT_ROOT' && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="size-7 text-destructive hover:text-destructive"
-                          title="Xóa"
+                        <RowAction
+                          label="Xóa đơn vị"
+                          icon={Trash2}
+                          destructive
                           onClick={() => setDeleteTarget(node)}
-                        >
-                          <Trash2 className="size-4" />
-                        </Button>
+                        />
                       )}
                     </div>
                   </TableCell>
@@ -251,245 +305,42 @@ export default function OrganizationPage() {
         </Table>
       </TreeTableContainer>
 
-      <CreateNodeDialog parent={createParent} onOpenChange={(open) => !open && setCreateParent(null)} />
-      <RenameNodeDialog node={renameTarget} onOpenChange={(open) => !open && setRenameTarget(null)} />
+      <CreateNodeDialog
+        parent={createParent}
+        onOpenChange={(open) => !open && setCreateParent(null)}
+      />
+      <RenameNodeDialog
+        node={renameTarget}
+        onOpenChange={(open) => !open && setRenameTarget(null)}
+      />
       <MoveNodeDialog
         node={moveTarget}
         allNodes={nodes ?? []}
         onOpenChange={(open) => !open && setMoveTarget(null)}
       />
 
-      <Dialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Xóa node tổ chức</DialogTitle>
-            <DialogDescription>
-              Xóa "{deleteTarget?.name}"? Hành động này không thể hoàn tác.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteTarget(null)}>
-              Hủy
-            </Button>
-            <Button variant="destructive" disabled={deleteMutation.isPending} onClick={handleDelete}>
-              {deleteMutation.isPending ? 'Đang xóa...' : 'Xóa'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog
+        open={!!disableTarget}
+        onOpenChange={(open) => !open && setDisableTarget(null)}
+        title="Tắt đơn vị này?"
+        description={`"${disableTarget?.name}" sẽ được đánh dấu đã tắt và không tạo được đơn vị con mới. Gateway và cảnh báo bên dưới vẫn tiếp tục chạy bình thường.`}
+        confirmLabel="Tắt đơn vị"
+        isPending={updateStatusMutation.isPending}
+        onConfirm={() =>
+          disableTarget && toggleStatus(disableTarget, () => setDisableTarget(null))
+        }
+      />
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
+        title="Xóa đơn vị này?"
+        description={`"${deleteTarget?.name}" sẽ bị xóa khỏi cây tổ chức. Thao tác bị chặn nếu đơn vị còn đơn vị con, gateway hoặc nguồn dữ liệu gắn vào. Hành động này không thể hoàn tác.`}
+        confirmLabel="Xóa đơn vị"
+        destructive
+        isPending={deleteMutation.isPending}
+        onConfirm={confirmDelete}
+      />
     </div>
-  )
-}
-
-function CreateNodeDialog({
-  parent,
-  onOpenChange,
-}: {
-  parent: TenantNode | null
-  onOpenChange: (open: boolean) => void
-}) {
-  const createMutation = useCreateTenantNodeMutation()
-  const form = useForm<NodeNameFormValues>({
-    resolver: zodResolver(nodeNameSchema),
-    defaultValues: { name: '' },
-  })
-
-  if (!parent) {
-    return null
-  }
-  const childType = NEXT_TYPE[parent.nodeType]
-  if (!childType) {
-    return null
-  }
-
-  function onSubmit(values: NodeNameFormValues) {
-    if (!parent || !childType) return
-    createMutation.mutate(
-      { parentId: parent.id, nodeType: childType, name: values.name },
-      {
-        onSuccess: () => {
-          form.reset()
-          onOpenChange(false)
-          toast.success('Tạo node thành công')
-        },
-        onError: (error) => {
-          toast.error(getApiErrorMessage(error, 'Tạo node thất bại'))
-        },
-      }
-    )
-  }
-
-  return (
-    <Dialog open onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Thêm {NODE_LABEL[childType].toLowerCase()}</DialogTitle>
-          <DialogDescription>Trong "{parent.name}"</DialogDescription>
-        </DialogHeader>
-        <Form {...form}>
-          <form className="space-y-4" onSubmit={form.handleSubmit(onSubmit)}>
-            <FormField
-              control={form.control}
-              name="name"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Tên</FormLabel>
-                  <FormControl>
-                    <Input autoFocus {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            <DialogFooter>
-              <Button type="submit" disabled={createMutation.isPending}>
-                {createMutation.isPending ? 'Đang tạo...' : 'Tạo'}
-              </Button>
-            </DialogFooter>
-          </form>
-        </Form>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-function RenameNodeDialog({
-  node,
-  onOpenChange,
-}: {
-  node: TenantNode | null
-  onOpenChange: (open: boolean) => void
-}) {
-  const renameMutation = useRenameTenantNodeMutation()
-  const form = useForm<NodeNameFormValues>({
-    resolver: zodResolver(nodeNameSchema),
-    values: { name: node?.name ?? '' },
-  })
-
-  if (!node) {
-    return null
-  }
-
-  function onSubmit(values: NodeNameFormValues) {
-    if (!node) return
-    renameMutation.mutate(
-      { id: node.id, payload: { name: values.name } },
-      {
-        onSuccess: () => {
-          onOpenChange(false)
-          toast.success('Đổi tên thành công')
-        },
-        onError: (error) => {
-          toast.error(getApiErrorMessage(error, 'Đổi tên thất bại'))
-        },
-      }
-    )
-  }
-
-  return (
-    <Dialog open onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Đổi tên</DialogTitle>
-        </DialogHeader>
-        <Form {...form}>
-          <form className="space-y-4" onSubmit={form.handleSubmit(onSubmit)}>
-            <FormField
-              control={form.control}
-              name="name"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Tên</FormLabel>
-                  <FormControl>
-                    <Input autoFocus {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            <DialogFooter>
-              <Button type="submit" disabled={renameMutation.isPending}>
-                {renameMutation.isPending ? 'Đang lưu...' : 'Lưu'}
-              </Button>
-            </DialogFooter>
-          </form>
-        </Form>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-function MoveNodeDialog({
-  node,
-  allNodes,
-  onOpenChange,
-}: {
-  node: TenantNode | null
-  allNodes: TenantNode[]
-  onOpenChange: (open: boolean) => void
-}) {
-  const moveMutation = useMoveTenantNodeMutation()
-  const [newParentId, setNewParentId] = useState<string>('')
-
-  const requiredParentType = node
-    ? (Object.entries(NEXT_TYPE).find(([, child]) => child === node.nodeType)?.[0] as NodeType | undefined)
-    : undefined
-  const candidates = requiredParentType
-    ? allNodes.filter((n) => n.nodeType === requiredParentType && n.id !== node?.id)
-    : []
-
-  if (!node) {
-    return null
-  }
-
-  function onSubmit() {
-    if (!node || !newParentId) return
-    moveMutation.mutate(
-      { id: node.id, payload: { newParentId: Number(newParentId) } },
-      {
-        onSuccess: () => {
-          setNewParentId('')
-          onOpenChange(false)
-          toast.success('Di chuyển thành công')
-        },
-        onError: (error) => {
-          toast.error(getApiErrorMessage(error, 'Di chuyển thất bại'))
-        },
-      }
-    )
-  }
-
-  return (
-    <Dialog
-      open
-      onOpenChange={(next) => {
-        if (!next) setNewParentId('')
-        onOpenChange(next)
-      }}
-    >
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Di chuyển "{node.name}"</DialogTitle>
-          <DialogDescription>Chọn {requiredParentType ? NODE_LABEL[requiredParentType].toLowerCase() : ''} mới làm cha.</DialogDescription>
-        </DialogHeader>
-        <select
-          className="h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-          value={newParentId}
-          onChange={(e) => setNewParentId(e.target.value)}
-        >
-          <option value="">-- Chọn --</option>
-          {candidates.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-        <DialogFooter>
-          <Button onClick={onSubmit} disabled={!newParentId || moveMutation.isPending}>
-            {moveMutation.isPending ? 'Đang di chuyển...' : 'Di chuyển'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   )
 }

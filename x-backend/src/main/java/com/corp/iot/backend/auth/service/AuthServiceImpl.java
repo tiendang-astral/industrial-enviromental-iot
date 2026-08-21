@@ -2,6 +2,7 @@ package com.corp.iot.backend.auth.service;
 
 import com.corp.iot.backend.auth.dto.ChangePasswordRequest;
 import com.corp.iot.backend.auth.dto.MeResponse;
+import com.corp.iot.backend.auth.dto.UpdateMeRequest;
 import com.corp.iot.backend.common.enums.AccountStatus;
 import com.corp.iot.backend.common.exception.BusinessException;
 import com.corp.iot.backend.common.security.AppUserPrincipal;
@@ -24,6 +25,7 @@ import com.corp.iot.backend.userrolescope.entity.UserRoleScope;
 import com.corp.iot.backend.userrolescope.repository.UserRoleScopeRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -156,6 +158,42 @@ public class AuthServiceImpl implements AuthService {
         TenantUser user = tenantUserRepository.findById(principal.userId())
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "USER_NOT_FOUND", "Không tìm thấy user"));
         return toMeResponse(principal, user.getFullName(), user.getEmail());
+    }
+
+    @Override
+    @Transactional
+    public MeResponse updateMe(AppUserPrincipal principal, UpdateMeRequest request) {
+        String email = normalizeEmail(request.email());
+        try {
+            if (principal.type() == UserType.PLATFORM) {
+                PlatformUser user = platformUserRepository.findById(principal.userId())
+                        .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "USER_NOT_FOUND", "Không tìm thấy user"));
+                user.setFullName(request.fullName());
+                user.setEmail(email);
+                platformUserRepository.saveAndFlush(user);
+                return toMeResponse(principal, user.getFullName(), user.getEmail());
+            }
+            TenantUser user = tenantUserRepository.findById(principal.userId())
+                    .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "USER_NOT_FOUND", "Không tìm thấy user"));
+            user.setFullName(request.fullName());
+            user.setEmail(email);
+            tenantUserRepository.saveAndFlush(user);
+            return toMeResponse(principal, user.getFullName(), user.getEmail());
+        } catch (DataIntegrityViolationException e) {
+            // Email unique theo lower(email) trên TOÀN PLATFORM, trong khi TenantUser gắn @TenantId
+            // nên query kiểm tra trước chỉ thấy được user cùng tenant — không đủ. Để DB làm trọng
+            // tài rồi dịch lỗi, thay vì tự check rồi vẫn vỡ ở tenant khác.
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "EMAIL_TAKEN", "Email này đã được tài khoản khác sử dụng");
+        }
+    }
+
+    /** Ô email để trống nghĩa là gỡ email, không phải lưu chuỗi rỗng (cột unique, '' sẽ đụng nhau). */
+    private String normalizeEmail(String email) {
+        if (email == null) {
+            return null;
+        }
+        String trimmed = email.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 
     @Override
