@@ -96,6 +96,27 @@ public class GatewayPinServiceImpl implements GatewayPinService {
         return gatewayPinMapper.toResponse(pin);
     }
 
+    /**
+     * Xoá CỨNG: `gateway_pin` không có `deleted_at` (pin gắn cố định với phần cứng, không phải dữ
+     * liệu cần lưu vết). Datastream 1-1 của pin bị xoá cùng transaction — để lại thì nó trỏ vào một
+     * `source_id` không còn tồn tại.
+     *
+     * KHÔNG chặn khi widget dashboard đang bind datastream đó: `layout_json` là JSONB nên quét
+     * ngược từ datastream ra widget rất đắt, và đây cũng là hành vi sẵn có của
+     * `DELETE /datastreams/{id}` (external source). Widget mất nguồn sẽ tự báo ở FE.
+     */
+    @Override
+    @Transactional
+    public void delete(Long gatewayId, Long pinId) {
+        GatewayPin pin = gatewayPinRepository.findById(pinId)
+                .filter(p -> p.getGatewayId().equals(gatewayId))
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "PIN_NOT_FOUND", "Không tìm thấy pin"));
+
+        datastreamRepository.deleteAll(
+                datastreamRepository.findBySourceTypeAndSourceId(SourceType.GATEWAY_PIN, pinId));
+        gatewayPinRepository.delete(pin);
+    }
+
     private void validateTypeMatchesDirection(PinDirection direction, PinType type) {
         boolean valid = (direction == PinDirection.INPUT && INPUT_TYPES.contains(type))
                 || (direction == PinDirection.OUTPUT && OUTPUT_TYPES.contains(type));

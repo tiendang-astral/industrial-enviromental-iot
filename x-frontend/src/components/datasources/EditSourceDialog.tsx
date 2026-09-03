@@ -1,7 +1,8 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Controller, useForm } from 'react-hook-form'
 import { toast } from 'sonner'
+import { AlertTriangle } from 'lucide-react'
 import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import {
@@ -13,31 +14,39 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { FormDialog } from '@/components/patterns/FormDialog'
+import { ConnectionTestRow } from '@/components/datasources/ConnectionTestRow'
 import { getApiErrorMessage } from '@/lib/apiError'
 import {
   updateExternalSourceSchema,
   type UpdateExternalSourceFormValues,
 } from '@/lib/externalSourceSchema'
+import { useTestSavedConnectionMutation } from '@/queries/useTestSavedConnectionMutation'
 import { useUpdateExternalSourceMutation } from '@/queries/useUpdateExternalSourceMutation'
-import type { ExternalSource } from '@/types/externalSource'
+import type { ExternalSource, TestConnectionResult } from '@/types/externalSource'
 
 const SSL_MODES = ['disable', 'require', 'prefer']
 
 export function EditSourceDialog({
   source,
+  jobCount = 0,
   open,
   onOpenChange,
 }: {
   source: ExternalSource
+  /** Số job đang chạy trên nguồn — dùng để nêu hậu quả cụ thể khi đổi host/database. */
+  jobCount?: number
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
   const updateMutation = useUpdateExternalSourceMutation()
+  const testMutation = useTestSavedConnectionMutation(source.id)
+  const [testResult, setTestResult] = useState<TestConnectionResult | null>(null)
   const {
     register,
     handleSubmit,
     reset,
     control,
+    watch,
     formState: { errors },
   } = useForm<UpdateExternalSourceFormValues>({
     resolver: zodResolver(updateExternalSourceSchema),
@@ -54,6 +63,7 @@ export function EditSourceDialog({
 
   useEffect(() => {
     if (!open) return
+    setTestResult(null)
     reset({
       name: source.name,
       host: source.connectionConfig.host,
@@ -64,6 +74,40 @@ export function EditSourceDialog({
       password: '',
     })
   }, [open, source, reset])
+
+  const values = watch()
+  const endpointChanged =
+    values.host !== source.connectionConfig.host ||
+    Number(values.port) !== source.connectionConfig.port ||
+    values.database !== source.connectionConfig.database ||
+    (values.sslMode || null) !== source.connectionConfig.sslMode
+  const credentialChanged = !!values.username && !!values.password
+  const connectionChanged = endpointChanged || credentialChanged
+  // Đổi host/database là trỏ sang database khác — schema có thể khác hẳn, job đang chạy sẽ hỏng.
+  const pointsElsewhere =
+    values.host !== source.connectionConfig.host || values.database !== source.connectionConfig.database
+
+  function handleTest() {
+    testMutation.mutate(
+      {
+        connectionConfig: endpointChanged
+          ? {
+              host: values.host ?? '',
+              port: Number(values.port),
+              database: values.database ?? '',
+              sslMode: values.sslMode || null,
+            }
+          : undefined,
+        credential: credentialChanged
+          ? { username: values.username ?? '', password: values.password ?? '' }
+          : undefined,
+      },
+      {
+        onSuccess: setTestResult,
+        onError: () => toast.error('Không gọi được máy chủ để thử kết nối'),
+      }
+    )
+  }
 
   function onSubmit(values: UpdateExternalSourceFormValues) {
     // Backend coi thiếu connectionConfig/credential là "giữ nguyên" — chỉ gửi khi đủ bộ.
@@ -98,12 +142,12 @@ export function EditSourceDialog({
       open={open}
       onOpenChange={onOpenChange}
       title="Sửa nguồn dữ liệu"
-      description="Đổi kết nối sẽ áp dụng cho toàn bộ job của nguồn này ở lần chạy kế tiếp."
       isPending={updateMutation.isPending}
+      submitDisabled={connectionChanged && !testResult?.ok}
       onSubmit={handleSubmit(onSubmit)}
     >
       <Field data-invalid={!!errors.name}>
-        <FieldLabel htmlFor="edit-source-name">Tên nguồn</FieldLabel>
+        <FieldLabel htmlFor="edit-source-name" data-required>Tên nguồn</FieldLabel>
         <Input id="edit-source-name" autoFocus aria-invalid={!!errors.name} {...register('name')} />
         <FieldError errors={[errors.name]} />
       </Field>
@@ -176,10 +220,27 @@ export function EditSourceDialog({
           />
         </Field>
         <FieldDescription className="sm:col-span-2">
-          Bỏ trống cả hai ô để giữ nguyên thông tin đăng nhập đang dùng. Mật khẩu đã lưu không đọc
-          lại được nên không hiển thị ở đây.
+          Bỏ trống để giữ nguyên tài khoản đang dùng.
         </FieldDescription>
       </div>
+
+      {connectionChanged && (
+        <ConnectionTestRow
+          result={testResult}
+          isPending={testMutation.isPending}
+          onTest={handleTest}
+        />
+      )}
+
+      {pointsElsewhere && jobCount > 0 && (
+        <p className="flex items-start gap-2 text-sm text-warning">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+          <span>
+            Đang trỏ sang database khác. {jobCount} job trên nguồn này viết theo cấu trúc bảng cũ và sẽ
+            lỗi nếu database mới không có đúng bảng, cột đó.
+          </span>
+        </p>
+      )}
     </FormDialog>
   )
 }

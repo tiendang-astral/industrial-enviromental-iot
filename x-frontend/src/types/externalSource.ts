@@ -34,24 +34,20 @@ export interface UpdateExternalSourceRequest {
   credential?: ExternalSourceCredential
 }
 
-export interface ExternalSourceFilter {
-  column: string
-  operator: '=' | '!=' | '>' | '<' | '>=' | '<='
-  value: string
+export interface ExternalSourceQueryConfig {
+  /** Câu SELECT do người dùng viết, bắt buộc chứa :cursor ở điều kiện thời gian. */
+  sql: string
+  /** Tên cột thời gian trong KẾT QUẢ (bí danh nếu có AS). */
+  timestampColumn: string
 }
 
-export interface ExternalSourceQueryConfig {
-  table: string
-  timestampColumn: string
-  valueColumns: string[]
-}
+export type StartFrom = 'NEW_ONLY' | 'ALL_HISTORY' | 'FROM_DATE'
 
 export interface ExternalSourceJob {
   id: number
   externalSourceId: number
   name: string
   queryConfig: ExternalSourceQueryConfig
-  filterConfig: ExternalSourceFilter[] | null
   scheduleCron: string
   incrementalCursor: string | null
   totalRowCount: number
@@ -64,13 +60,59 @@ export interface ExternalSourceJob {
 export interface CreateExternalSourceJobRequest {
   name: string
   queryConfig: ExternalSourceQueryConfig
-  filterConfig?: ExternalSourceFilter[]
   scheduleCron: string
+  startFrom: StartFrom
+  startFromDate?: string
 }
 
 export interface UpdateExternalSourceJobRequest {
   name: string
   queryConfig?: ExternalSourceQueryConfig
-  filterConfig?: ExternalSourceFilter[]
   scheduleCron?: string
+}
+
+export interface ExternalSourceJobRun {
+  id: number
+  status: 'RUNNING' | 'SUCCESS' | 'FAILED'
+  rowCount: number
+  error: string | null
+  startedAt: string
+  finishedAt: string | null
+}
+
+export interface TestConnectionResult {
+  ok: boolean
+  serverVersion: string | null
+  latencyMs: number | null
+  tableCount: number | null
+  writable: boolean
+  errorCode: string | null
+  errorMessage: string | null
+}
+
+export interface SchemaColumn {
+  name: string
+  dataType: string
+  timestamp: boolean
+  numeric: boolean
+}
+
+export interface SchemaTable {
+  schema: string
+  name: string
+  estimatedRows: number | null
+  columns: SchemaColumn[]
+}
+
+export interface PreviewColumn {
+  name: string
+  dataType: string
+  numeric: boolean
+}
+
+export interface PreviewResult {
+  columns: PreviewColumn[]
+  rows: (string | number | boolean | null)[][]
+  rowCount: number
+  elapsedMs: number
 }

@@ -4,25 +4,20 @@ import { useForm } from 'react-hook-form'
 import { toast } from 'sonner'
 import { Field, FieldError, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { FormDialog } from '@/components/patterns/FormDialog'
+import { TenantNodePicker } from '@/components/patterns/TenantNodePicker'
 import { getApiErrorMessage } from '@/lib/apiError'
 import { createGatewaySchema, type CreateGatewayFormValues } from '@/lib/gatewaySchema'
 import { useCreateGatewayMutation } from '@/queries/useCreateGatewayMutation'
 import { useUpdateGatewayMutation } from '@/queries/useUpdateGatewayMutation'
 import type { Gateway } from '@/types/gateway'
+import type { TenantNode } from '@/types/tenantNode'
 
 interface GatewayFormDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  sites: { id: number; name: string }[]
+  /** Cả cây tổ chức — picker cần cấp trên để vẽ nhánh, dù chỉ SITE mới chọn được. */
+  nodes: TenantNode[]
   /** null = tạo mới, có giá trị = sửa. Form tạo và sửa chỉ khác nhau ở nhãn nên dùng chung. */
   gateway: Gateway | null
 }
@@ -30,7 +25,7 @@ interface GatewayFormDialogProps {
 export function GatewayFormDialog({
   open,
   onOpenChange,
-  sites,
+  nodes,
   gateway,
 }: GatewayFormDialogProps) {
   const createMutation = useCreateGatewayMutation()
@@ -58,7 +53,7 @@ export function GatewayFormDialog({
 
   function onSubmit(values: CreateGatewayFormValues) {
     if (!siteId) {
-      setSiteError('Vui lòng chọn site')
+      setSiteError('Vui lòng chọn xưởng/chuồng trại')
       return
     }
 
@@ -99,49 +94,41 @@ export function GatewayFormDialog({
     <FormDialog
       open={open}
       onOpenChange={onOpenChange}
-      title={isEdit ? 'Sửa gateway' : 'Thêm gateway'}
-      description={
-        isEdit
-          ? 'Đổi site sẽ chuyển toàn bộ dữ liệu mới của gateway sang site đó.'
-          : 'Gateway phải được gán vào một site để dữ liệu cảm biến biết thuộc về đâu.'
-      }
+      title={isEdit ? 'Sửa thiết bị' : 'Thêm thiết bị'}
       submitLabel={isEdit ? 'Lưu thay đổi' : 'Tạo gateway'}
       isPending={createMutation.isPending || updateMutation.isPending}
       onSubmit={handleSubmit(onSubmit)}
     >
       <Field data-invalid={!!siteError}>
-        <FieldLabel htmlFor="gateway-site">Site</FieldLabel>
-        <Select
-          value={siteId}
-          onValueChange={(value) => {
-            setSiteId(value)
+        <FieldLabel htmlFor="gateway-site" data-required>
+          Chọn xưởng / chuồng trại
+        </FieldLabel>
+        {/* Backend bắt buộc gateway gắn vào node kiểu SITE, nhưng vẫn hiện cả cây (cấp trên bị
+            khoá) để người dùng thấy xưởng đang nằm dưới chi nhánh nào. */}
+        <TenantNodePicker
+          id="gateway-site"
+          mode="single"
+          nodes={nodes}
+          selectable={(node) => node.nodeType === 'SITE'}
+          placeholder="Chọn xưởng / chuồng trại"
+          value={siteId ? Number(siteId) : null}
+          onChange={(id) => {
+            setSiteId(String(id))
             setSiteError(null)
           }}
-        >
-          <SelectTrigger id="gateway-site" aria-invalid={!!siteError} className="w-full">
-            <SelectValue placeholder="Chọn site" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectGroup>
-              {sites.map((site) => (
-                <SelectItem key={site.id} value={String(site.id)}>
-                  {site.name}
-                </SelectItem>
-              ))}
-            </SelectGroup>
-          </SelectContent>
-        </Select>
+          invalid={!!siteError}
+        />
         <FieldError>{siteError}</FieldError>
       </Field>
 
       <Field data-invalid={!!errors.name}>
-        <FieldLabel htmlFor="gateway-name">Tên gateway</FieldLabel>
+        <FieldLabel htmlFor="gateway-name" data-required>Tên gateway</FieldLabel>
         <Input id="gateway-name" aria-invalid={!!errors.name} {...register('name')} />
         <FieldError errors={[errors.name]} />
       </Field>
 
       <Field data-invalid={!!errors.macAddress}>
-        <FieldLabel htmlFor="gateway-mac">MAC address</FieldLabel>
+        <FieldLabel htmlFor="gateway-mac" data-required>MAC address</FieldLabel>
         <Input
           id="gateway-mac"
           placeholder="AA:BB:CC:DD:EE:FF"

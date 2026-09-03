@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   Network,
   Router,
+  Users,
 } from 'lucide-react'
 
 export interface NavItem {
@@ -37,6 +38,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: 'Thiết bị', href: '/devices', icon: Router },
       { label: 'Nguồn dữ liệu', href: '/data-sources', icon: Database },
       { label: 'Cảnh báo', href: '/alerts', icon: BellRing },
+      { label: 'Người dùng', href: '/users', icon: Users },
     ],
   },
 ]

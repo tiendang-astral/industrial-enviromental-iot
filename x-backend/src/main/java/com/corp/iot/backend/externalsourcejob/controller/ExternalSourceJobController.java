@@ -3,6 +3,7 @@ package com.corp.iot.backend.externalsourcejob.controller;
 import com.corp.iot.backend.common.dto.ApiResponse;
 import com.corp.iot.backend.externalsourcejob.dto.CreateExternalSourceJobRequest;
 import com.corp.iot.backend.externalsourcejob.dto.ExternalSourceJobResponse;
+import com.corp.iot.backend.externalsourcejob.dto.ExternalSourceJobRunResponse;
 import com.corp.iot.backend.externalsourcejob.dto.UpdateExternalSourceJobRequest;
 import com.corp.iot.backend.externalsourcejob.service.ExternalSourceJobService;
 import jakarta.validation.Valid;
@@ -35,6 +36,21 @@ public class ExternalSourceJobController {
     @PreAuthorize("hasAnyAuthority('TENANT_ADMIN','MANAGER','OPERATOR') and @nodeScope.canAccessJob(#id)")
     public ApiResponse<ExternalSourceJobResponse> update(@PathVariable Long id, @Valid @RequestBody UpdateExternalSourceJobRequest request) {
         return ApiResponse.of(externalSourceJobService.update(id, request));
+    }
+
+    // Không gọi RPC sang x-ingestion-service — chỉ kéo next_run_at về hiện tại, sweep nhặt trong ≤15s.
+    @PostMapping("/api/v1/external-source-jobs/{id}/run-now")
+    @PreAuthorize("hasAnyAuthority('TENANT_ADMIN','MANAGER','OPERATOR') and @nodeScope.canAccessJob(#id)")
+    public ApiResponse<ExternalSourceJobResponse> runNow(@PathVariable Long id) {
+        return ApiResponse.of(externalSourceJobService.runNow(id));
+    }
+
+    @GetMapping("/api/v1/external-source-jobs/{id}/runs")
+    @PreAuthorize("hasAnyAuthority('TENANT_ADMIN','MANAGER','OPERATOR','VIEWER') and @nodeScope.canAccessJob(#id)")
+    public ApiResponse<List<ExternalSourceJobRunResponse>> runs(
+            @PathVariable Long id,
+            @RequestParam(defaultValue = "12") int sinceHours) {
+        return ApiResponse.of(externalSourceJobService.listRuns(id, sinceHours));
     }
 
     @DeleteMapping("/api/v1/external-source-jobs/{id}")

@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useForm } from 'react-hook-form'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Building2, Eye, Lock, LockOpen, Plus } from 'lucide-react'
+import { Building2, Lock, LockOpen, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Field, FieldError, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
@@ -29,6 +29,7 @@ function formatDate(value: string) {
 }
 
 export default function TenantsPage() {
+  const navigate = useNavigate()
   const { data: tenants, isLoading } = useTenantsQuery()
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [statusTarget, setStatusTarget] = useState<Tenant | null>(null)
@@ -64,14 +65,14 @@ export default function TenantsPage() {
       {
         onSuccess: () => {
           openCreate(false)
-          toast.success('Tạo tenant thành công')
+          toast.success('Tạo tổ chức thành công')
         },
         onError: (error) => {
           const apiError = getApiError(error)
           if (apiError?.code === 'USERNAME_TAKEN') {
             setError('adminUsername', { message: apiError.message })
           } else {
-            toast.error(apiError?.message ?? 'Tạo tenant thất bại, vui lòng thử lại')
+            toast.error(apiError?.message ?? 'Tạo tổ chức thất bại, vui lòng thử lại')
           }
         },
       }
@@ -86,7 +87,7 @@ export default function TenantsPage() {
       {
         onSuccess: () => {
           setStatusTarget(null)
-          toast.success(nextStatus === 'ACTIVE' ? 'Đã kích hoạt tenant' : 'Đã khóa tenant')
+          toast.success(nextStatus === 'ACTIVE' ? 'Đã kích hoạt tổ chức' : 'Đã khóa tổ chức')
         },
         onError: (error) => {
           toast.error(getApiErrorMessage(error, 'Cập nhật trạng thái thất bại'))
@@ -98,8 +99,8 @@ export default function TenantsPage() {
   const columns: DataTableColumn<Tenant>[] = [
     {
       key: 'name',
-      header: 'Tên tenant',
-      sortValue: (row) => row.name,
+      header: 'Tên tổ chức',
+      filter: { type: 'text', placeholder: 'Tìm tên', getValue: (row) => row.name },
       cell: (row) => (
         <Link to={`/tenants/${row.id}`} className="font-medium hover:underline">
           {row.name}
@@ -109,58 +110,52 @@ export default function TenantsPage() {
     {
       key: 'email',
       header: 'Email',
-      sortValue: (row) => row.email,
+      filter: { type: 'text', placeholder: 'Tìm email', getValue: (row) => row.email },
       cell: (row) => <span className="text-muted-foreground">{row.email}</span>,
     },
     {
       key: 'status',
       header: 'Trạng thái',
-      sortValue: (row) => row.status,
+      filter: {
+        type: 'select',
+        placeholder: 'Trạng thái',
+        getValue: (row) => row.status,
+        options: [
+          { value: 'ACTIVE', label: 'Đang hoạt động' },
+          { value: 'LOCKED', label: 'Đã khóa' },
+        ],
+      },
       cell: (row) => <StatusBadge status={row.status} />,
     },
     {
       key: 'createdAt',
       header: 'Ngày tạo',
-      sortValue: (row) => row.createdAt,
       cell: (row) => <span className="tabular text-muted-foreground">{formatDate(row.createdAt)}</span>,
     },
     {
       key: 'actions',
-      header: 'Tác vụ',
-      headerClassName: 'w-24 text-right',
+      header: 'Hành động',
+      headerClassName: 'w-16 text-right',
       className: 'text-right',
       cell: (row) => (
-        <div className="flex items-center justify-end gap-1">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" className="size-7" asChild>
-                <Link to={`/tenants/${row.id}`}>
-                  <Eye />
-                  <span className="sr-only">Xem chi tiết</span>
-                </Link>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Xem chi tiết</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="size-7"
-                onClick={() => setStatusTarget(row)}
-              >
-                {row.status === 'ACTIVE' ? <Lock /> : <LockOpen />}
-                <span className="sr-only">
-                  {row.status === 'ACTIVE' ? 'Khóa tenant' : 'Kích hoạt tenant'}
-                </span>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              {row.status === 'ACTIVE' ? 'Khóa tenant' : 'Kích hoạt tenant'}
-            </TooltipContent>
-          </Tooltip>
-        </div>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-7"
+              onClick={() => setStatusTarget(row)}
+            >
+              {row.status === 'ACTIVE' ? <Lock /> : <LockOpen />}
+              <span className="sr-only">
+                {row.status === 'ACTIVE' ? 'Khóa tổ chức' : 'Kích hoạt tổ chức'}
+              </span>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            {row.status === 'ACTIVE' ? 'Khóa tổ chức' : 'Kích hoạt tổ chức'}
+          </TooltipContent>
+        </Tooltip>
       ),
     },
   ]
@@ -169,11 +164,11 @@ export default function TenantsPage() {
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Tổ chức"
-        description="Danh sách tenant đang dùng nền tảng và trạng thái truy cập của họ."
+        description="Danh sách tổ chức đang dùng nền tảng và trạng thái truy cập của họ."
         actions={
           <Button onClick={() => openCreate(true)}>
             <Plus data-icon="inline-start" />
-            Tạo tenant
+            Tạo tổ chức
           </Button>
         }
       />
@@ -183,21 +178,13 @@ export default function TenantsPage() {
         rows={tenants}
         getRowId={(row) => row.id}
         isLoading={isLoading}
-        searchable={{
-          placeholder: 'Tìm theo tên hoặc email',
-          getText: (row) => `${row.name} ${row.email}`,
-        }}
+        showIndex
+        onRowClick={(row) => navigate(`/tenants/${row.id}`)}
         empty={
           <EmptyState
             icon={Building2}
-            title="Chưa có tenant nào"
-            description="Tạo tenant đầu tiên để bắt đầu cấp quyền sử dụng nền tảng."
-            action={
-              <Button onClick={() => openCreate(true)}>
-                <Plus data-icon="inline-start" />
-                Tạo tenant
-              </Button>
-            }
+            title="Chưa có tổ chức nào"
+            description="Tạo tổ chức đầu tiên để bắt đầu cấp quyền sử dụng nền tảng."
           />
         }
       />
@@ -205,19 +192,19 @@ export default function TenantsPage() {
       <FormDialog
         open={isCreateOpen}
         onOpenChange={openCreate}
-        title="Tạo tenant mới"
-        description="Tạo tenant và tài khoản Tenant Admin đầu tiên cho tenant này."
-        submitLabel="Tạo tenant"
+        title="Tạo tổ chức mới"
+        description="Tạo tổ chức và tài khoản quản trị viên đầu tiên cho tổ chức này."
+        submitLabel="Tạo tổ chức"
         isPending={createTenantMutation.isPending}
         onSubmit={handleSubmit(onSubmit)}
       >
         <Field data-invalid={!!errors.name}>
-          <FieldLabel htmlFor="name">Tên tenant</FieldLabel>
+          <FieldLabel htmlFor="name">Tên tổ chức</FieldLabel>
           <Input id="name" aria-invalid={!!errors.name} {...register('name')} />
           <FieldError errors={[errors.name]} />
         </Field>
         <Field data-invalid={!!errors.email}>
-          <FieldLabel htmlFor="email">Email tenant</FieldLabel>
+          <FieldLabel htmlFor="email">Email tổ chức</FieldLabel>
           <Input id="email" aria-invalid={!!errors.email} {...register('email')} />
           <FieldError errors={[errors.email]} />
         </Field>
@@ -265,13 +252,13 @@ export default function TenantsPage() {
       <ConfirmDialog
         open={!!statusTarget}
         onOpenChange={(open) => !open && setStatusTarget(null)}
-        title={statusTarget?.status === 'ACTIVE' ? 'Khóa tenant này?' : 'Kích hoạt lại tenant?'}
+        title={statusTarget?.status === 'ACTIVE' ? 'Khóa tổ chức này?' : 'Kích hoạt lại tổ chức này?'}
         description={
           statusTarget?.status === 'ACTIVE'
-            ? `Toàn bộ người dùng của "${statusTarget?.name}" sẽ không đăng nhập được và phiên đang mở sẽ bị thu hồi. Dữ liệu cảm biến vẫn tiếp tục được thu thập.`
-            : `Người dùng của "${statusTarget?.name}" sẽ đăng nhập lại được ngay sau khi kích hoạt.`
+            ? `Bạn có chắc chắn muốn khóa tổ chức "${statusTarget?.name}"? Người dùng của tổ chức này sẽ không thể đăng nhập.`
+            : `Bạn có chắc chắn muốn kích hoạt lại tổ chức "${statusTarget?.name}"? Người dùng của tổ chức này sẽ đăng nhập lại được.`
         }
-        confirmLabel={statusTarget?.status === 'ACTIVE' ? 'Khóa tenant' : 'Kích hoạt'}
+        confirmLabel={statusTarget?.status === 'ACTIVE' ? 'Khóa tổ chức' : 'Kích hoạt'}
         destructive={statusTarget?.status === 'ACTIVE'}
         isPending={updateStatusMutation.isPending}
         onConfirm={confirmToggleStatus}

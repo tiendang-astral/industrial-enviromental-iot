@@ -13,4 +13,6 @@ public interface GatewayPinService {
     GatewayPinResponse create(Long gatewayId, CreateGatewayPinRequest request);
 
     GatewayPinResponse update(Long gatewayId, Long pinId, UpdateGatewayPinRequest request);
+
+    void delete(Long gatewayId, Long pinId);
 }

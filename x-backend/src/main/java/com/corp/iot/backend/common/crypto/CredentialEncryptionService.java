@@ -42,4 +42,22 @@ public class CredentialEncryptionService {
             throw new IllegalStateException("Failed to encrypt credential", e);
         }
     }
+
+    // Đọc ngược credential đã lưu để mở kết nối tới database ngoài (thử kết nối, đọc cấu trúc
+    // bảng, chạy thử). IV nằm ở 12 byte đầu, phần còn lại là ciphertext.
+    public String decrypt(String encrypted) {
+        try {
+            byte[] raw = Base64.getDecoder().decode(encrypted);
+            ByteBuffer buffer = ByteBuffer.wrap(raw);
+            byte[] iv = new byte[IV_LENGTH_BYTES];
+            buffer.get(iv);
+            byte[] ciphertext = new byte[buffer.remaining()];
+            buffer.get(ciphertext);
+            Cipher cipher = Cipher.getInstance(ALGORITHM);
+            cipher.init(Cipher.DECRYPT_MODE, keySpec, new GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv));
+            return new String(cipher.doFinal(ciphertext), StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to decrypt credential", e);
+        }
+    }
 }

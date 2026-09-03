@@ -100,7 +100,7 @@ export function GatewayPinFormDialog({
       onSubmit={handleSubmit(onSubmit)}
     >
       <Field>
-        <FieldLabel htmlFor="pin-direction">Chiều tín hiệu</FieldLabel>
+        <FieldLabel htmlFor="pin-direction" data-required>Chiều tín hiệu</FieldLabel>
         <Controller
           control={control}
           name="direction"
@@ -131,7 +131,7 @@ export function GatewayPinFormDialog({
 
       <div className="grid gap-5 sm:grid-cols-2">
         <Field data-invalid={!!errors.type}>
-          <FieldLabel htmlFor="pin-type">Loại pin</FieldLabel>
+          <FieldLabel htmlFor="pin-type" data-required>Loại pin</FieldLabel>
           <Controller
             control={control}
             name="type"
@@ -157,7 +157,7 @@ export function GatewayPinFormDialog({
         </Field>
 
         <Field data-invalid={!!errors.pinNumber}>
-          <FieldLabel htmlFor="pin-number">Số chân</FieldLabel>
+          <FieldLabel htmlFor="pin-number" data-required>Số chân</FieldLabel>
           <Input
             id="pin-number"
             type="number"
@@ -170,7 +170,7 @@ export function GatewayPinFormDialog({
       </div>
 
       <Field data-invalid={!!errors.name}>
-        <FieldLabel htmlFor="pin-name">Tên pin</FieldLabel>
+        <FieldLabel htmlFor="pin-name" data-required>Tên pin</FieldLabel>
         <Input
           id="pin-name"
           placeholder="Nhiệt độ chuồng A"
@@ -182,7 +182,7 @@ export function GatewayPinFormDialog({
 
       {direction === 'INPUT' && (
         <Field data-invalid={!!errors.metricId}>
-          <FieldLabel htmlFor="pin-metric">Metric</FieldLabel>
+          <FieldLabel htmlFor="pin-metric" data-required>Metric</FieldLabel>
           <Controller
             control={control}
             name="metricId"

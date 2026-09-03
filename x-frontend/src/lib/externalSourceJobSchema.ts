@@ -1,28 +1,29 @@
 import { z } from 'zod'
 
-export const FILTER_OPERATORS = ['=', '!=', '>', '<', '>=', '<='] as const
-
-export const externalSourceFilterSchema = z.object({
-  column: z.string().min(1, 'Nhập tên cột'),
-  operator: z.enum(FILTER_OPERATORS),
-  value: z.string().min(1, 'Nhập giá trị'),
-})
+// :cursor là hợp đồng giữa câu SQL và cơ chế đọc tăng dần — backend cũng validate lại
+// (SqlQueryValidator), ở đây chặn sớm để người dùng thấy lỗi ngay khi gõ.
+export const CURSOR_TOKEN = ':cursor'
 
 export const externalSourceJobSchema = z.object({
   name: z.string().min(1, 'Vui lòng nhập tên job'),
-  table: z.string().min(1, 'Vui lòng nhập tên bảng'),
-  timestampColumn: z.string().min(1, 'Vui lòng nhập cột thời gian'),
-  valueColumns: z.string().min(1, 'Vui lòng nhập ít nhất 1 cột dữ liệu (cách nhau bằng dấu phẩy)'),
-  filters: z.array(externalSourceFilterSchema),
-  scheduleCron: z.string().min(1, 'Vui lòng nhập lịch chạy (cron 5 field, VD */5 * * * *)'),
+  sql: z
+    .string()
+    .min(1, 'Vui lòng nhập câu truy vấn')
+    .refine((value) => /^\s*(select|with)\b/i.test(value), 'Câu truy vấn phải bắt đầu bằng SELECT hoặc WITH')
+    .refine(
+      (value) => new RegExp(`${CURSOR_TOKEN}\\b`).test(value),
+      'Câu truy vấn phải chứa :cursor ở điều kiện thời gian, ví dụ: WHERE measured_at > :cursor'
+    ),
+  timestampColumn: z.string().min(1, 'Vui lòng chọn cột thời gian'),
+  scheduleCron: z.string().min(1, 'Vui lòng chọn lịch chạy'),
 })
 
 export type ExternalSourceJobFormValues = z.infer<typeof externalSourceJobSchema>
 
 export const createDatastreamSchema = z.object({
-  name: z.string().min(1, 'Vui lòng nhập tên datastream'),
+  name: z.string().min(1, 'Vui lòng nhập tên kênh dữ liệu'),
   metricId: z.string().min(1, 'Vui lòng chọn metric'),
-  sourceField: z.string().min(1, 'Vui lòng chọn field'),
+  sourceField: z.string().min(1, 'Vui lòng chọn cột'),
 })
 
 export type CreateDatastreamFormValues = z.infer<typeof createDatastreamSchema>

@@ -13,3 +13,14 @@ export const NODE_LABEL: Record<NodeType, string> = {
   PRODUCTION_AREA: 'Khu sản xuất',
   SITE: 'Xưởng/Chuồng trại',
 }
+
+/**
+ * Nhãn ngắn cho nút hành động trong hàng bảng ("Thêm chi nhánh", "Thêm xưởng"...).
+ * Khác NODE_LABEL ở mỗi cấp SITE: "Xưởng/Chuồng trại" quá dài cho một nút nằm trong hàng.
+ */
+export const NODE_LABEL_SHORT: Record<NodeType, string> = {
+  TENANT_ROOT: 'Công ty',
+  BRANCH: 'Chi nhánh',
+  PRODUCTION_AREA: 'Khu sản xuất',
+  SITE: 'Xưởng',
+}

@@ -9,7 +9,7 @@ import { EmptyState } from '@/components/patterns/EmptyState'
 import { PageHeader } from '@/components/patterns/PageHeader'
 import { EditSourceDialog } from '@/components/datasources/EditSourceDialog'
 import { JobCard } from '@/components/datasources/JobCard'
-import { JobFormDialog } from '@/components/datasources/JobFormDialog'
+import { JobEditorDialog } from '@/components/datasources/JobEditorDialog'
 import { SourceInfoCard } from '@/components/datasources/SourceInfoCard'
 import { getApiErrorMessage } from '@/lib/apiError'
 import { useDatastreamsByExternalSourceQuery } from '@/queries/useDatastreamsByExternalSourceQuery'
@@ -81,7 +81,7 @@ export default function DataSourceDetailPage() {
     <div className="flex flex-col gap-6">
       <PageHeader
         title={source.name}
-        description="PostgreSQL ngoài — mỗi job đọc một bảng theo lịch, mỗi datastream gắn một cột vào metric."
+        description="PostgreSQL ngoài. Mỗi job là một câu truy vấn chạy theo lịch; mỗi cột trong kết quả gắn được vào một metric thành kênh dữ liệu."
         backTo="/data-sources"
         backLabel="Nguồn dữ liệu"
         actions={
@@ -129,7 +129,7 @@ export default function DataSourceDetailPage() {
         <EmptyState
           icon={DatabaseZap}
           title="Chưa có job nào"
-          description="Job quyết định bảng nào được đọc và đọc bao lâu một lần. Chưa có job thì nguồn này chưa đưa dữ liệu nào về hệ thống."
+          description="Job quyết định truy vấn nào được chạy và chạy bao lâu một lần. Chưa có job thì nguồn này chưa đưa dữ liệu nào về hệ thống."
           action={
             <Button variant="outline" onClick={() => setIsCreateJobOpen(true)}>
               Thêm job đầu tiên
@@ -148,9 +148,14 @@ export default function DataSourceDetailPage() {
         />
       ))}
 
-      <EditSourceDialog source={source} open={isEditOpen} onOpenChange={setIsEditOpen} />
+      <EditSourceDialog
+        source={source}
+        jobCount={jobs?.length ?? 0}
+        open={isEditOpen}
+        onOpenChange={setIsEditOpen}
+      />
 
-      <JobFormDialog
+      <JobEditorDialog
         externalSourceId={externalSourceId}
         job={null}
         open={isCreateJobOpen}
@@ -161,7 +166,13 @@ export default function DataSourceDetailPage() {
         open={isDeleteOpen}
         onOpenChange={setIsDeleteOpen}
         title="Xóa nguồn dữ liệu này?"
-        description={`"${source.name}" sẽ bị xóa cùng thông tin kết nối đã lưu. Thao tác bị chặn nếu nguồn còn job — xóa hết job trước. Hành động này không thể hoàn tác.`}
+        question={
+          <>
+            Bạn có chắc chắn muốn xóa nguồn{' '}
+            <span className="font-semibold">&ldquo;{source.name}&rdquo;</span>?
+          </>
+        }
+        description="Cần xóa các job và kênh dữ liệu của nguồn này trước."
         confirmLabel="Xóa nguồn"
         destructive
         isPending={deleteSourceMutation.isPending}

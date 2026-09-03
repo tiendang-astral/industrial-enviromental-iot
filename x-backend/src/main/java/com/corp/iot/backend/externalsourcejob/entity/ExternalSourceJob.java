@@ -1,6 +1,5 @@
 package com.corp.iot.backend.externalsourcejob.entity;
 
-import com.corp.iot.backend.externalsourcejob.dto.ExternalSourceFilter;
 import com.corp.iot.backend.externalsourcejob.dto.ExternalSourceQueryConfig;
 import jakarta.persistence.*;
 import lombok.Getter;
@@ -14,11 +13,9 @@ import org.hibernate.annotations.UpdateTimestamp;
 import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
-import java.util.List;
 
-// mapping_config (cột có trong DB từ baseline) KHÔNG map ở đây — field->metric mapping thật
-// nằm ở datastream.source_field/metric_id (xem DATABASE.md § external_source_job), cột này
-// reserved/unused. incremental_field cũng không map — thay bằng queryConfig.timestampColumn.
+// filter_config/mapping_config đã bị bỏ ở V12: điều kiện nằm trong WHERE của queryConfig.sql,
+// biến đổi nằm trong SELECT. incremental_field không map — thay bằng queryConfig.timestampColumn.
 @Entity
 @Table(name = "external_source_job")
 @SQLRestriction("deleted_at IS NULL")
@@ -44,10 +41,6 @@ public class ExternalSourceJob {
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "query_config", nullable = false, columnDefinition = "jsonb")
     private ExternalSourceQueryConfig queryConfig;
-
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "filter_config", columnDefinition = "jsonb")
-    private List<ExternalSourceFilter> filterConfig;
 
     @Column(name = "schedule_cron", nullable = false)
     private String scheduleCron;

@@ -116,16 +116,22 @@ Payload:
 
 **Quyết định chốt ở Phase 5** (khác Phase 3): chỉ hỗ trợ `connection_type=POSTGRESQL` (JDBC), field→metric mapping **không** qua `mapping_config` nữa mà qua `datastream.source_field` (datastream tạo thủ công, xem `DATABASE.md` § datastream) — vì vậy Ingestion không tự "map field → metric", chỉ publish field thô kèm `sourceField`, Processing Service mới resolve `Datastream`/`Metric`.
 
+**Cập nhật ở `V12` — SQL là nguồn sự thật:** người dùng viết thẳng câu `SELECT`, hệ thống không dựng query từ config nữa. Lọc nằm trong `WHERE`, biến đổi (đổi đơn vị, gộp theo phút, join sang bảng khác) nằm trong `SELECT` — database bên kia đã có sẵn công cụ đầy đủ, không việc gì viết lại một phiên bản nghèo hơn. Đổi lại có 3 ràng buộc:
+
+1. **`:cursor` bắt buộc** trong câu SQL — Ingestion thay bằng `?` và bind mốc đọc lần trước. Thiếu nó thì job quét lại toàn bộ bảng mỗi lần chạy, nên chặn ngay lúc lưu (`MISSING_CURSOR_PLACEHOLDER`).
+2. **Phiên `READ ONLY`** thay cho allowlist định danh: `Connection.setReadOnly(true)` khiến chính Postgres bên kia từ chối mọi lệnh ghi, cộng `statement_timeout` và trần dòng. Đây là database của khách hàng chạy bằng credential họ tự nhập — mối đe dọa thật là câu ghi gõ nhầm chạy lặp theo cron, không phải injection.
+3. **Cột dữ liệu suy từ `ResultSetMetaData`** (mọi cột trừ `timestampColumn`), không khai trước — thêm cột vào `SELECT` là có ngay field mới để gắn datastream.
+
 | Bước | Service | Xử lý gì |
 |------|---------|-----------|
 | 1 | Ingestion Service | `@Scheduled` fixed-delay sweep (~15s, `ExternalSourceSchedulerService`) quét `external_source_job` có `next_run_at <= now()` — không cache Redis (khác `gw-resolve`) vì tần suất thấp, 1 query JPA/lần chạy là đủ rẻ |
 | 2 | Ingestion Service | Decrypt `credential_encrypted` (AES-GCM, key `APP_ENCRYPTION_KEY`), mở `java.sql.Connection` JDBC thuần tới `external_source.connection_config` (không qua Hibernate — schema DB ngoài không biết trước) |
-| 3 | Ingestion Service | Build SQL parameterized từ `query_config`/`filter_config` (`SELECT {timestampColumn}, {valueColumns...} FROM {table} WHERE {timestampColumn} > ? [AND filter...] ORDER BY {timestampColumn} LIMIT 500`) — identifier (table/column) validate allowlist `^[a-zA-Z_][a-zA-Z0-9_]{0,62}$` cả lúc tạo job lẫn lúc build query (không parameterize được identifier trong JDBC), giá trị filter bind qua `?` |
-| 4 | Ingestion Service | Với mỗi row kết quả, **unbundle 1 Kafka message/field** (giống unbundle batch MQTT ở Phase 3), sinh `messageId = sha256(jobId+sourceField+measuredAt)`, publish Kafka `external-data-raw` (partition `tenant_id`+`external_source_job_id`) |
+| 3 | Ingestion Service | Lấy `query_config.sql` (câu người dùng viết), thay mọi `:cursor` bằng `?` và bind mốc đọc lần trước; chạy trong phiên `READ ONLY` kèm `statement_timeout` + trần dòng. Không còn build query từ config, không còn allowlist định danh (`V12`) |
+| 4 | Ingestion Service | Với mỗi row kết quả, **unbundle 1 Kafka message/field** (giống unbundle batch MQTT ở Phase 3) — field = mọi cột trong `ResultSetMetaData` trừ `timestampColumn`; sinh `messageId = sha256(jobId+sourceField+measuredAt)`, publish Kafka `external-data-raw` (partition `tenant_id`+`external_source_job_id`) |
 | 5 | Kafka | Buffer `external-data-raw` riêng khỏi luồng gateway (đặc tính khác: theo cron, không push liên tục) |
 | 6 | Processing Service | Consume, dedup theo `messageId` (tái dùng `telemetry-dedup` Redis key, TTL 6h — dedup logic không quan tâm nguồn), resolve `Datastream` theo `(sourceType=EXTERNAL_SOURCE_JOB, sourceId=externalSourceJobId, sourceField)` → `metric_id` → `Metric.code`; không tìm thấy → log + skip (giống pattern gateway_pin không khớp) |
 | 7 | Processing Service | Ghi InfluxDB measurement `external_reading` (tag `tenant_id`, `tenant_node_id`, `source_id`=`externalSourceJobId`, `metric`) |
-| 8 | Ingestion Service | Cập nhật `incremental_cursor = max(timestampColumn)`, `total_row_count += n`, `last_run_status=SUCCESS`, `next_run_at` (tính lại qua `cron-utils` từ `schedule_cron`); lỗi JDBC/connection → `last_run_status=FAILED`, `last_error`, vẫn advance `next_run_at` (log + skip, không throw, không retry-storm) |
+| 8 | Ingestion Service | Cập nhật `incremental_cursor = max(timestampColumn)`, `total_row_count += n`, `last_run_status=SUCCESS`, `next_run_at` (tính lại qua `cron-utils` từ `schedule_cron`); lỗi JDBC/connection → `last_run_status=FAILED`, `last_error`, vẫn advance `next_run_at` (log + skip, không throw, không retry-storm). Ghi thêm 1 dòng `external_source_job_run` mỗi lần chạy (`V12`) để Backend dựng dải nhịp chạy và biểu đồ số dòng/giờ |
 | 9 | Processing Service | Publish event realtime lên Redis pub/sub channel `realtime:{tenantId}:{tenantNodeId}` — payload **khác** flow sensor: `{datastreamId, metric, value, measuredAt}` (không có `gatewayId/pinType/pinNumber` vì external không có pin) |
 | 10 | Backend → Frontend | `RedisRealtimeBridge` forward nguyên văn (không phân biệt payload gateway/external) → STOMP topic `/topic/realtime/{tenantId}/{tenantNodeId}`; FE nhận payload có `datastreamId` thì match thẳng, không cần tra theo `gatewayId+pinType+pinNumber` |
 

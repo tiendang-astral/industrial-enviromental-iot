@@ -7,6 +7,7 @@ import com.corp.iot.backend.gatewaypin.dto.UpdateGatewayPinRequest;
 import com.corp.iot.backend.gatewaypin.service.GatewayPinService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
@@ -39,5 +40,12 @@ public class GatewayPinController {
             @Valid @RequestBody UpdateGatewayPinRequest request
     ) {
         return ApiResponse.of(gatewayPinService.update(gatewayId, pinId, request));
+    }
+
+    @DeleteMapping("/{pinId}")
+    @PreAuthorize("hasAnyAuthority('TENANT_ADMIN','MANAGER','OPERATOR') and @nodeScope.canAccessGateway(#gatewayId)")
+    public ResponseEntity<Void> delete(@PathVariable Long gatewayId, @PathVariable Long pinId) {
+        gatewayPinService.delete(gatewayId, pinId);
+        return ResponseEntity.ok().build();
     }
 }

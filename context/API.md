@@ -68,6 +68,39 @@ Lỗi — `@RestControllerAdvice` (`GlobalExceptionHandler`) trả cùng envelop
 
 `PlatformUserResponse`: `{ id, username, fullName, email, status, createdAt }`.
 
+### Module: Tenant User (`TenantUserController`) — **Mới**
+
+`@PreAuthorize("hasAuthority('TENANT_ADMIN')")` trên cả class — quản lý tài khoản và phân quyền là việc của Quản trị viên tenant; `MANAGER`/`OPERATOR`/`VIEWER` **không** đọc được danh sách (khác `TenantNodeController` nơi các vai trò kia còn được xem). Hibernate `@TenantId` trên `TenantUser`/`UserRoleScope`/`TenantRole` tự giới hạn mọi query trong tenant của người gọi nên không cần kiểm tra tenant thủ công.
+
+| Method | Path | Body / Query | Response mẫu | Mô tả |
+|--------|------|--------------|--------------|-------|
+| GET | /api/v1/tenant-users | — | `{ data: TenantUserResponse[] }` | Toàn bộ user trong tenant (đã ẩn user soft-delete), sắp theo `username`, không phân trang |
+| POST | /api/v1/tenant-users | `{ username, fullName, email?, password, scopes[] }` | `{ data: TenantUserResponse }` | Tạo user + `user_role_scope`. 409 `USERNAME_TAKEN` (kiểm tra chéo cả `platform_user` lẫn `tenant_user`, toàn platform); 400 `EMAIL_TAKEN`; 400 `ROLE_NOT_FOUND`/`NODE_NOT_FOUND` |
+| PUT | /api/v1/tenant-users/{id} | `{ fullName, email?, scopes[] }` | `{ data: TenantUserResponse }` | Sửa hồ sơ + **REPLACE toàn bộ** `scopes` (không merge, cùng quy ước `alert_channel`). Không cho đổi `username`. 409 `LAST_TENANT_ADMIN` nếu bỏ vai trò `TENANT_ADMIN` của quản trị viên ACTIVE cuối cùng |
+| PUT | /api/v1/tenant-users/{id}/status | `{ status }` (`ACTIVE`\|`LOCKED`) | `{ data: TenantUserResponse }` | Khóa/mở khóa; revoke toàn bộ refresh token khi `LOCKED`. 400 `SELF_ACTION_FORBIDDEN`; 409 `LAST_TENANT_ADMIN` |
+| PUT | /api/v1/tenant-users/{id}/password | `{ newPassword }` | 200, no body | Quản trị viên đặt lại mật khẩu cho user khác (khác `PUT /auth/password` là user tự đổi và cần `currentPassword`). Revoke toàn bộ refresh token của user đó |
+| DELETE | /api/v1/tenant-users/{id} | — | 200, no body | Soft delete (`deleted_at`) + xóa `user_role_scope` + revoke refresh token. 400 `SELF_ACTION_FORBIDDEN`; 409 `LAST_TENANT_ADMIN` |
+
+`TenantUserResponse`: `{ id, username, fullName, email, status, createdAt, scopes: UserScopeResponse[] }`.
+
+`UserScopeResponse`: `{ id, roleId, roleValue, roleName, tenantNodeId, tenantNodeName }` — `tenantNodeId` NULL = full-access toàn tenant (đúng ngữ nghĩa cột `user_role_scope.tenant_node_id`).
+
+`scopes[]` trong request: `[{ roleId, tenantNodeId }]`, `tenantNodeId` nullable. Bắt buộc `@NotEmpty` — user không có role nào thì đăng nhập được nhưng không thấy gì, tạo ra tài khoản "chết" mà quản trị viên tưởng đã cấp quyền. Service tự dedupe trước khi ghi vì `uq_user_role_scope` là `(tenant_id, user_id, role_id, COALESCE(tenant_node_id, 0))`.
+
+**Một user = MỘT vai trò, áp cho một hoặc nhiều đơn vị** — mọi phần tử `scopes[]` phải cùng `roleId`, khác nhau thì 400 `SINGLE_ROLE_ONLY`. Đây không phải ràng buộc thẩm mỹ: `AuthServiceImpl.resolveTenantAuthorities()` gộp phẳng vai trò thành `authorities` trong JWT và **bỏ phần đơn vị đi kèm**, còn `ScopeService` gộp phạm vi thành hợp của mọi node. Nếu cho nhiều vai trò ở các đơn vị khác nhau thì user dùng được vai trò cao nhất trên **toàn bộ** phạm vi — dữ liệu hứa một đằng, kiểm tra quyền làm một nẻo. Bảng `user_role_scope` vẫn giữ nhiều dòng (một dòng/đơn vị), chỉ khác là mọi dòng dùng chung `role_id`.
+
+> **`TenantUser` nay có soft delete** — entity thêm `deleted_at` + `@SQLRestriction("deleted_at IS NULL")` (giống `PlatformUser` từ `V9`), nên user đã xóa biến mất khỏi mọi query entity-managed **kể cả luồng đăng nhập**. Không cần migration: cột đã có sẵn trong `V1__baseline_schema.sql`.
+>
+> Khác `platform_user`: `uq_tenant_user_username`/`uq_tenant_user_email` **không** partial theo `deleted_at`, nên user đã xóa mềm vẫn giữ chỗ username/email — kiểm tra trùng phải dùng native query đếm cả bản ghi đã xóa (`TenantUserRepository.usernameExistsPlatformWide`), vì query entity-managed vừa bị `@TenantId` giới hạn trong 1 tenant vừa bị `@SQLRestriction` lọc mất bản ghi đã xóa.
+
+### Module: Tenant Role (`TenantRoleController`) — **Mới**
+
+| Method | Path | Body / Query | Response mẫu | Mô tả |
+|--------|------|--------------|--------------|-------|
+| GET | /api/v1/tenant-roles | — | `{ data: TenantRoleResponse[] }` | 4 vai trò của tenant hiện tại (`TENANT_ADMIN`/`MANAGER`/`OPERATOR`/`VIEWER`, seed lúc tạo tenant). `@PreAuthorize('TENANT_ADMIN')` — chỉ dùng để đổ dropdown trong form phân quyền |
+
+`TenantRoleResponse`: `{ id, name, value }`. Khác `metric` (master data global chéo tenant), `tenant_role` được seed **riêng cho từng tenant** nên `@TenantId` lo phần lọc.
+
 ### Module: Tenant Node (`TenantNodeController`)
 
 Yêu cầu `tenant_user` đã login + scope theo node (custom `@PreAuthorize` SpEL, resolve qua `ScopeService` + cache Redis `scope-sites`). `TENANT_ADMIN` full quyền; `MANAGER`/`OPERATOR` chỉ đọc (không sửa cây tổ chức); `VIEWER` chỉ đọc.
@@ -113,7 +146,8 @@ Scope theo node như Tenant Node ở trên.
 |--------|------|--------------|--------------|-------|
 | GET | /api/v1/gateways/{id}/pins | — | `{ data: GatewayPinResponse[] }` | List pin của gateway |
 | POST | /api/v1/gateways/{id}/pins | `{ direction, type, name, metricId?, pinNumber }` | `{ data: GatewayPinResponse }` | Tạo pin, validate CHECK: INPUT⇒`metricId` bắt buộc; OUTPUT⇒`metricId` NULL |
-| PUT | /api/v1/gateways/{id}/pins/{pinId} | `{ name?, enabled? }` | `{ data: GatewayPinResponse }` | Sửa tên/toggle enabled — không có endpoint xóa (bảng không có `deleted_at`, pin gắn cố định với hardware) |
+| PUT | /api/v1/gateways/{id}/pins/{pinId} | `{ name?, enabled? }` | `{ data: GatewayPinResponse }` | Sửa tên/toggle enabled — chỉ 2 field này mutable (`type`/`pinNumber`/`metricId` gắn với phần cứng, đổi thì tạo pin mới) |
+| DELETE | /api/v1/gateways/{id}/pins/{pinId} | — | 200, no body | **Xóa cứng** (bảng `gateway_pin` không có `deleted_at`) — xóa luôn `datastream` gắn vào pin (`sourceType=GATEWAY_PIN, sourceId=pinId`) trong cùng transaction, đúng invariant "1 gateway_pin → 1 datastream, lifecycle thuộc pin". 404 `PIN_NOT_FOUND` nếu pin không thuộc gateway. **Chưa dọn widget Dashboard đang bind datastream đó** — `layout_json` giữ nguyên `datastreamId` đã chết, xem ghi chú `DATABASE.md` § datastream |
 
 `GatewayPinResponse`: `{ id, gatewayId, direction, type, name, metricId, pinNumber, powerDesiredState, powerReportedState, enabled }`.
 
@@ -140,12 +174,12 @@ Scope theo node như module Gateway ở trên. `datastream` tự động sinh 1-
 | GET | /api/v1/tenant-nodes/{id}/datastreams | — | `{ data: DatastreamResponse[] }` | List datastream theo node |
 | PUT | /api/v1/datastreams/{id} | `{ name }` | `{ data: DatastreamResponse }` | Đổi tên datastream |
 
-`DatastreamResponse`: `{ id, tenantNodeId, name, metricId, metricCode, metricUnit, sourceType, sourceId, sourceField, sourceGatewayId, sourcePinType, sourcePinNumber, sourceEnabled }`. `metricUnit` = đơn vị thật (VD `°C`) — dùng để hiện trên biểu đồ, khác `metricCode` (VD `temperature`) chỉ để so khớp logic. `sourceGatewayId`/`sourcePinType`/`sourcePinNumber` chỉ có khi `sourceType=GATEWAY_PIN` (denormalize để FE map `RealtimeReadingMessage` → đúng `datastreamId`). `sourceField` chỉ có khi `sourceType=EXTERNAL_SOURCE_JOB` — field trong `query_config.valueColumns` mà datastream này bind vào. `sourceEnabled` = `gateway_pin.enabled` hiện tại — `false` khi pin bị tắt; **datastream không bị xóa khi tắt pin**, chỉ dừng nhận data, FE dùng field này để hiện badge "Pin đã tắt".
+`DatastreamResponse`: `{ id, tenantNodeId, name, metricId, metricCode, metricUnit, sourceType, sourceId, sourceField, sourceGatewayId, sourcePinType, sourcePinNumber, sourceEnabled }`. `metricUnit` = đơn vị thật (VD `°C`) — dùng để hiện trên biểu đồ, khác `metricCode` (VD `temperature`) chỉ để so khớp logic. `sourceGatewayId`/`sourcePinType`/`sourcePinNumber` chỉ có khi `sourceType=GATEWAY_PIN` (denormalize để FE map `RealtimeReadingMessage` → đúng `datastreamId`). `sourceField` chỉ có khi `sourceType=EXTERNAL_SOURCE_JOB` — tên cột trong kết quả truy vấn của job mà datastream này bind vào. `sourceEnabled` = `gateway_pin.enabled` hiện tại — `false` khi pin bị tắt; **datastream không bị xóa khi tắt pin**, chỉ dừng nhận data, FE dùng field này để hiện badge "Pin đã tắt".
 
 | Method | Path | Body / Query | Response mẫu | Mô tả |
 |--------|------|--------------|--------------|-------|
 | GET | /api/v1/external-sources/{sourceId}/datastreams | — | `{ data: DatastreamResponse[] }` | List datastream thuộc 1 nguồn (join qua job) — dùng cho dialog "Thêm widget" ở dashboard theo nguồn |
-| POST | /api/v1/external-source-jobs/{jobId}/datastreams | `{ name, metricId, sourceField }` | `{ data: DatastreamResponse }` | Tạo datastream thủ công cho `external_source_job` (khác gateway_pin tự động) — `sourceField` phải khớp `query_config.valueColumns` của job |
+| POST | /api/v1/external-source-jobs/{jobId}/datastreams | `{ name, metricId, sourceField }` | `{ data: DatastreamResponse }` | Tạo datastream thủ công cho `external_source_job` (khác gateway_pin tự động) — `sourceField` phải là **cột thật trong kết quả truy vấn** của job (backend chạy thử để đối chiếu), 400 `INVALID_SOURCE_FIELD` nếu không có |
 | DELETE | /api/v1/datastreams/{id} | — | 200, no body | Chỉ cho phép khi `sourceType=EXTERNAL_SOURCE_JOB` — 400 nếu là `GATEWAY_PIN` (lifecycle vẫn thuộc gateway_pin) |
 
 ### Module: External Source (`ExternalSourceController`)
@@ -162,18 +196,51 @@ Scope theo node như module Gateway ở trên — khác Gateway, `tenantNodeId` 
 
 `ExternalSourceResponse`: `{ id, tenantNodeId, name, connectionType, connectionConfig, lastSyncStatus, lastSyncAt, lastError }` — **không** trả `credential` dưới bất kỳ hình thức nào.
 
+#### Đọc trực tiếp database ngoài (`ExternalDbController`) — **Mới**
+
+Ba endpoint mở JDBC thẳng tới database của nguồn, phục vụ luồng dựng job ở `x-frontend`. Mọi kết nối đặt `Connection.setReadOnly(true)` (Postgres bên kia tự từ chối lệnh ghi) + `statement_timeout` (`app.external.query-timeout-seconds`) + trần dòng (`app.external.preview-max-rows`). Quyền `TENANT_ADMIN/MANAGER/OPERATOR` — `VIEWER` **không** được chạy truy vấn tuỳ ý lên database khách hàng.
+
+| Method | Path | Body / Query | Response mẫu | Mô tả |
+|--------|------|--------------|--------------|-------|
+| POST | /api/v1/external-sources/test-connection | `{ connectionConfig, credential }` | `{ data: TestConnectionResponse }` | Thử kết nối **trước khi lưu** (form "Thêm nguồn" chưa có id). FE chặn nút Lưu tới khi `ok=true` |
+| POST | /api/v1/external-sources/{id}/test-connection | — | `{ data: TestConnectionResponse }` | Thử lại nguồn đã lưu, dùng credential đã mã hoá trong DB |
+| GET | /api/v1/external-sources/{id}/schema | — | `{ data: SchemaTable[] }` | Danh sách bảng + cột + kiểu dữ liệu (đọc `information_schema`), bỏ `pg_catalog`/`information_schema` |
+| POST | /api/v1/external-sources/{id}/preview | `{ sql, timestampColumn }` | `{ data: PreviewResponse }` | Chạy thử truy vấn, trả tối đa `preview-max-rows` dòng. Bind `:cursor = epoch` — đúng bằng những dòng đầu tiên job sẽ đọc về. Chỉ đọc, không ghi Kafka/InfluxDB |
+
+`TestConnectionResponse`: `{ ok, serverVersion, latencyMs, tableCount, writable, errorCode, errorMessage }`. `writable=true` → cảnh báo mềm "tài khoản có quyền ghi, nên dùng tài khoản chỉ đọc". `errorMessage` dịch sẵn theo SQLState (`28P01` sai mật khẩu, `3D000` database không tồn tại, `08006` không tới được máy chủ...) thay vì trả "thất bại" chung chung.
+
+`SchemaTable`: `{ schema, name, estimatedRows, columns: SchemaColumn[] }`. `SchemaColumn`: `{ name, dataType, timestamp, numeric }`.
+
+`PreviewResponse`: `{ columns: [{ name, dataType, numeric }], rows: any[][], rowCount, elapsedMs }`. Lỗi SQL → 400 `QUERY_FAILED` kèm thông báo Postgres nguyên văn; thiếu cột thời gian trong kết quả → 400 `TIMESTAMP_COLUMN_MISSING`; SQL không có `:cursor` → 400 `MISSING_CURSOR_PLACEHOLDER` (chạy thử cùng luật với lúc lưu, tránh cảnh "thử xanh, lưu đỏ").
+
 ### Module: External Source Job (`ExternalSourceJobController`)
 
 Scope theo `external_source` cha (cùng node scope ở trên).
 
 | Method | Path | Body / Query | Response mẫu | Mô tả |
 |--------|------|--------------|--------------|-------|
-| POST | /api/v1/external-sources/{sourceId}/jobs | `{ name, queryConfig: {table, timestampColumn, valueColumns[]}, filterConfig?: [{column, operator, value}], scheduleCron }` | `{ data: ExternalSourceJobResponse }` | Tạo — validate identifier allowlist + parse thử `scheduleCron` bằng cron-utils (400 nếu sai cú pháp) |
+| POST | /api/v1/external-sources/{sourceId}/jobs | `{ name, queryConfig: {sql, timestampColumn}, scheduleCron, startFrom, startFromDate? }` | `{ data: ExternalSourceJobResponse }` | Tạo — validate `sql` (`SqlQueryValidator`) + **backend tự chạy thử** trước khi ghi + parse `scheduleCron` bằng cron-utils |
 | GET | /api/v1/external-sources/{sourceId}/jobs | — | `{ data: ExternalSourceJobResponse[] }` | List job của source |
-| PUT | /api/v1/external-source-jobs/{id} | `{ name?, queryConfig?, filterConfig?, scheduleCron? }` | `{ data: ExternalSourceJobResponse }` | Sửa — đổi `queryConfig`/`filterConfig`/`scheduleCron` → reset `incrementalCursor=null` |
+| PUT | /api/v1/external-source-jobs/{id} | `{ name, queryConfig?, scheduleCron? }` | `{ data: ExternalSourceJobResponse }` | Sửa — chạy thử lại + đối chiếu cột đang gắn kênh; chỉ reset cursor về epoch khi đổi `timestampColumn` |
+| POST | /api/v1/external-source-jobs/{id}/run-now | — | `{ data: ExternalSourceJobResponse }` | **Mới.** Kéo `next_run_at` về hiện tại; `x-ingestion-service` nhặt trong ≤15s (sweep). Không gọi RPC giữa service — đúng ranh giới ở `ARCHITECTURE.md` |
+| GET | /api/v1/external-source-jobs/{id}/runs | Query `sinceHours` (mặc định 12) | `{ data: ExternalSourceJobRunResponse[] }` | **Mới.** Lịch sử chạy cho dải nhịp chạy; FE tự gom theo giờ cho biểu đồ số dòng |
 | DELETE | /api/v1/external-source-jobs/{id} | — | 200, no body | Soft delete; 409 `JOB_HAS_DATASTREAMS` nếu còn datastream gắn vào |
 
-`ExternalSourceJobResponse`: `{ id, externalSourceId, name, queryConfig, filterConfig, scheduleCron, incrementalCursor, totalRowCount, lastRunStatus, lastRunAt, nextRunAt, lastError }`.
+`ExternalSourceJobResponse`: `{ id, externalSourceId, name, queryConfig, scheduleCron, incrementalCursor, totalRowCount, lastRunStatus, lastRunAt, nextRunAt, lastError }`.
+
+`ExternalSourceJobRunResponse`: `{ id, status, rowCount, error, startedAt, finishedAt }`.
+
+`startFrom` ∈ `NEW_ONLY` (cursor = now, chỉ theo dõi từ giờ) | `ALL_HISTORY` (cursor = epoch, kéo hết lịch sử) | `FROM_DATE` (cần `startFromDate`, thiếu → 400 `START_DATE_REQUIRED`).
+
+**Mã lỗi khi lưu job:**
+
+| Code | Khi nào |
+|------|---------|
+| `MISSING_CURSOR_PLACEHOLDER` | `sql` không chứa `:cursor` — job sẽ đọc lại toàn bộ bảng mỗi lần chạy |
+| `INVALID_QUERY` | Không bắt đầu bằng `SELECT`/`WITH`, hoặc có nhiều câu lệnh |
+| `QUERY_FAILED` | Chạy thử hỏng — trả nguyên văn lỗi Postgres kèm vị trí |
+| `TIMESTAMP_COLUMN_MISSING` | Kết quả không có cột `timestampColumn` |
+| `BOUND_COLUMN_MISSING` | Truy vấn mới mất cột mà một `datastream` đang gắn — chặn để widget dashboard không chết âm thầm |
 
 ### Module: Dashboard (`DashboardController`)
 
@@ -214,6 +281,22 @@ Scope theo gateway như module Gateway ở trên (`@nodeScope.canAccessGateway`)
 | POST | /api/v1/gateways/{gatewayId}/pins/{pinId}/commands | `{ commandType: "TURN_ON"\|"TURN_OFF", idempotencyKey }` | `{ data: CommandResponse }` | Tạo lệnh bật/tắt relay — 400 nếu pin không phải `OUTPUT`; trong 1 transaction ghi `command(status=PENDING)` + `outbox_event`; trùng `idempotencyKey` (cùng `requested_by`) → trả về `command` đã tồn tại thay vì tạo mới |
 
 `CommandResponse`: `{ id, gatewayId, pinId, commandType, status, requestedAt, timeoutAt, error }`. `status` ∈ `PENDING`/`DISPATCHED`/`ACKNOWLEDGED`/`FAILED`/`TIMED_OUT` — cập nhật tiếp theo qua WebSocket, xem `ARCHITECTURE.md` § Flow Command.
+
+### Module: Platform Dashboard (`PlatformDashboardController`)
+
+`@PreAuthorize("hasAuthority('PLATFORM_ADMIN')")` — chỉ System Admin. Dùng cho trang Dashboard của `x-frontend-admin` (tổng hợp cross-tenant, không có ở `x-frontend`).
+
+| Method | Path | Body / Query | Response mẫu | Mô tả |
+|--------|------|--------------|--------------|-------|
+| GET | /api/v1/platform/dashboard/summary | — | `{ data: PlatformDashboardSummaryResponse }` | Tổng số `tenant_user` (không tính `platform_user`), tổng số `tenant`, tổng số `gateway` (toàn platform, kể cả gateway chưa gán Site) + top 5 tenant nhiều `tenant_user` nhất |
+| GET | /api/v1/platform/dashboard/user-trend | Query `range` (`3d`\|`7d`\|`30d`, mặc định `7d`) | `{ data: TrendPointResponse[] }` | Tổng lũy kế `tenant_user` theo từng ngày trong khoảng chọn (carry-forward ngày không phát sinh mới); 400 `INVALID_RANGE` nếu `range` khác 3 giá trị trên |
+| GET | /api/v1/platform/dashboard/tenant-trend | Query `range` (`3d`\|`7d`\|`30d`, mặc định `7d`) | `{ data: TrendPointResponse[] }` | Giống trên nhưng đếm `tenant` |
+
+`PlatformDashboardSummaryResponse`: `{ totalTenantUsers, totalTenants, totalDevices, topTenants: [{ tenantId, tenantName, userCount }] }`.
+
+`TrendPointResponse`: `{ date, value }` — `date` dạng `yyyy-MM-dd`, `value` là số lũy kế tính đến hết ngày đó.
+
+Đếm `tenant_user`/`gateway` cross-tenant bắt buộc dùng native query bypass Hibernate `@TenantId` (System Admin không có `tenant_id`) — cùng pattern `GatewayRepository.macAddressExistsPlatformWide` đã có từ Phase 2 (xem `DATABASE.md`).
 
 ---
 

@@ -4,7 +4,7 @@ import { useTenantNodesQuery } from '@/queries/useTenantNodesQuery'
 /**
  * "Tổng quan" trong Sidebar không gắn sẵn 1 node cụ thể — resolve về TENANT_ROOT
  * (dashboard.tenant_node_id có thể là bất kỳ node nào, xem DATABASE.md § dashboard),
- * mỗi Site có Dashboard riêng của nó truy cập qua SiteDetailPage.
+ * mỗi Site có Dashboard riêng của nó truy cập qua /dashboard/:nodeId.
  */
 export default function DashboardOverviewRedirect() {
   const { data: nodes, isLoading } = useTenantNodesQuery()

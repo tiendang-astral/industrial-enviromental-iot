@@ -9,8 +9,6 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Spinner } from '@/components/ui/spinner'
-import { cn } from '@/lib/utils'
-import { buttonVariants } from '@/components/ui/button'
 
 interface ConfirmDialogProps {
   open: boolean
@@ -47,7 +45,7 @@ export function ConfirmDialog({
           <AlertDialogCancel disabled={isPending}>{cancelLabel}</AlertDialogCancel>
           <AlertDialogAction
             disabled={isPending}
-            className={cn(destructive && buttonVariants({ variant: 'destructive' }))}
+            variant={destructive ? 'destructive' : 'default'}
             onClick={(event) => {
               // Giữ dialog mở tới khi mutation xong, để người dùng thấy spinner thay vì
               // dialog đóng rồi mới biết thành công hay lỗi qua toast.

@@ -325,7 +325,8 @@
         background-repeat: no-repeat;
     }
 
-    /* Topbar và các dải khung ngang. */
+    /* Topbar, hàng tiêu đề cột của bảng, và các dải khung ngang khác. Chữ đặt trên nền này phải
+       dùng bộ --surface-deep-* (xem § Quy tắc styling), không dùng --foreground. */
     .bg-app-chrome {
         background-color: var(--surface-deep);
         background-image: var(--gradient-chrome);
@@ -338,13 +339,28 @@
     background-image: var(--gradient-sidebar);
 }
 
+/* Field bắt buộc: gắn `data-required` lên <FieldLabel>. Làm ở CSS chứ không thêm prop vào
+   `ui/field.tsx` (file shadcn generated, hạn chế sửa tay) — và làm ở một chỗ thì mọi form đều
+   đánh dấu giống nhau, không ai tự chế dấu sao riêng.
+   `aria-hidden` không đặt được cho ::after, nhưng content chỉ trang trí: ràng buộc thật đã nằm ở
+   `required`/`aria-invalid` của control và ở zod schema. */
+[data-slot="field-label"][data-required]::after {
+    content: "*";
+    /* FieldLabel là flex có gap-2, nên ::after thành flex item và ăn nguyên 8px khoảng cách —
+       trừ lại rồi cộng 3px để dấu sao bám sát chữ. */
+    margin-inline-start: calc(3px - 0.5rem);
+    color: var(--critical);
+    font-weight: 500;
+}
+
 /* Ô nhập được: có nền riêng (--field) nên tách hẳn khỏi mặt nền chứa nó. Mặc định của shadcn là
    `bg-transparent` + `dark:bg-input/30`, ở chế độ tối cho ra ô chỉ sáng hơn nền modal ~0.02 —
    nhìn như không có ô nào cả. */
 [data-slot="input"],
 [data-slot="input-group"],
 [data-slot="textarea"],
-[data-slot="native-select"] {
+[data-slot="native-select"],
+[data-slot="select-trigger"] {
     background-color: var(--field);
 }
 
@@ -357,6 +373,17 @@
     color: var(--muted-foreground);
     opacity: 1;
     cursor: default;
+}
+
+/* Overlay của Dialog/AlertDialog: nền TỐI thật, không phải lớp mờ. Mặc định của shadcn là
+   `bg-black/10` + `backdrop-blur-xs` — trên nền tối của app nó gần như không thấy, hộp thoại
+   trông như dán đè lên giao diện còn đọc được nguyên vẹn phía sau. Tối hẳn thì mắt biết ngay
+   phần dưới đã bị khoá tương tác. Bỏ luôn backdrop-blur: làm mờ chữ phía sau không khiến hộp
+   thoại nổi hơn, chỉ khiến toàn màn hình trông như lỗi render. */
+[data-slot="dialog-overlay"],
+[data-slot="alert-dialog-overlay"] {
+    background-color: oklch(0 0 0 / 62%);
+    backdrop-filter: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

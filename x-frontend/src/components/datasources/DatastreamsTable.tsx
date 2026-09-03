@@ -16,12 +16,10 @@ export function DatastreamsTable({
   externalSourceId,
   datastreams,
   metrics,
-  onAdd,
 }: {
   externalSourceId: number
   datastreams: Datastream[]
   metrics: Metric[]
-  onAdd: () => void
 }) {
   const deleteMutation = useDeleteDatastreamMutation(externalSourceId)
   const [deleteTarget, setDeleteTarget] = useState<Datastream | null>(null)
@@ -47,19 +45,16 @@ export function DatastreamsTable({
       key: 'name',
       header: 'Tên datastream',
       cell: (row) => <span className="font-medium">{row.name}</span>,
-      sortValue: (row) => row.name,
     },
     {
       key: 'sourceField',
       header: 'Cột nguồn',
       cell: (row) => <span className="text-muted-foreground">{row.sourceField ?? '—'}</span>,
-      sortValue: (row) => row.sourceField,
     },
     {
       key: 'metric',
       header: 'Metric',
       cell: (row) => <span className="text-muted-foreground">{metricLabel(row.metricId)}</span>,
-      sortValue: (row) => metricLabel(row.metricId),
     },
     {
       key: 'latestValue',
@@ -69,18 +64,16 @@ export function DatastreamsTable({
         row.latestValue != null
           ? `${row.latestValue}${row.metricUnit ? ` ${row.metricUnit}` : ''}`
           : '—',
-      sortValue: (row) => row.latestValue,
     },
     {
       key: 'latestMeasuredAt',
       header: 'Cập nhật gần nhất',
       className: 'text-muted-foreground tabular',
       cell: (row) => (row.latestMeasuredAt ? formatDateTime(row.latestMeasuredAt) : 'Chưa có dữ liệu'),
-      sortValue: (row) => row.latestMeasuredAt,
     },
     {
       key: 'actions',
-      header: <span className="sr-only">Tác vụ</span>,
+      header: <span className="sr-only">Hành động</span>,
       headerClassName: 'w-12',
       cell: (row) => (
         <Tooltip>
@@ -113,11 +106,6 @@ export function DatastreamsTable({
             icon={Waves}
             title="Chưa có datastream nào"
             description="Job đang đọc dữ liệu nhưng chưa cột nào được gắn vào metric, nên dashboard chưa hiển thị được gì."
-            action={
-              <Button size="sm" variant="outline" onClick={onAdd}>
-                Thêm datastream
-              </Button>
-            }
           />
         }
       />
@@ -126,7 +114,13 @@ export function DatastreamsTable({
         open={!!deleteTarget}
         onOpenChange={(open) => !open && setDeleteTarget(null)}
         title="Xóa datastream này?"
-        description={`"${deleteTarget?.name}" sẽ bị gỡ khỏi job. Widget đang dùng datastream này sẽ mất dữ liệu. Số liệu đã ghi vào InfluxDB vẫn giữ nguyên.`}
+        question={
+          <>
+            Bạn có chắc chắn muốn xóa{' '}
+            <span className="font-semibold">&ldquo;{deleteTarget?.name}&rdquo;</span>?
+          </>
+        }
+        description="Datastream sẽ bị gỡ khỏi job. Widget đang dùng datastream này sẽ mất dữ liệu. Số liệu đã ghi vào InfluxDB vẫn giữ nguyên."
         confirmLabel="Xóa datastream"
         destructive
         isPending={deleteMutation.isPending}

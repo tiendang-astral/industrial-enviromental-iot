@@ -8,7 +8,7 @@
 
 > **2 SPA độc lập, deploy riêng, không share code/package giữa 2 project** (cùng triết lý "chấp nhận duplicate" như 3 Backend service ở mục 2):
 > - **`x-frontend/`** — app cho **tenant user** (Tenant Admin / Kỹ thuật viên / Nhân viên): dashboard, alert, command, report, quản lý tổ chức trong tenant. Dùng đủ stack ở `TECHSTACK.md` (ECharts, react-grid-layout, @stomp/stompjs...).
-> - **`x-frontend-admin/`** — app cho **platform user** (System Admin): quản lý tenant, quản lý platform_user. Scope nhỏ, **không cần** ECharts/react-grid-layout/@stomp/stompjs (không có dashboard/widget/realtime) — chỉ cần Router, TanStack Query, Axios, RHF+Zod, shadcn/ui.
+> - **`x-frontend-admin/`** — app cho **platform user** (System Admin): quản lý tenant, quản lý platform_user, Dashboard tổng hợp cross-tenant. Scope nhỏ, **không cần** react-grid-layout/@stomp/stompjs (không có widget kéo-thả/realtime) — Router, TanStack Query, Axios, RHF+Zod, shadcn/ui, **và Recharts** (qua `components/ui/chart.tsx`, chỉ dùng cho trang Dashboard: line/area biến động + bar ngang top tenant, không cần ECharts vì không có time-series zoom/pan/brush như `x-frontend`).
 > - Cả 2 gọi chung 1 Backend API (`x-backend`) — Backend tự phân biệt `platform_user`/`tenant_user` theo `username` khi login, không cần API riêng cho từng frontend (xem `ARCHITECTURE.md` § Flow Auth/RBAC).
 > - Quy tắc dưới đây (naming, layer responsibility, cấu trúc thư mục `src/`) áp dụng **cho cả 2 project**, mỗi project tự có `components/ui` (shadcn generated riêng), `services/`, `stores/`... của mình.
 
@@ -74,8 +74,9 @@ Mỗi app tự có bản riêng (không share code, đúng nguyên tắc ở đ�
 | `FormDialog` | Mọi form trong dialog — bọc sẵn `FieldGroup` + footer Hủy/Lưu có `Spinner` |
 | `ConfirmDialog` | **Bắt buộc** trước mọi hành động phá hủy (xóa, khóa, gửi lệnh relay); `description` phải nêu hậu quả cụ thể |
 | `StatusBadge` | Mọi mã trạng thái backend → nhãn tiếng Việt + màu semantic. Cấm render thẳng `ACTIVE`/`LOCKED` |
-| `EmptyState` | Trạng thái rỗng, luôn kèm CTA tạo dữ liệu đầu tiên |
+| `EmptyState` | Trạng thái rỗng — icon + tiêu đề + câu giải thích. **Không** đặt nút "Thêm" ở đây khi dùng trong bảng: nút tạo đã nằm cố định ở `PageHeader`, lặp lại thành hai đích bấm cho cùng một việc và nó nhảy chỗ theo việc bảng có dữ liệu hay không |
 | `LoadingButton` | Nút submit — `Spinner` + `disabled`, giữ nguyên nhãn (không đổi thành "Đang lưu...") |
+| `TenantNodePicker` | **Mọi** ô chọn đơn vị tổ chức — cây có thụt lề + rẽ nhánh, `mode="single"`/`"multiple"`. Node không hợp lệ truyền qua `selectable` để **khoá**, không lọc bỏ (bỏ hẳn thì cây gãy nhánh, người dùng mất mốc định vị). Cấm dựng lại `Select` phẳng liệt kê node |
 
 ### Quy tắc styling
 
@@ -88,6 +89,7 @@ Mỗi app tự có bản riêng (không share code, đúng nguyên tắc ở đ�
 - **Ngày giờ:** dùng `lib/datetime.ts` (`formatDateTime`, `formatRelativeTime`), không gọi `toLocaleString('vi-VN')` rải rác trong page.
 - **Animation:** chỉ dùng 3 biến `--motion-fast|base|slow` + `--motion-ease` khai trong `index.css`, cấm duration rời rạc. Toàn bộ animation tắt dưới `prefers-reduced-motion: reduce`.
 - **Số liệu đo:** thêm class `.tabular` (tabular-nums) để chữ số không nhảy ngang khi giá trị realtime đổi.
+- **Field bắt buộc:** gắn `data-required` lên `<FieldLabel>`, dấu `*` do `index.css` vẽ. Đối chiếu với zod schema *và* `@NotBlank`/`@NotNull` ở backend — đánh dấu sai còn tệ hơn không đánh dấu.
 
 ### Đặc điểm riêng
 

@@ -1,6 +1,5 @@
 package com.corp.iot.ingestion.external.entity;
 
-import com.corp.iot.ingestion.external.dto.ExternalSourceFilter;
 import com.corp.iot.ingestion.external.dto.ExternalSourceQueryConfig;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -13,7 +12,6 @@ import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
-import java.util.List;
 
 // Entity riêng của Ingestion Service — chỉ khai field cần cho scheduler + query executor
 // (xem ExternalSourceSchedulerService, ExternalQueryExecutorService).
@@ -36,10 +34,6 @@ public class ExternalSourceJob {
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "query_config", columnDefinition = "jsonb")
     private ExternalSourceQueryConfig queryConfig;
-
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "filter_config", columnDefinition = "jsonb")
-    private List<ExternalSourceFilter> filterConfig;
 
     @Column(name = "schedule_cron", nullable = false)
     private String scheduleCron;

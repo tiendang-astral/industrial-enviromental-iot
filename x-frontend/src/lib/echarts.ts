@@ -34,18 +34,56 @@ function lineSeries(history: ReadingPoint[], palette: ChartPalette, showSymbol: 
   }
 }
 
-/** Sparkline dùng cho GatewayDetailPage (card nhỏ, không trục) — LineWidget Dashboard
- * dùng buildAxisLineOption bên dưới, tập trung vào biểu đồ đầy đủ trục/mốc giá trị. */
-export function buildSparklineOption(history: ReadingPoint[], palette: ChartPalette) {
+/**
+ * Đường xu hướng trên card pin: chỉ hiện trục thời gian, `min`/`max` cố định theo khoảng đang xem.
+ * Nhờ trục cố định, pin chưa có dữ liệu vẫn vẽ ra khung có mốc giờ chạy hết cả ngày — nhìn ra ngay
+ * là "chưa có số liệu", chứ không phải một vùng trắng trông như lỗi render. Cũng nhờ vậy card
+ * không nhảy layout khi điểm dữ liệu đầu tiên về.
+ */
+export function buildPinTrendOption(
+  history: ReadingPoint[],
+  palette: ChartPalette,
+  rangeMinutes: number,
+  now: number
+) {
   return {
-    grid: { left: 0, right: 8, top: 8, bottom: 0, containLabel: false },
-    xAxis: { type: 'category', show: false, data: history.map((p) => p.measuredAt) },
-    yAxis: { type: 'value', show: false, scale: true },
+    grid: { left: 0, right: 8, top: 8, bottom: 0, containLabel: true },
+    xAxis: {
+      type: 'time',
+      min: now - rangeMinutes * 60_000,
+      max: now,
+      axisLine: { lineStyle: { color: palette.grid } },
+      axisTick: { lineStyle: { color: palette.grid } },
+      axisLabel: {
+        fontSize: 10,
+        color: palette.text,
+        /*
+         * Cửa sổ 24h trượt luôn vắt qua nửa đêm, nên nếu mốc nào cũng chỉ có `HH:mm` thì trục đọc
+         * ra như chạy ngược (16:00 → 12:00) — không có gì cho biết 16:00 là của hôm qua. Mốc rơi
+         * đúng 00:00 vì vậy hiện ngày thay cho giờ, đánh dấu chỗ sang ngày mới.
+         */
+        formatter: (value: number) => {
+          const at = new Date(value)
+          return at.getHours() === 0 && at.getMinutes() === 0
+            ? at.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' })
+            : at.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
+        },
+      },
+    },
+    // Ẩn trục giá trị: giá trị hiện tại đã in to ngay bên trái biểu đồ, dựng thêm một cột số nữa
+    // chỉ ăn mất bề ngang vốn đã hẹp. `scale: true` để đường vẫn trải hết chiều cao.
+    yAxis: { type: 'value', scale: true, show: false },
     tooltip: {
       trigger: 'axis',
       valueFormatter: (value: number) => value.toString(),
     },
-    series: [lineSeries(history, palette, false)],
+    series: [
+      {
+        ...lineSeries(history, palette, false),
+        // Trục thời gian cần cặp [mốc, giá trị]; mảng giá trị đơn thuần chỉ hợp với trục category.
+        data: history.map((point) => [new Date(point.measuredAt).getTime(), point.value]),
+      },
+    ],
   }
 }
 

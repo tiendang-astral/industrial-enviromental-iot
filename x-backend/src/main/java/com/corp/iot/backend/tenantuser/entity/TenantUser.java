@@ -6,6 +6,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.SQLRestriction;
 import org.hibernate.annotations.TenantId;
 import org.hibernate.annotations.UpdateTimestamp;
 
@@ -13,6 +14,13 @@ import java.time.Instant;
 
 @Entity
 @Table(name = "tenant_user")
+/*
+ * Soft delete: user đã xoá phải biến mất khỏi MỌI query entity-managed, kể cả luồng đăng nhập
+ * (findByUsernameIgnoreCase) — nếu không thì tài khoản đã xoá vẫn login được. Cùng cách
+ * PlatformUser xử lý từ V9. Native query (Platform Dashboard) không bị @SQLRestriction chi phối
+ * nên vẫn tự lọc "deleted_at IS NULL" bằng tay.
+ */
+@SQLRestriction("deleted_at IS NULL")
 @Getter
 @Setter
 @NoArgsConstructor
@@ -48,4 +56,7 @@ public class TenantUser {
     @UpdateTimestamp
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
+
+    @Column(name = "deleted_at")
+    private Instant deletedAt;
 }

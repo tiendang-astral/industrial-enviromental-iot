@@ -44,6 +44,9 @@ app:
     online-threshold-minutes: 5
   command:
     timeout-seconds: 30
+  external:
+    query-timeout-seconds: 10
+    preview-max-rows: 50
 
 server:
   port: 8080

@@ -20,3 +20,7 @@ export async function updateGatewayPin(
   const { data } = await httpClient.put<ApiEnvelope<GatewayPin>>(`/gateways/${gatewayId}/pins/${pinId}`, payload)
   return data.data!
 }
+
+export async function deleteGatewayPin(gatewayId: number, pinId: number): Promise<void> {
+  await httpClient.delete(`/gateways/${gatewayId}/pins/${pinId}`)
+}

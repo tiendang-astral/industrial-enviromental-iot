@@ -11,7 +11,7 @@ import GatewayDetailPage from '@/pages/GatewayDetailPage'
 import LoginPage from '@/pages/LoginPage'
 import OrganizationPage from '@/pages/OrganizationPage'
 import ReportsPage from '@/pages/ReportsPage'
-import SiteDetailPage from '@/pages/SiteDetailPage'
+import UsersPage from '@/pages/UsersPage'
 import SourceDashboardPage from '@/pages/SourceDashboardPage'
 
 export const router = createBrowserRouter([
@@ -32,10 +32,6 @@ export const router = createBrowserRouter([
           {
             path: '/organization',
             element: <OrganizationPage />,
-          },
-          {
-            path: '/organization/sites/:siteId',
-            element: <SiteDetailPage />,
           },
           {
             path: '/devices',
@@ -72,6 +68,10 @@ export const router = createBrowserRouter([
           {
             path: '/reports',
             element: <ReportsPage />,
+          },
+          {
+            path: '/users',
+            element: <UsersPage />,
           },
         ],
       },

@@ -3,7 +3,6 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useForm } from 'react-hook-form'
 import { toast } from 'sonner'
 import { Lock, LockOpen, Plus, Trash2, Users } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Field, FieldError, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
@@ -110,35 +109,43 @@ export default function PlatformUsersPage() {
     {
       key: 'username',
       header: 'Username',
-      sortValue: (row) => row.username,
+      filter: { type: 'text', placeholder: 'Tìm username', getValue: (row) => row.username },
       cell: (row) => (
-        <span className="flex items-center gap-2 font-medium">
+        <span className="flex items-center gap-1.5 font-medium">
           {row.username}
-          {row.id === me?.id && (
-            <Badge variant="outline" className="font-normal">
-              bạn
-            </Badge>
-          )}
+          {row.id === me?.id && <span className="text-muted-foreground">(bạn)</span>}
         </span>
       ),
     },
-    { key: 'fullName', header: 'Họ tên', sortValue: (row) => row.fullName, cell: (row) => row.fullName },
+    {
+      key: 'fullName',
+      header: 'Họ tên',
+      filter: { type: 'text', placeholder: 'Tìm họ tên', getValue: (row) => row.fullName },
+      cell: (row) => row.fullName,
+    },
     {
       key: 'email',
       header: 'Email',
-      sortValue: (row) => row.email,
+      filter: { type: 'text', placeholder: 'Tìm email', getValue: (row) => row.email ?? '' },
       cell: (row) => <span className="text-muted-foreground">{row.email || '—'}</span>,
     },
     {
       key: 'status',
       header: 'Trạng thái',
-      sortValue: (row) => row.status,
+      filter: {
+        type: 'select',
+        placeholder: 'Trạng thái',
+        getValue: (row) => row.status,
+        options: [
+          { value: 'ACTIVE', label: 'Đang hoạt động' },
+          { value: 'LOCKED', label: 'Đã khóa' },
+        ],
+      },
       cell: (row) => <StatusBadge status={row.status} />,
     },
     {
       key: 'createdAt',
       header: 'Ngày tạo',
-      sortValue: (row) => row.createdAt,
       cell: (row) => (
         <span className="tabular text-muted-foreground">{formatDate(row.createdAt)}</span>
       ),
@@ -209,21 +216,12 @@ export default function PlatformUsersPage() {
         rows={platformUsers}
         getRowId={(row) => row.id}
         isLoading={isLoading}
-        searchable={{
-          placeholder: 'Tìm theo username, họ tên hoặc email',
-          getText: (row) => `${row.username} ${row.fullName} ${row.email ?? ''}`,
-        }}
+        showIndex
         empty={
           <EmptyState
             icon={Users}
             title="Chưa có tài khoản quản trị nào"
             description="Tạo tài khoản System Admin để có người quản trị nền tảng."
-            action={
-              <Button onClick={() => openCreate(true)}>
-                <Plus data-icon="inline-start" />
-                Tạo tài khoản
-              </Button>
-            }
           />
         }
       />
@@ -270,8 +268,8 @@ export default function PlatformUsersPage() {
         title={statusTarget?.status === 'ACTIVE' ? 'Khóa tài khoản này?' : 'Kích hoạt lại tài khoản?'}
         description={
           statusTarget?.status === 'ACTIVE'
-            ? `"${statusTarget?.username}" sẽ bị đăng xuất khỏi mọi thiết bị và không đăng nhập lại được.`
-            : `"${statusTarget?.username}" sẽ đăng nhập lại được ngay sau khi kích hoạt.`
+            ? `Bạn có chắc chắn muốn khóa tài khoản "${statusTarget?.username}"? Tài khoản này sẽ bị đăng xuất khỏi mọi thiết bị và không đăng nhập lại được.`
+            : `Bạn có chắc chắn muốn kích hoạt lại tài khoản "${statusTarget?.username}"? Tài khoản này sẽ đăng nhập lại được ngay sau khi kích hoạt.`
         }
         confirmLabel={statusTarget?.status === 'ACTIVE' ? 'Khóa tài khoản' : 'Kích hoạt'}
         destructive={statusTarget?.status === 'ACTIVE'}
@@ -283,7 +281,7 @@ export default function PlatformUsersPage() {
         open={!!deleteTarget}
         onOpenChange={(open) => !open && setDeleteTarget(null)}
         title="Xóa tài khoản quản trị?"
-        description={`"${deleteTarget?.username}" sẽ bị xóa và thu hồi toàn bộ phiên đăng nhập. Username sẽ được giải phóng để dùng lại. Hành động này không thể hoàn tác.`}
+        description={`Bạn có chắc chắn muốn xóa tài khoản "${deleteTarget?.username}"? Tài khoản sẽ bị xóa và thu hồi toàn bộ phiên đăng nhập. Username sẽ được giải phóng để dùng lại. Hành động này không thể hoàn tác.`}
         confirmLabel="Xóa tài khoản"
         destructive
         isPending={deleteMutation.isPending}

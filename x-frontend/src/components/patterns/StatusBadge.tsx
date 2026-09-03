@@ -27,9 +27,12 @@ const STATUS_MAP: Record<string, { label: string; variant: BadgeVariant }> = {
   CRITICAL: { label: 'Nguy hiểm', variant: 'destructive' },
   // trạng thái suy ra ở FE (gateway online, pin enabled...)
   ONLINE: { label: 'Trực tuyến', variant: 'ok' },
-  OFFLINE: { label: 'Mất kết nối', variant: 'outline' },
+  // Mất kết nối là hỏng thật (gateway ngừng gửi dữ liệu), không phải một nhãn phân loại — để
+  // `outline` thì nó nằm im giữa bảng và người trực ca lướt qua không thấy.
+  OFFLINE: { label: 'Mất kết nối', variant: 'destructive' },
   ENABLED: { label: 'Đang bật', variant: 'ok' },
-  DISABLED: { label: 'Đã tắt', variant: 'outline' },
+  // Tắt là chủ ý, nhưng hệ quả vẫn là không có dữ liệu về — cảnh báo nhẹ, không phải lỗi.
+  DISABLED: { label: 'Đã tắt', variant: 'warning' },
 }
 
 interface StatusBadgeProps {

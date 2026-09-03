@@ -13,7 +13,7 @@
 | Form / Validation | React Hook Form + Zod | RHF 7.x, Zod 4.x | Dùng `Field`/`FieldGroup`/`FieldError` — `@shadcn/form` (`Form`/`FormField`) đã bị shadcn khai tử, registry item nay rỗng |
 | Call API | Axios | 1.x | Interceptor cho JWT refresh, multi-tenant header |
 | Icon | Lucide | | Icon library cho shadcn/ui |
-| Chart | Apache ECharts | 5.x | Time-series lớn, zoom/pan/brush mượt hơn Chart.js/Recharts cho dashboard IoT |
+| Chart | Apache ECharts (`x-frontend`), Recharts (`x-frontend-admin`) | 5.x / 3.x | `x-frontend`: time-series lớn, zoom/pan/brush mượt hơn Chart.js/Recharts cho dashboard IoT. `x-frontend-admin`: Recharts qua shadcn `components/ui/chart.tsx` (đã có sẵn từ lúc cài đủ 62 component, dùng chính thức từ trang Dashboard admin — line/area biến động + bar ngang top tenant), không kéo theo ECharts vì scope nhẹ hơn nhiều so với `x-frontend` |
 | Canvas / Rich Editor | react-grid-layout | 1.x | Widget kéo-thả, resize, lưu layout per-site/per-user |
 | Realtime | @stomp/stompjs | 7.x | STOMP-over-WebSocket, khớp `Spring WebSocket` ở Backend — không dùng socket.io vì Spring không có server socket.io chính thức (quyết định chốt khi làm trang Chi tiết Gateway, ban đầu doc ghi nhầm socket.io-client) |
 | Bundler | Vite | 8.x | |

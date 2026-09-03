@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
 interface PageHeaderProps {
-  title: string
+  title: React.ReactNode
   description?: string
   /** Nút quay lại — chỉ dùng ở trang chi tiết (/:id), trang danh sách đã có breadcrumb. */
   backTo?: string

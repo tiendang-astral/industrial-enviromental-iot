@@ -1,41 +1,49 @@
 package com.corp.iot.backend.externalsourcejob.service;
 
 import com.corp.iot.backend.common.exception.BusinessException;
+import com.corp.iot.backend.datastream.entity.Datastream;
 import com.corp.iot.backend.datastream.entity.SourceType;
 import com.corp.iot.backend.datastream.repository.DatastreamRepository;
+import com.corp.iot.backend.externaldb.dto.ExternalDbDtos.PreviewColumn;
+import com.corp.iot.backend.externaldb.dto.ExternalDbDtos.PreviewResponse;
+import com.corp.iot.backend.externaldb.service.ExternalSourceQueryService;
 import com.corp.iot.backend.externalsource.repository.ExternalSourceRepository;
 import com.corp.iot.backend.externalsourcejob.dto.CreateExternalSourceJobRequest;
-import com.corp.iot.backend.externalsourcejob.dto.ExternalSourceFilter;
 import com.corp.iot.backend.externalsourcejob.dto.ExternalSourceJobResponse;
+import com.corp.iot.backend.externalsourcejob.dto.ExternalSourceJobRunResponse;
 import com.corp.iot.backend.externalsourcejob.dto.ExternalSourceQueryConfig;
+import com.corp.iot.backend.externalsourcejob.dto.StartFrom;
 import com.corp.iot.backend.externalsourcejob.dto.UpdateExternalSourceJobRequest;
 import com.corp.iot.backend.externalsourcejob.entity.ExternalSourceJob;
 import com.corp.iot.backend.externalsourcejob.mapper.ExternalSourceJobMapper;
 import com.corp.iot.backend.externalsourcejob.repository.ExternalSourceJobRepository;
+import com.corp.iot.backend.externalsourcejob.repository.ExternalSourceJobRunRepository;
 import com.corp.iot.backend.externalsourcejob.util.CronNextRunCalculator;
-import com.corp.iot.backend.externalsourcejob.util.SqlIdentifierValidator;
+import com.corp.iot.backend.externalsourcejob.util.SqlQueryValidator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeSet;
 
 @Service
 @RequiredArgsConstructor
 public class ExternalSourceJobServiceImpl implements ExternalSourceJobService {
 
     private final ExternalSourceJobRepository externalSourceJobRepository;
+    private final ExternalSourceJobRunRepository externalSourceJobRunRepository;
     private final ExternalSourceRepository externalSourceRepository;
     private final DatastreamRepository datastreamRepository;
     private final ExternalSourceJobMapper externalSourceJobMapper;
-    private final SqlIdentifierValidator sqlIdentifierValidator;
+    private final ExternalSourceQueryService externalSourceQueryService;
+    private final SqlQueryValidator sqlQueryValidator;
     private final CronNextRunCalculator cronNextRunCalculator;
-
-    private static final Set<String> ALLOWED_OPERATORS = Set.of("=", "!=", ">", "<", ">=", "<=");
 
     @Override
     public List<ExternalSourceJobResponse> list(Long externalSourceId) {
@@ -50,16 +58,19 @@ public class ExternalSourceJobServiceImpl implements ExternalSourceJobService {
         if (!externalSourceRepository.existsById(externalSourceId)) {
             throw new BusinessException(HttpStatus.NOT_FOUND, "SOURCE_NOT_FOUND", "Không tìm thấy nguồn dữ liệu");
         }
-        validateQueryConfig(request.queryConfig());
-        validateFilterConfig(request.filterConfig());
+        ExternalSourceQueryConfig config = request.queryConfig();
+        sqlQueryValidator.validate(config.sql());
+        // Backend tự chạy thử thay vì tin FE đã chạy — câu SQL hỏng thì không có cách nào biết
+        // trước khi cron chạy, và đó chính là loại lỗi thiết kế này muốn xoá.
+        externalSourceQueryService.preview(externalSourceId, config.sql(), config.timestampColumn());
 
         ExternalSourceJob job = new ExternalSourceJob();
         job.setExternalSourceId(externalSourceId);
         job.setName(request.name());
-        job.setQueryConfig(request.queryConfig());
-        job.setFilterConfig(request.filterConfig());
+        job.setQueryConfig(config);
         job.setScheduleCron(request.scheduleCron());
         job.setTotalRowCount(0);
+        job.setIncrementalCursor(resolveStartCursor(request).toString());
         job.setNextRunAt(cronNextRunCalculator.nextRunAfter(request.scheduleCron(), Instant.now()));
         externalSourceJobRepository.save(job);
         return externalSourceJobMapper.toResponse(job);
@@ -71,24 +82,25 @@ public class ExternalSourceJobServiceImpl implements ExternalSourceJobService {
         ExternalSourceJob job = getOrThrow(id);
         job.setName(request.name());
 
-        boolean queryChanged = request.queryConfig() != null && !Objects.equals(request.queryConfig(), job.getQueryConfig());
-        boolean filterChanged = request.filterConfig() != null && !Objects.equals(request.filterConfig(), job.getFilterConfig());
         if (request.queryConfig() != null) {
-            validateQueryConfig(request.queryConfig());
-            job.setQueryConfig(request.queryConfig());
-        }
-        if (request.filterConfig() != null) {
-            validateFilterConfig(request.filterConfig());
-            job.setFilterConfig(request.filterConfig());
+            ExternalSourceQueryConfig config = request.queryConfig();
+            sqlQueryValidator.validate(config.sql());
+            PreviewResponse preview = externalSourceQueryService.preview(
+                    job.getExternalSourceId(), config.sql(), config.timestampColumn());
+            requireBoundColumnsPresent(id, preview.columns());
+
+            boolean timestampColumnChanged = !Objects.equals(
+                    config.timestampColumn(), job.getQueryConfig().timestampColumn());
+            job.setQueryConfig(config);
+            // Chỉ reset cursor khi đổi cột thời gian — mốc cũ đo theo cột khác thì vô nghĩa.
+            // Đổi WHERE/SELECT không làm mốc sai, giữ lại để khỏi đọc lại toàn bộ lịch sử.
+            if (timestampColumnChanged) {
+                job.setIncrementalCursor(Instant.EPOCH.toString());
+            }
         }
         if (request.scheduleCron() != null) {
             job.setScheduleCron(request.scheduleCron());
             job.setNextRunAt(cronNextRunCalculator.nextRunAfter(request.scheduleCron(), Instant.now()));
-        }
-        // Cursor cũ có thể không còn hợp lệ với query/filter mới — reset để lần chạy tiếp
-        // theo đọc lại từ đầu (xem DATABASE.md § external_source_job).
-        if (queryChanged || filterChanged) {
-            job.setIncrementalCursor(null);
         }
 
         externalSourceJobRepository.save(job);
@@ -106,22 +118,59 @@ public class ExternalSourceJobServiceImpl implements ExternalSourceJobService {
         externalSourceJobRepository.save(job);
     }
 
-    private void validateQueryConfig(ExternalSourceQueryConfig config) {
-        sqlIdentifierValidator.validate(config.table());
-        sqlIdentifierValidator.validate(config.timestampColumn());
-        config.valueColumns().forEach(sqlIdentifierValidator::validate);
+    @Override
+    @Transactional
+    public ExternalSourceJobResponse runNow(Long id) {
+        ExternalSourceJob job = getOrThrow(id);
+        // Không gọi thẳng x-ingestion-service (3 service chỉ giao tiếp qua Kafka/Redis/Postgres,
+        // xem ARCHITECTURE.md) — kéo next_run_at về hiện tại để sweep kế tiếp nhặt lên (≤15s).
+        job.setNextRunAt(Instant.now());
+        externalSourceJobRepository.save(job);
+        return externalSourceJobMapper.toResponse(job);
     }
 
-    private void validateFilterConfig(List<ExternalSourceFilter> filters) {
-        if (filters == null) {
-            return;
+    @Override
+    public List<ExternalSourceJobRunResponse> listRuns(Long id, int sinceHours) {
+        getOrThrow(id);
+        Instant since = Instant.now().minus(sinceHours, ChronoUnit.HOURS);
+        return externalSourceJobRunRepository
+                .findByExternalSourceJobIdAndStartedAtAfterOrderByStartedAtDesc(id, since).stream()
+                .map(externalSourceJobMapper::toRunResponse)
+                .toList();
+    }
+
+    // Kênh dữ liệu có id bền, được widget dashboard và luật cảnh báo neo vào. Sửa SQL làm mất cột
+    // đang gán là cách âm thầm nhất để giết một widget — chặn tại đây vì lần chạy thử vừa rồi đã
+    // trả về đủ danh sách cột, đối chiếu không tốn thêm gì.
+    private void requireBoundColumnsPresent(Long jobId, List<PreviewColumn> columns) {
+        Set<String> resultColumns = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+        columns.forEach(column -> resultColumns.add(column.name()));
+
+        List<String> missing = datastreamRepository
+                .findBySourceTypeAndSourceId(SourceType.EXTERNAL_SOURCE_JOB, jobId).stream()
+                .map(Datastream::getSourceField)
+                .filter(Objects::nonNull)
+                .filter(field -> !resultColumns.contains(field))
+                .toList();
+
+        if (!missing.isEmpty()) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "BOUND_COLUMN_MISSING",
+                    "Kết quả truy vấn không còn cột đang gắn kênh dữ liệu: " + String.join(", ", missing));
         }
-        filters.forEach(filter -> {
-            sqlIdentifierValidator.validate(filter.column());
-            if (!ALLOWED_OPERATORS.contains(filter.operator())) {
-                throw new BusinessException(HttpStatus.BAD_REQUEST, "INVALID_FILTER_OPERATOR", "Operator không hợp lệ: " + filter.operator());
+    }
+
+    private Instant resolveStartCursor(CreateExternalSourceJobRequest request) {
+        return switch (request.startFrom()) {
+            case NEW_ONLY -> Instant.now();
+            case ALL_HISTORY -> Instant.EPOCH;
+            case FROM_DATE -> {
+                if (request.startFromDate() == null) {
+                    throw new BusinessException(HttpStatus.BAD_REQUEST, "START_DATE_REQUIRED",
+                            "Chọn \"từ ngày cụ thể\" thì phải có ngày bắt đầu");
+                }
+                yield request.startFromDate();
             }
-        });
+        };
     }
 
     private ExternalSourceJob getOrThrow(Long id) {

@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Controller, useForm } from 'react-hook-form'
 import { toast } from 'sonner'
@@ -12,13 +13,17 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { FormDialog } from '@/components/patterns/FormDialog'
+import { ConnectionTestRow } from '@/components/datasources/ConnectionTestRow'
+import { TenantNodePicker } from '@/components/patterns/TenantNodePicker'
 import { getApiErrorMessage } from '@/lib/apiError'
 import {
   createExternalSourceSchema,
   type CreateExternalSourceFormValues,
 } from '@/lib/externalSourceSchema'
 import { useCreateExternalSourceMutation } from '@/queries/useCreateExternalSourceMutation'
+import { useTestConnectionMutation } from '@/queries/useTestConnectionMutation'
 import { useTenantNodesQuery } from '@/queries/useTenantNodesQuery'
+import type { TestConnectionResult } from '@/types/externalSource'
 
 const SSL_MODES = [
   { value: 'disable', label: 'disable' },
@@ -35,12 +40,15 @@ export function ExternalSourceFormDialog({
 }) {
   const { data: nodes } = useTenantNodesQuery()
   const createMutation = useCreateExternalSourceMutation()
+  const testMutation = useTestConnectionMutation()
+  const [testResult, setTestResult] = useState<TestConnectionResult | null>(null)
 
   const {
     register,
     handleSubmit,
     reset,
     control,
+    getValues,
     formState: { errors },
   } = useForm<CreateExternalSourceFormValues>({
     resolver: zodResolver(createExternalSourceSchema),
@@ -57,8 +65,36 @@ export function ExternalSourceFormDialog({
   })
 
   function handleOpenChange(next: boolean) {
-    if (!next) reset()
+    if (!next) {
+      reset()
+      setTestResult(null)
+    }
     onOpenChange(next)
+  }
+
+  // Kết nối phải thử được trước khi lưu — nếu không, lỗi chỉ lộ ra khi job chạy theo lịch,
+  // lúc người tạo đã rời trang (xem context/ARCHITECTURE.md § Flow: External source data).
+  function handleTest() {
+    const values = getValues()
+    if (!values.host || !values.database || !values.username || !values.password) {
+      toast.error('Điền đủ host, database, tài khoản và mật khẩu trước khi thử kết nối')
+      return
+    }
+    testMutation.mutate(
+      {
+        connectionConfig: {
+          host: values.host,
+          port: Number(values.port),
+          database: values.database,
+          sslMode: values.sslMode || null,
+        },
+        credential: { username: values.username, password: values.password },
+      },
+      {
+        onSuccess: setTestResult,
+        onError: () => toast.error('Không gọi được máy chủ để thử kết nối'),
+      }
+    )
   }
 
   function onSubmit(values: CreateExternalSourceFormValues) {
@@ -92,46 +128,41 @@ export function ExternalSourceFormDialog({
       open={open}
       onOpenChange={handleOpenChange}
       title="Thêm nguồn dữ liệu"
-      description="Kết nối một PostgreSQL ngoài. Thông tin đăng nhập được mã hóa trước khi lưu và không bao giờ đọc lại được."
-      submitLabel="Tạo nguồn"
+      submitLabel="Lưu & mở nguồn"
       isPending={createMutation.isPending}
+      submitDisabled={!testResult?.ok}
       onSubmit={handleSubmit(onSubmit)}
     >
       <Field data-invalid={!!errors.tenantNodeId}>
-        <FieldLabel htmlFor="source-node">Gắn vào node</FieldLabel>
+        <FieldLabel htmlFor="source-node" data-required>
+          Chọn tổ chức
+        </FieldLabel>
         <Controller
           control={control}
           name="tenantNodeId"
           render={({ field }) => (
-            <Select value={field.value} onValueChange={field.onChange}>
-              <SelectTrigger id="source-node" aria-invalid={!!errors.tenantNodeId} className="w-full">
-                <SelectValue placeholder="Chọn node" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  {nodes?.map((node) => (
-                    <SelectItem key={node.id} value={String(node.id)}>
-                      {' '.repeat((node.depth - 1) * 2)}
-                      {node.name}
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
+            <TenantNodePicker
+              id="source-node"
+              mode="single"
+              nodes={nodes ?? []}
+              value={field.value ? Number(field.value) : null}
+              onChange={(id) => field.onChange(String(id))}
+              invalid={!!errors.tenantNodeId}
+            />
           )}
         />
         <FieldError errors={[errors.tenantNodeId]} />
       </Field>
 
       <Field data-invalid={!!errors.name}>
-        <FieldLabel htmlFor="source-name">Tên nguồn</FieldLabel>
+        <FieldLabel htmlFor="source-name" data-required>Tên nguồn</FieldLabel>
         <Input id="source-name" autoFocus aria-invalid={!!errors.name} {...register('name')} />
         <FieldError errors={[errors.name]} />
       </Field>
 
       <div className="grid gap-5 sm:grid-cols-3">
         <Field className="sm:col-span-2" data-invalid={!!errors.host}>
-          <FieldLabel htmlFor="source-host">Host</FieldLabel>
+          <FieldLabel htmlFor="source-host" data-required>Host</FieldLabel>
           <Input
             id="source-host"
             placeholder="203.0.113.10"
@@ -141,7 +172,7 @@ export function ExternalSourceFormDialog({
           <FieldError errors={[errors.host]} />
         </Field>
         <Field data-invalid={!!errors.port}>
-          <FieldLabel htmlFor="source-port">Port</FieldLabel>
+          <FieldLabel htmlFor="source-port" data-required>Port</FieldLabel>
           <Input id="source-port" type="number" aria-invalid={!!errors.port} {...register('port')} />
           <FieldError errors={[errors.port]} />
         </Field>
@@ -149,7 +180,7 @@ export function ExternalSourceFormDialog({
 
       <div className="grid gap-5 sm:grid-cols-2">
         <Field data-invalid={!!errors.database}>
-          <FieldLabel htmlFor="source-database">Database</FieldLabel>
+          <FieldLabel htmlFor="source-database" data-required>Database</FieldLabel>
           <Input id="source-database" aria-invalid={!!errors.database} {...register('database')} />
           <FieldError errors={[errors.database]} />
         </Field>
@@ -180,12 +211,12 @@ export function ExternalSourceFormDialog({
 
       <div className="grid gap-5 sm:grid-cols-2">
         <Field data-invalid={!!errors.username}>
-          <FieldLabel htmlFor="source-username">Username</FieldLabel>
+          <FieldLabel htmlFor="source-username" data-required>Username</FieldLabel>
           <Input id="source-username" aria-invalid={!!errors.username} {...register('username')} />
           <FieldError errors={[errors.username]} />
         </Field>
         <Field data-invalid={!!errors.password}>
-          <FieldLabel htmlFor="source-password">Password</FieldLabel>
+          <FieldLabel htmlFor="source-password" data-required>Password</FieldLabel>
           <Input
             id="source-password"
             type="password"
@@ -195,6 +226,12 @@ export function ExternalSourceFormDialog({
           <FieldError errors={[errors.password]} />
         </Field>
       </div>
+
+      <ConnectionTestRow
+        result={testResult}
+        isPending={testMutation.isPending}
+        onTest={handleTest}
+      />
     </FormDialog>
   )
 }

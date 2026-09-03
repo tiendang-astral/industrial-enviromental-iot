@@ -1,20 +1,6 @@
 import { useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
-import {
-  Building,
-  Building2,
-  MapPin,
-  MoveRight,
-  Network,
-  Pencil,
-  Plus,
-  Power,
-  PowerOff,
-  Router,
-  Trash2,
-  Warehouse,
-} from 'lucide-react'
+import { Building, Building2, MapPinHouse, Network, Pencil, Plus, Trash2, Warehouse } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { TableCell, TableRow } from '@/components/ui/table'
@@ -25,94 +11,62 @@ import {
   TreeTableContainer,
   TreeTableHead,
   TreeTableHeader,
-  TreeTableLevelLabel,
   TreeTableNameCell,
   TreeTableRow,
-  TreeTableStatusBadge,
   useTreeTableRows,
 } from '@/components/shared/TreeTable'
 import { ConfirmDialog } from '@/components/patterns/ConfirmDialog'
 import { EmptyState } from '@/components/patterns/EmptyState'
+import { EnumBadge } from '@/components/patterns/EnumBadge'
 import { PageHeader } from '@/components/patterns/PageHeader'
-import {
-  CreateNodeDialog,
-  MoveNodeDialog,
-  RenameNodeDialog,
-} from '@/components/organization/NodeDialogs'
+import { StatusBadge } from '@/components/patterns/StatusBadge'
+import { CreateNodeDialog, EditNodeDialog } from '@/components/organization/NodeDialogs'
 import { getApiErrorMessage } from '@/lib/apiError'
-import { NEXT_TYPE, NODE_LABEL } from '@/lib/tenantNodeLabels'
+import { orderNodesDepthFirst } from '@/lib/tenantNodeTree'
+import { cn } from '@/lib/utils'
+import { NEXT_TYPE, NODE_LABEL, NODE_LABEL_SHORT } from '@/lib/tenantNodeLabels'
 import { useDeleteTenantNodeMutation } from '@/queries/useDeleteTenantNodeMutation'
 import { useTenantNodesQuery } from '@/queries/useTenantNodesQuery'
-import { useUpdateTenantNodeStatusMutation } from '@/queries/useUpdateTenantNodeStatusMutation'
 import type { NodeType, TenantNode } from '@/types/tenantNode'
 
-const NODE_ICON: Record<NodeType, typeof Building2> = {
-  TENANT_ROOT: Building2,
-  BRANCH: Building,
-  PRODUCTION_AREA: Warehouse,
-  SITE: MapPin,
-}
-
-/** DFS order theo cây (children luôn theo ngay sau cha) — ổn định hơn sort theo path text (label số nhiều chữ số sort sai theo lexical). */
-function orderNodesDepthFirst(nodes: TenantNode[]): TenantNode[] {
-  const byParent = new Map<number | null, TenantNode[]>()
-  for (const node of nodes) {
-    const list = byParent.get(node.parentId) ?? []
-    list.push(node)
-    byParent.set(node.parentId, list)
-  }
-  for (const list of byParent.values()) {
-    list.sort((a, b) => a.name.localeCompare(b.name))
-  }
-  const result: TenantNode[] = []
-  function visit(parentId: number | null) {
-    for (const node of byParent.get(parentId) ?? []) {
-      result.push(node)
-      visit(node.id)
-    }
-  }
-  visit(null)
-  return result
-}
-
-/** Nút icon trong hàng cây — luôn kèm Tooltip + sr-only để không phải đoán ý nghĩa icon. */
+/**
+ * Nút hành động trong hàng cây. `showLabel` cho hai hành động hay dùng nhất (Thêm, Sửa) hiện nhãn
+ * ra ngoài — bấm nhầm ở đây là sửa cấu trúc tổ chức thật, không đáng để người dùng phải rê chuột
+ * chờ tooltip mới biết nút nào là nút nào. Các nút còn lại giữ dạng icon để hàng không bị vỡ.
+ */
 function RowAction({
   label,
   icon: Icon,
   onClick,
-  to,
   destructive,
   disabled,
+  showLabel,
 }: {
   label: string
   icon: typeof Plus
   onClick?: () => void
-  to?: string
   destructive?: boolean
   disabled?: boolean
+  showLabel?: boolean
 }) {
   const button = (
     <Button
       variant="ghost"
-      size="icon"
-      className={destructive ? 'size-7 text-destructive hover:text-destructive' : 'size-7'}
+      size={showLabel ? 'sm' : 'icon'}
+      className={cn(
+        showLabel ? 'h-7 px-2 text-xs whitespace-nowrap' : 'size-7',
+        destructive && 'text-destructive hover:text-destructive'
+      )}
       disabled={disabled}
       onClick={onClick}
-      asChild={!!to}
     >
-      {to ? (
-        <Link to={to}>
-          <Icon />
-          <span className="sr-only">{label}</span>
-        </Link>
-      ) : (
-        <>
-          <Icon />
-          <span className="sr-only">{label}</span>
-        </>
-      )}
+      <Icon data-icon={showLabel ? 'inline-start' : undefined} />
+      {showLabel ? label : <span className="sr-only">{label}</span>}
     </Button>
   )
+
+  // Nút đã hiện nhãn thì tooltip chỉ lặp lại đúng chữ đó.
+  if (showLabel) return button
 
   return (
     <Tooltip>
@@ -122,19 +76,26 @@ function RowAction({
   )
 }
 
+/** Khớp bộ icon cây tổ chức ở trang chi tiết tenant (x-frontend-admin) — cùng một cây thì cùng
+ *  một bộ ký hiệu, dù hai app deploy riêng. */
+const NODE_ICON: Record<NodeType, typeof Building2> = {
+  TENANT_ROOT: Building2,
+  BRANCH: Building,
+  PRODUCTION_AREA: Warehouse,
+  SITE: MapPinHouse,
+}
+
 export default function OrganizationPage() {
   const { data: nodes, isLoading } = useTenantNodesQuery()
   const orderedNodes = useMemo(() => (nodes ? orderNodesDepthFirst(nodes) : []), [nodes])
   const { rows } = useTreeTableRows(orderedNodes)
 
-  const [createParent, setCreateParent] = useState<TenantNode | null>(null)
-  const [renameTarget, setRenameTarget] = useState<TenantNode | null>(null)
-  const [moveTarget, setMoveTarget] = useState<TenantNode | null>(null)
+  // `{ parent: null }` = mở dialog ở chế độ tự chọn đơn vị cha; `null` = dialog đóng.
+  const [createState, setCreateState] = useState<{ parent: TenantNode | null } | null>(null)
+  const [editTarget, setEditTarget] = useState<TenantNode | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<TenantNode | null>(null)
-  const [disableTarget, setDisableTarget] = useState<TenantNode | null>(null)
 
   const deleteMutation = useDeleteTenantNodeMutation()
-  const updateStatusMutation = useUpdateTenantNodeStatusMutation()
 
   function confirmDelete() {
     if (!deleteTarget) return
@@ -147,32 +108,18 @@ export default function OrganizationPage() {
     })
   }
 
-  function toggleStatus(node: TenantNode, onDone?: () => void) {
-    updateStatusMutation.mutate(
-      { id: node.id, payload: { enabled: !node.enabled } },
-      {
-        onSuccess: () => {
-          onDone?.()
-          toast.success(node.enabled ? 'Đã tắt đơn vị' : 'Đã bật lại đơn vị')
-        },
-        onError: (error) =>
-          toast.error(getApiErrorMessage(error, 'Cập nhật trạng thái thất bại')),
-      }
-    )
-  }
-
   const rootNode = nodes?.find((node) => node.nodeType === 'TENANT_ROOT')
 
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Tổ chức"
-        description="Cây đơn vị của tenant: Công ty → Chi nhánh → Khu sản xuất → Xưởng/Chuồng trại."
+        description="Các cấp tổ chức: Công ty → Chi nhánh → Khu sản xuất → Xưởng/Chuồng trại."
         actions={
           rootNode && (
-            <Button onClick={() => setCreateParent(rootNode)}>
+            <Button onClick={() => setCreateState({ parent: null })}>
               <Plus data-icon="inline-start" />
-              Thêm chi nhánh
+              Thêm tổ chức
             </Button>
           )
         }
@@ -182,10 +129,10 @@ export default function OrganizationPage() {
         <Table>
           <TreeTableHeader>
             <TableRow>
-              <TreeTableHead>Tên</TreeTableHead>
+              <TreeTableHead>Tổ chức</TreeTableHead>
               <TreeTableHead>Loại</TreeTableHead>
               <TreeTableHead>Trạng thái</TreeTableHead>
-              <TreeTableHead className="w-56 text-right">Tác vụ</TreeTableHead>
+              <TreeTableHead className="w-[20rem] text-right">Hành động</TreeTableHead>
             </TableRow>
           </TreeTableHeader>
           <TableBody>
@@ -218,7 +165,6 @@ export default function OrganizationPage() {
               </TableRow>
             )}
             {rows.map(({ node, depth, hasChildren, isExpanded, childCount, toggle }) => {
-              const isLeafType = node.nodeType === 'SITE'
               const childType = NEXT_TYPE[node.nodeType]
               return (
                 <TreeTableRow key={node.id} isActive={node.enabled}>
@@ -227,66 +173,37 @@ export default function OrganizationPage() {
                     hasChildren={hasChildren}
                     isExpanded={isExpanded}
                     onToggle={toggle}
-                    isLeafType={isLeafType}
-                    leafIcon={MapPin}
-                    typeIcon={NODE_ICON[node.nodeType]}
+                    icon={NODE_ICON[node.nodeType]}
                     childCount={childCount}
                     isActive={node.enabled}
                   >
-                    {isLeafType ? (
-                      <Link to={`/organization/sites/${node.id}`} className="hover:underline">
-                        {node.name}
-                      </Link>
-                    ) : (
-                      node.name
-                    )}
+                    {node.name}
                   </TreeTableNameCell>
                   <TableCell>
-                    <TreeTableLevelLabel>{NODE_LABEL[node.nodeType]}</TreeTableLevelLabel>
+                    <EnumBadge>{NODE_LABEL[node.nodeType]}</EnumBadge>
                   </TableCell>
                   <TableCell>
-                    <TreeTableStatusBadge
-                      active={node.enabled}
-                      activeLabel="Đang hoạt động"
-                      inactiveLabel="Đã tắt"
+                    <StatusBadge
+                      status={node.enabled ? 'ENABLED' : 'DISABLED'}
+                      label={node.enabled ? 'Đang hoạt động' : 'Đã tắt'}
                     />
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center justify-end gap-1">
                       {childType && (
                         <RowAction
-                          label={`Thêm ${NODE_LABEL[childType].toLowerCase()}`}
+                          showLabel
+                          label={`Thêm ${NODE_LABEL_SHORT[childType].toLowerCase()}`}
                           icon={Plus}
                           disabled={!node.enabled}
-                          onClick={() => setCreateParent(node)}
-                        />
-                      )}
-                      {isLeafType && (
-                        <RowAction
-                          label="Quản lý gateway"
-                          icon={Router}
-                          to={`/organization/sites/${node.id}`}
+                          onClick={() => setCreateState({ parent: node })}
                         />
                       )}
                       <RowAction
-                        label="Đổi tên"
+                        showLabel
+                        label="Sửa"
                         icon={Pencil}
-                        onClick={() => setRenameTarget(node)}
-                      />
-                      {node.nodeType !== 'TENANT_ROOT' && (
-                        <RowAction
-                          label="Di chuyển"
-                          icon={MoveRight}
-                          onClick={() => setMoveTarget(node)}
-                        />
-                      )}
-                      <RowAction
-                        label={node.enabled ? 'Tắt đơn vị' : 'Bật lại đơn vị'}
-                        icon={node.enabled ? PowerOff : Power}
-                        disabled={updateStatusMutation.isPending}
-                        onClick={() =>
-                          node.enabled ? setDisableTarget(node) : toggleStatus(node)
-                        }
+                        onClick={() => setEditTarget(node)}
                       />
                       {node.nodeType !== 'TENANT_ROOT' && (
                         <RowAction
@@ -306,36 +223,27 @@ export default function OrganizationPage() {
       </TreeTableContainer>
 
       <CreateNodeDialog
-        parent={createParent}
-        onOpenChange={(open) => !open && setCreateParent(null)}
-      />
-      <RenameNodeDialog
-        node={renameTarget}
-        onOpenChange={(open) => !open && setRenameTarget(null)}
-      />
-      <MoveNodeDialog
-        node={moveTarget}
+        open={!!createState}
+        parent={createState?.parent ?? null}
         allNodes={nodes ?? []}
-        onOpenChange={(open) => !open && setMoveTarget(null)}
+        onOpenChange={(open) => !open && setCreateState(null)}
       />
-
-      <ConfirmDialog
-        open={!!disableTarget}
-        onOpenChange={(open) => !open && setDisableTarget(null)}
-        title="Tắt đơn vị này?"
-        description={`"${disableTarget?.name}" sẽ được đánh dấu đã tắt và không tạo được đơn vị con mới. Gateway và cảnh báo bên dưới vẫn tiếp tục chạy bình thường.`}
-        confirmLabel="Tắt đơn vị"
-        isPending={updateStatusMutation.isPending}
-        onConfirm={() =>
-          disableTarget && toggleStatus(disableTarget, () => setDisableTarget(null))
-        }
+      <EditNodeDialog
+        node={editTarget}
+        allNodes={nodes ?? []}
+        onOpenChange={(open) => !open && setEditTarget(null)}
       />
 
       <ConfirmDialog
         open={!!deleteTarget}
         onOpenChange={(open) => !open && setDeleteTarget(null)}
         title="Xóa đơn vị này?"
-        description={`"${deleteTarget?.name}" sẽ bị xóa khỏi cây tổ chức. Thao tác bị chặn nếu đơn vị còn đơn vị con, gateway hoặc nguồn dữ liệu gắn vào. Hành động này không thể hoàn tác.`}
+        description={
+          <>
+            Bạn có chắc chắn muốn xóa{' '}
+            <span className="font-semibold">&ldquo;{deleteTarget?.name}&rdquo;</span>?
+          </>
+        }
         confirmLabel="Xóa đơn vị"
         destructive
         isPending={deleteMutation.isPending}

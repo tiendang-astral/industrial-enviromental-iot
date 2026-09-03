@@ -32,7 +32,9 @@ export function PageHeader({
           </Link>
         </Button>
       )}
-      <div className="flex flex-wrap items-start justify-between gap-4">
+      {/* items-center: nút hành động căn giữa theo chiều cao khối tiêu đề (title + mô tả),
+          không dính lên mép trên — khối trái cao 2 dòng nên căn start bị lệch rõ. */}
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex flex-col gap-1">
           <h1 className="text-xl font-semibold tracking-tight text-foreground">{title}</h1>
           {description && (

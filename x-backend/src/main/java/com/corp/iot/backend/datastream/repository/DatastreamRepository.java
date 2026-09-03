@@ -19,6 +19,8 @@ public interface DatastreamRepository extends JpaRepository<Datastream, Long> {
 
     boolean existsBySourceTypeAndSourceId(SourceType sourceType, Long sourceId);
 
+    List<Datastream> findBySourceTypeAndSourceId(SourceType sourceType, Long sourceId);
+
     boolean existsBySourceTypeAndSourceIdAndSourceField(SourceType sourceType, Long sourceId, String sourceField);
 
     /**

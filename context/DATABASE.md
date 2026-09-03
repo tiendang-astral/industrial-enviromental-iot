@@ -2,7 +2,7 @@
 
 > Nguồn schema duy nhất là **Flyway**; Hibernate chạy `ddl-auto: validate`.
 > Tenant isolation: **Hibernate multi-tenancy DISCRIMINATOR** (bỏ RLS).
-> Migration đã squash thành baseline (2026-06-30): `V1__baseline_schema.sql`; các thay đổi sau baseline theo từng version riêng (`V2__auth_seed.sql`, `V3__refresh_token_platform_user.sql`, `V4__phase2_metric_seed.sql`, `V5__dev_seed_credentials.sql`, `V6__backfill_datastream_from_gateway_pin.sql`, `V7__phase4_dashboard_template_seed.sql`, `V8__weather_and_gas_metric_seed.sql`, `V9__platform_user_soft_delete.sql`, `V10__tenant_node_enabled.sql`, `V11__external_source_polling.sql`...).
+> Migration đã squash thành baseline (2026-06-30): `V1__baseline_schema.sql`; các thay đổi sau baseline theo từng version riêng (`V2__auth_seed.sql`, `V3__refresh_token_platform_user.sql`, `V4__phase2_metric_seed.sql`, `V5__dev_seed_credentials.sql`, `V6__backfill_datastream_from_gateway_pin.sql`, `V7__phase4_dashboard_template_seed.sql`, `V8__weather_and_gas_metric_seed.sql`, `V9__platform_user_soft_delete.sql`, `V10__tenant_node_enabled.sql`, `V11__external_source_polling.sql`, `V12__external_source_sql_query.sql`...).
 
 ## 1. ERD
 
@@ -21,6 +21,7 @@ Các thực thể trong hệ thống và mối quan hệ giữa chúng.
 | gateway_pin | Chân vật lý trên gateway (INPUT=đo / OUTPUT=điều khiển) |
 | external_source | Nguồn dữ liệu ngoài (kết nối DB khác) |
 | external_source_job | Task scrape/pull dữ liệu từ external_source |
+| external_source_job_run | Lịch sử từng lần chạy của job (bảng log) |
 | dashboard | Bảng điều khiển (widget JSONB) |
 | dashboard_template | Template dashboard (SYSTEM/CUSTOM) |
 | datastream | Kênh dữ liệu/điều khiển (neo vào gateway_pin) |
@@ -317,9 +318,7 @@ erDiagram
 | tenant_id | bigint | NOT NULL, FK tenant | |
 | external_source_id | bigint | NOT NULL, FK external_source ON DELETE CASCADE | Nguồn dữ liệu |
 | name | varchar | NOT NULL | Tên job |
-| query_config | jsonb | NOT NULL | `{table, timestampColumn, valueColumns: []}` — table/column name validate allowlist `^[a-zA-Z_][a-zA-Z0-9_]{0,62}$` cả lúc tạo (x-backend) lẫn lúc build query (x-ingestion-service), vì identifier không parameterize được trong JDBC |
-| filter_config | jsonb | | `[{column, operator, value}]`, `operator` ∈ `=,!=,>,<,>=,<=` — value bind qua `?`, column validate cùng allowlist trên |
-| mapping_config | jsonb | | **Không dùng ở Phase 5** — field→metric mapping thật nằm ở `datastream.source_field`/`metric_id` (xem bảng `datastream`), cột này giữ lại reserved cho transform rule (type coercion) nếu cần sau |
+| query_config | jsonb | NOT NULL | `{sql, timestampColumn}` — `V12`. `sql` là câu SELECT do người dùng viết, **bắt buộc chứa `:cursor`** ở điều kiện thời gian (`SqlQueryValidator`); `timestampColumn` là tên cột trong KẾT QUẢ (bí danh nếu có `AS`), dùng lấy mốc thời gian và tính cursor mới. Cột dữ liệu không khai nữa — suy từ `ResultSetMetaData` (mọi cột trừ `timestampColumn`) |
 | schedule_cron | varchar | | Cron expression 5 field chuẩn (VD `*/5 * * * *`), parse bằng `cron-utils` (x-ingestion-service), validate cú pháp ngay lúc tạo job (x-backend) |
 | incremental_field | varchar | | Cột thời gian dùng để incremental reading |
 | incremental_cursor | varchar | | Giá trị cursor hiện tại (timestamp hoặc value) |
@@ -336,8 +335,30 @@ erDiagram
 
 - Composite FK `(tenant_id, external_source_id) → external_source`.
 - Unique `(tenant_id, id)`.
-- Scheduler: `x-ingestion-service` chạy 1 `@Scheduled` fixed-delay sweep (~15s) quét `next_run_at <= now()`, không cache Redis (khác `gw-resolve`) vì tần suất thấp (theo lịch job, không phải mỗi message MQTT). Sửa `query_config`/`filter_config`/`schedule_cron` → reset `incremental_cursor = NULL` (cursor cũ có thể không còn hợp lệ với query mới).
+- Scheduler: `x-ingestion-service` chạy 1 `@Scheduled` fixed-delay sweep (~15s) quét `next_run_at <= now()`, không cache Redis (khác `gw-resolve`) vì tần suất thấp (theo lịch job, không phải mỗi message MQTT). Từ `V12`: `incremental_cursor` **luôn có giá trị** (`:cursor` phải bind được mọi lần chạy) — lúc tạo job chọn mốc qua `startFrom` (`NEW_ONLY` = now, `ALL_HISTORY` = epoch, `FROM_DATE` = ngày chỉ định). Sửa job chỉ reset cursor về epoch khi **đổi `timestampColumn`** (mốc cũ đo theo cột khác thì vô nghĩa); đổi `WHERE`/`SELECT` giữ nguyên cursor để khỏi đọc lại toàn bộ lịch sử.
 - Xóa bị chặn 409 nếu còn `datastream` gắn vào (`source_type='EXTERNAL_SOURCE_JOB', source_id=job.id`).
+- **An toàn từ `V12`:** allowlist định danh bị bỏ (SQL tự do nên không còn ý nghĩa). Thay bằng 3 lớp lúc chạy: `Connection.setReadOnly(true)` (Postgres bên kia tự từ chối mọi lệnh ghi), `statement_timeout` (`app.external.query-timeout-seconds`), và trần dòng (`app.external.max-rows-per-run`). Đây là database của khách hàng chạy bằng credential họ tự nhập — mối đe dọa thật là câu ghi gõ nhầm chạy lặp theo cron, không phải injection.
+- **Lưu job luôn chạy thử ở x-backend trước khi ghi** (`ExternalSourceQueryService.preview`): SQL hỏng → 400 kèm lỗi Postgres nguyên văn; kết quả thiếu cột mà `datastream` đang gắn → 400 `BOUND_COLUMN_MISSING`.
+
+### external_source_job_run
+**Vì sao cần:** Lịch sử từng lần chạy của job (`V12`). Bảng log — không soft delete, `x-ingestion-service` ghi, `x-backend` đọc. `external_source_job` chỉ giữ được lần chạy gần nhất nên không dựng được dải nhịp chạy hay biểu đồ số dòng theo giờ ở trang chi tiết nguồn.
+
+| Column | Type | Constraint | Mô tả |
+|--------|------|------------|-------|
+| id | bigint | PK auto increment | |
+| tenant_id | bigint | NOT NULL | |
+| external_source_job_id | bigint | NOT NULL | Job đã chạy |
+| status | varchar | NOT NULL, CHECK IN ('RUNNING','SUCCESS','FAILED') | |
+| row_count | bigint | NOT NULL DEFAULT 0 | Số dòng đọc được lần đó |
+| error | text | | Lỗi nếu FAILED |
+| started_at | timestamptz | NOT NULL | |
+| finished_at | timestamptz | | |
+| created_at | timestamptz | NOT NULL | |
+| updated_at | timestamptz | NOT NULL | |
+
+- Composite FK `(tenant_id, external_source_job_id) → external_source_job`.
+- Index `ix_job_run_recent (tenant_id, external_source_job_id, started_at DESC)`.
+- Tự dọn bản ghi cũ hơn 7 ngày (`ExternalSourceSchedulerService.cleanupRunHistory`, fixed-delay 1h) — job chạy mỗi phút nên bảng lớn nhanh.
 
 ### dashboard
 **Vì sao cần:** Bảng điều khiển. Widget + layout lưu JSONB (`layout_json`).
@@ -399,7 +420,7 @@ Template layout = [
 | metric_id | bigint | NOT NULL, FK metric | Kiểu đo (temperature, humidity...) |
 | source_type | varchar | NOT NULL, CHECK IN ('GATEWAY_PIN','EXTERNAL_SOURCE_JOB') | Loại nguồn |
 | source_id | bigint | NOT NULL | ID nguồn (gateway_pin hoặc external_source_job) |
-| source_field | varchar | NULLABLE — `V11`, CHECK (GATEWAY_PIN ⇒ NULL, EXTERNAL_SOURCE_JOB ⇒ NOT NULL) | Field/cột trong `query_config.valueColumns` mà datastream này bind vào — cần vì 1 `external_source_job` có thể sinh nhiều datastream (khác gateway_pin luôn 1-1) |
+| source_field | varchar | NULLABLE — `V11`, CHECK (GATEWAY_PIN ⇒ NULL, EXTERNAL_SOURCE_JOB ⇒ NOT NULL) | Tên cột trong **kết quả truy vấn** của job (bí danh nếu có `AS`) mà datastream này bind vào — cần vì 1 `external_source_job` có thể sinh nhiều datastream (khác gateway_pin luôn 1-1). Từ `V12` cột hợp lệ được xác định bằng cách chạy thử truy vấn, không còn khai trước ở `valueColumns` |
 | created_at | timestamptz | NOT NULL | |
 | created_by | bigint | | |
 | updated_at | timestamptz | NOT NULL | |
@@ -536,6 +557,7 @@ Template layout = [
 | `ix_gateway_node` | gateway | `(tenant_id, tenant_node_id)` | Gateway theo node |
 | `uq_gateway_pin` | gateway_pin | `(tenant_id, gateway_id, type, pin_number)` | Chân vật lý duy nhất TRONG mỗi type/gateway |
 | `uq_datastream_name` | datastream | `(tenant_id, tenant_node_id, lower(name))` | Tên kênh duy nhất trong anchor node |
+| `ix_job_run_recent` | external_source_job_run | `(tenant_id, external_source_job_id, started_at DESC)` | Dải nhịp chạy + biểu đồ dòng/giờ — `V12` |
 | `uq_datastream_external_field` | datastream | `(tenant_id, source_type, source_id, source_field) WHERE source_type='EXTERNAL_SOURCE_JOB'` | Chặn map trùng 1 field vào 2 datastream — `V11` |
 | `uq_dashboard_user_node` | dashboard | `(tenant_id, user_id, tenant_node_id, COALESCE(external_source_id, 0))` | 1 board/user/node **hoặc** 1 board/user/nguồn — `V11` |
 | `uq_alert_open` | alert | `(tenant_id, fingerprint) WHERE status IN ('PENDING','ACTIVE')` | 1 alert đang mở/fingerprint |

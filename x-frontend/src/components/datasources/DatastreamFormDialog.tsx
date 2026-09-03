@@ -18,19 +18,23 @@ import {
   createDatastreamSchema,
   type CreateDatastreamFormValues,
 } from '@/lib/externalSourceJobSchema'
+import { suggestMetricCode } from '@/lib/sqlTemplate'
 import { useCreateDatastreamForJobMutation } from '@/queries/useCreateDatastreamForJobMutation'
-import type { ExternalSourceJob } from '@/types/externalSource'
+import type { ExternalSourceJob, PreviewColumn } from '@/types/externalSource'
 import type { Metric } from '@/types/metric'
 
 export function DatastreamFormDialog({
   externalSourceId,
   job,
+  column,
   metrics,
   open,
   onOpenChange,
 }: {
   externalSourceId: number
   job: ExternalSourceJob
+  /** Cột kết quả đang gán — null khi dialog đóng. */
+  column: PreviewColumn | null
   metrics: Metric[]
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -48,8 +52,16 @@ export function DatastreamFormDialog({
   })
 
   useEffect(() => {
-    if (open) reset({ name: '', metricId: '', sourceField: '' })
-  }, [open, reset])
+    if (!open || !column) return
+    // Điền sẵn theo gợi ý từ tên cột — người dùng chỉ phải sửa khi đoán sai.
+    const suggestedCode = suggestMetricCode(column.name)
+    const suggested = suggestedCode ? metrics.find((metric) => metric.code === suggestedCode) : null
+    reset({
+      name: suggested ? `${suggested.name} · ${job.name}` : column.name,
+      metricId: suggested ? String(suggested.id) : '',
+      sourceField: column.name,
+    })
+  }, [open, column, metrics, job.name, reset])
 
   function onSubmit(values: CreateDatastreamFormValues) {
     createMutation.mutate(
@@ -64,9 +76,9 @@ export function DatastreamFormDialog({
       {
         onSuccess: () => {
           onOpenChange(false)
-          toast.success('Tạo datastream thành công')
+          toast.success('Đã gán kênh dữ liệu')
         },
-        onError: (error) => toast.error(getApiErrorMessage(error, 'Tạo datastream thất bại')),
+        onError: (error) => toast.error(getApiErrorMessage(error, 'Gán kênh thất bại')),
       }
     )
   }
@@ -75,40 +87,26 @@ export function DatastreamFormDialog({
     <FormDialog
       open={open}
       onOpenChange={onOpenChange}
-      title="Thêm datastream"
-      description={`Gắn một cột dữ liệu của job "${job.name}" vào một metric để hiển thị lên dashboard.`}
-      submitLabel="Tạo"
+      title="Gán cột vào metric"
+      description={
+        column
+          ? `Cột "${column.name}" của job "${job.name}" trở thành một kênh dữ liệu dùng được trên dashboard.`
+          : undefined
+      }
+      submitLabel="Gán kênh"
       isPending={createMutation.isPending}
       onSubmit={handleSubmit(onSubmit)}
     >
-      <Field data-invalid={!!errors.sourceField}>
+      <Field>
         <FieldLabel htmlFor="ds-field">Cột dữ liệu</FieldLabel>
-        <Controller
-          control={control}
-          name="sourceField"
-          render={({ field }) => (
-            <Select value={field.value} onValueChange={field.onChange}>
-              <SelectTrigger id="ds-field" aria-invalid={!!errors.sourceField} className="w-full">
-                <SelectValue placeholder="Chọn cột" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  {job.queryConfig.valueColumns.map((column) => (
-                    <SelectItem key={column} value={column}>
-                      {column}
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          )}
-        />
-        <FieldDescription>Danh sách lấy từ cột dữ liệu đã khai báo trong job.</FieldDescription>
-        <FieldError errors={[errors.sourceField]} />
+        <Input id="ds-field" readOnly className="font-mono" {...register('sourceField')} />
+        <FieldDescription>Lấy từ kết quả chạy thử của job, không sửa ở đây.</FieldDescription>
       </Field>
 
       <Field data-invalid={!!errors.metricId}>
-        <FieldLabel htmlFor="ds-metric">Metric</FieldLabel>
+        <FieldLabel htmlFor="ds-metric" data-required>
+          Metric
+        </FieldLabel>
         <Controller
           control={control}
           name="metricId"
@@ -133,7 +131,9 @@ export function DatastreamFormDialog({
       </Field>
 
       <Field data-invalid={!!errors.name}>
-        <FieldLabel htmlFor="ds-name">Tên datastream</FieldLabel>
+        <FieldLabel htmlFor="ds-name" data-required>
+          Tên kênh
+        </FieldLabel>
         <Input id="ds-name" aria-invalid={!!errors.name} {...register('name')} />
         <FieldDescription>Tên hiển thị trên widget dashboard.</FieldDescription>
         <FieldError errors={[errors.name]} />

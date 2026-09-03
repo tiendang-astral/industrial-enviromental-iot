@@ -11,6 +11,8 @@ import com.corp.iot.backend.datastream.entity.Datastream;
 import com.corp.iot.backend.datastream.entity.SourceType;
 import com.corp.iot.backend.datastream.mapper.DatastreamMapper;
 import com.corp.iot.backend.datastream.repository.DatastreamRepository;
+import com.corp.iot.backend.externaldb.dto.ExternalDbDtos.PreviewColumn;
+import com.corp.iot.backend.externaldb.service.ExternalSourceQueryService;
 import com.corp.iot.backend.externalsource.entity.ExternalSource;
 import com.corp.iot.backend.externalsource.repository.ExternalSourceRepository;
 import com.corp.iot.backend.externalsourcejob.entity.ExternalSourceJob;
@@ -37,6 +39,7 @@ public class DatastreamServiceImpl implements DatastreamService {
     private final MetricRepository metricRepository;
     private final ExternalSourceJobRepository externalSourceJobRepository;
     private final ExternalSourceRepository externalSourceRepository;
+    private final ExternalSourceQueryService externalSourceQueryService;
     private final DatastreamMapper datastreamMapper;
     private final InfluxReadService influxReadService;
 
@@ -72,9 +75,16 @@ public class DatastreamServiceImpl implements DatastreamService {
     public DatastreamResponse createForJob(Long jobId, CreateDatastreamRequest request) {
         ExternalSourceJob job = externalSourceJobRepository.findById(jobId)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "JOB_NOT_FOUND", "Không tìm thấy job"));
-        if (!job.getQueryConfig().valueColumns().contains(request.sourceField())) {
+        // Từ V12 không còn valueColumns khai sẵn — cột hợp lệ là cột thật trong kết quả truy vấn,
+        // nên chạy thử rồi đối chiếu (xem ExternalSourceJobServiceImpl.requireBoundColumnsPresent).
+        boolean fieldExists = externalSourceQueryService
+                .preview(job.getExternalSourceId(), job.getQueryConfig().sql(), job.getQueryConfig().timestampColumn())
+                .columns().stream()
+                .map(PreviewColumn::name)
+                .anyMatch(name -> name.equalsIgnoreCase(request.sourceField()));
+        if (!fieldExists) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "INVALID_SOURCE_FIELD",
-                    "sourceField phải khớp query_config.valueColumns của job");
+                    "Kết quả truy vấn của job không có cột \"" + request.sourceField() + "\"");
         }
         if (datastreamRepository.existsBySourceTypeAndSourceIdAndSourceField(SourceType.EXTERNAL_SOURCE_JOB, jobId, request.sourceField())) {
             throw new BusinessException(HttpStatus.CONFLICT, "DATASTREAM_FIELD_TAKEN", "Field này đã được gắn vào 1 datastream khác");

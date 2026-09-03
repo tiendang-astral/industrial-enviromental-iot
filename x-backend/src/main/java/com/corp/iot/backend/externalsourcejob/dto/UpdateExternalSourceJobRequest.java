@@ -3,14 +3,11 @@ package com.corp.iot.backend.externalsourcejob.dto;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 
-import java.util.List;
-
-// queryConfig/filterConfig/scheduleCron null = giữ nguyên; đổi queryConfig/filterConfig/
-// scheduleCron sẽ reset incrementalCursor (xem ExternalSourceJobServiceImpl).
+// queryConfig/scheduleCron null = giữ nguyên. Đổi timestampColumn sẽ reset cursor về epoch —
+// mốc cũ đo theo cột khác nên không còn nghĩa (xem ExternalSourceJobServiceImpl.update).
 public record UpdateExternalSourceJobRequest(
         @NotBlank String name,
         @Valid ExternalSourceQueryConfig queryConfig,
-        List<@Valid ExternalSourceFilter> filterConfig,
         String scheduleCron
 ) {
 }

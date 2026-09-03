@@ -4,13 +4,11 @@ import com.corp.iot.ingestion.external.crypto.CredentialDecryptionService;
 import com.corp.iot.ingestion.external.dto.ExternalReadingEvent;
 import com.corp.iot.ingestion.external.dto.ExternalSourceConnectionConfig;
 import com.corp.iot.ingestion.external.dto.ExternalSourceCredential;
-import com.corp.iot.ingestion.external.dto.ExternalSourceFilter;
 import com.corp.iot.ingestion.external.dto.ExternalSourceQueryConfig;
 import com.corp.iot.ingestion.external.entity.ExternalSource;
 import com.corp.iot.ingestion.external.entity.ExternalSourceJob;
 import com.corp.iot.ingestion.external.producer.ExternalDataRawProducer;
 import com.corp.iot.ingestion.external.producer.ExternalMessageIdGenerator;
-import com.corp.iot.ingestion.external.util.SqlIdentifierValidator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -21,27 +19,32 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
+import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
-// Kết nối PostgreSQL ngoài bằng JDBC thuần (không qua Hibernate — schema DB ngoài không biết
-// trước), build query parameterized từ query_config/filter_config, unbundle mỗi field/row
-// thành 1 Kafka message (xem ARCHITECTURE.md § Flow: External source data). table/column
-// không parameterize được trong JDBC nên phải validate allowlist trước khi ghép chuỗi SQL.
+// Chạy câu SQL do người dùng viết trên database ngoài bằng JDBC thuần (không qua Hibernate —
+// schema DB ngoài không biết trước), unbundle mỗi cột/dòng thành 1 Kafka message (xem
+// ARCHITECTURE.md § Flow: External source data).
+//
+// Từ V12: không còn build query từ config. Câu SQL là của người dùng, hệ thống chỉ bind :cursor.
+// An toàn dựa vào phiên READ ONLY (máy chủ bên kia tự từ chối lệnh ghi) + timeout + trần dòng,
+// không còn dựa vào allowlist định danh.
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class ExternalQueryExecutorService {
 
-    private static final Set<String> ALLOWED_OPERATORS = Set.of("=", "!=", ">", "<", ">=", "<=");
+    private static final Pattern CURSOR = Pattern.compile(":cursor\\b");
 
     private final CredentialDecryptionService credentialDecryptionService;
-    private final SqlIdentifierValidator sqlIdentifierValidator;
     private final ExternalMessageIdGenerator messageIdGenerator;
     private final ExternalDataRawProducer externalDataRawProducer;
     private final ObjectMapper objectMapper;
@@ -54,9 +57,8 @@ public class ExternalQueryExecutorService {
 
     public ExecutionResult execute(ExternalSourceJob job, ExternalSource source) {
         ExternalSourceQueryConfig queryConfig = job.getQueryConfig();
-        List<ExternalSourceFilter> filters = job.getFilterConfig() == null ? List.of() : job.getFilterConfig();
-        if (!validIdentifiers(queryConfig, filters)) {
-            return ExecutionResult.failed("Invalid identifier in query_config/filter_config");
+        if (queryConfig == null || queryConfig.sql() == null || queryConfig.timestampColumn() == null) {
+            return ExecutionResult.failed("query_config thiếu sql hoặc timestampColumn");
         }
 
         ExternalSourceCredential credential;
@@ -67,41 +69,60 @@ public class ExternalQueryExecutorService {
             return ExecutionResult.failed("Failed to decrypt credential: " + e.getMessage());
         }
 
-        String sql = buildSql(queryConfig, filters, job.getIncrementalCursor());
+        PreparedSql prepared = toPreparedSql(queryConfig.sql());
+        Instant cursor = parseCursor(job.getIncrementalCursor());
         String jdbcUrl = buildJdbcUrl(source.getConnectionConfig());
         String correlationId = UUID.randomUUID().toString();
 
-        try (Connection connection = DriverManager.getConnection(jdbcUrl, credential.username(), credential.password());
-             PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setQueryTimeout(queryTimeoutSeconds);
-            statement.setMaxRows(maxRowsPerRun);
-            bindParameters(statement, filters, job.getIncrementalCursor());
-
-            int rowCount = 0;
-            Instant maxMeasuredAt = null;
-            try (ResultSet rs = statement.executeQuery()) {
-                while (rs.next()) {
-                    rowCount++;
-                    Instant measuredAt = toInstant(rs.getObject(queryConfig.timestampColumn()));
-                    if (measuredAt == null) {
-                        continue;
-                    }
-                    if (maxMeasuredAt == null || measuredAt.isAfter(maxMeasuredAt)) {
-                        maxMeasuredAt = measuredAt;
-                    }
-                    publishRow(job, source, queryConfig, rs, measuredAt, correlationId);
+        try (Connection connection = DriverManager.getConnection(jdbcUrl, credential.username(), credential.password())) {
+            connection.setReadOnly(true);
+            try (PreparedStatement statement = connection.prepareStatement(prepared.sql())) {
+                statement.setQueryTimeout(queryTimeoutSeconds);
+                statement.setMaxRows(maxRowsPerRun);
+                for (int i = 1; i <= prepared.cursorParamCount(); i++) {
+                    statement.setTimestamp(i, Timestamp.from(cursor));
                 }
+
+                int rowCount = 0;
+                Instant maxMeasuredAt = null;
+                try (ResultSet rs = statement.executeQuery()) {
+                    List<String> valueColumns = readValueColumns(rs.getMetaData(), queryConfig.timestampColumn());
+                    while (rs.next()) {
+                        rowCount++;
+                        Instant measuredAt = toInstant(rs.getObject(queryConfig.timestampColumn()));
+                        if (measuredAt == null) {
+                            continue;
+                        }
+                        if (maxMeasuredAt == null || measuredAt.isAfter(maxMeasuredAt)) {
+                            maxMeasuredAt = measuredAt;
+                        }
+                        publishRow(job, source, valueColumns, rs, measuredAt, correlationId);
+                    }
+                }
+                return ExecutionResult.success(rowCount, maxMeasuredAt);
             }
-            return ExecutionResult.success(rowCount, maxMeasuredAt);
         } catch (Exception e) {
             log.error("External query failed jobId={}", job.getId(), e);
             return ExecutionResult.failed(truncate(e.getMessage()));
         }
     }
 
-    private void publishRow(ExternalSourceJob job, ExternalSource source, ExternalSourceQueryConfig queryConfig,
-                             ResultSet rs, Instant measuredAt, String correlationId) throws java.sql.SQLException {
-        for (String column : queryConfig.valueColumns()) {
+    // Cột dữ liệu suy từ kết quả thật (mọi cột trừ cột thời gian) — người dùng không phải khai
+    // valueColumns nữa, thêm cột vào SELECT là có ngay field mới để gắn datastream.
+    private List<String> readValueColumns(ResultSetMetaData metaData, String timestampColumn) throws SQLException {
+        List<String> columns = new ArrayList<>();
+        for (int i = 1; i <= metaData.getColumnCount(); i++) {
+            String label = metaData.getColumnLabel(i);
+            if (!label.equalsIgnoreCase(timestampColumn)) {
+                columns.add(label);
+            }
+        }
+        return columns;
+    }
+
+    private void publishRow(ExternalSourceJob job, ExternalSource source, List<String> valueColumns,
+                            ResultSet rs, Instant measuredAt, String correlationId) throws SQLException {
+        for (String column : valueColumns) {
             Double value = toDouble(rs.getObject(column));
             if (value == null) {
                 continue;
@@ -113,46 +134,53 @@ public class ExternalQueryExecutorService {
         }
     }
 
-    private boolean validIdentifiers(ExternalSourceQueryConfig config, List<ExternalSourceFilter> filters) {
-        if (!sqlIdentifierValidator.isValid(config.table()) || !sqlIdentifierValidator.isValid(config.timestampColumn())) {
-            return false;
+    private PreparedSql toPreparedSql(String sql) {
+        Matcher matcher = CURSOR.matcher(sql);
+        StringBuilder out = new StringBuilder();
+        int count = 0;
+        while (matcher.find()) {
+            if (insideStringOrComment(sql, matcher.start())) {
+                continue;
+            }
+            matcher.appendReplacement(out, "?");
+            count++;
         }
-        if (config.valueColumns().stream().anyMatch(c -> !sqlIdentifierValidator.isValid(c))) {
-            return false;
-        }
-        return filters.stream().allMatch(f -> sqlIdentifierValidator.isValid(f.column()) && ALLOWED_OPERATORS.contains(f.operator()));
+        matcher.appendTail(out);
+        return new PreparedSql(out.toString(), count);
     }
 
-    private String buildSql(ExternalSourceQueryConfig config, List<ExternalSourceFilter> filters, String cursor) {
-        StringBuilder sql = new StringBuilder("SELECT ").append(config.timestampColumn());
-        config.valueColumns().forEach(column -> sql.append(", ").append(column));
-        sql.append(" FROM ").append(config.table());
-
-        List<String> conditions = new ArrayList<>();
-        if (cursor != null) {
-            conditions.add(config.timestampColumn() + " > ?");
+    private boolean insideStringOrComment(String sql, int index) {
+        String head = sql.substring(0, index);
+        long quotes = head.chars().filter(c -> c == '\'').count();
+        if (quotes % 2 == 1) {
+            return true;
         }
-        filters.forEach(f -> conditions.add(f.column() + " " + f.operator() + " ?"));
-        if (!conditions.isEmpty()) {
-            sql.append(" WHERE ").append(String.join(" AND ", conditions));
-        }
-        sql.append(" ORDER BY ").append(config.timestampColumn()).append(" ASC");
-        return sql.toString();
+        int lineStart = head.lastIndexOf('\n') + 1;
+        return head.indexOf("--", lineStart) >= 0;
     }
 
-    private void bindParameters(PreparedStatement statement, List<ExternalSourceFilter> filters, String cursor) throws java.sql.SQLException {
-        int paramIndex = 1;
-        if (cursor != null) {
-            statement.setTimestamp(paramIndex++, Timestamp.from(Instant.parse(cursor)));
+    // Từ V12 cursor luôn có giá trị; job cũ hỏng dữ liệu thì đọc lại từ đầu thay vì chết.
+    private Instant parseCursor(String cursor) {
+        if (cursor == null || cursor.isBlank()) {
+            return Instant.EPOCH;
         }
-        for (ExternalSourceFilter filter : filters) {
-            statement.setString(paramIndex++, filter.value());
+        try {
+            return Instant.parse(cursor);
+        } catch (Exception e) {
+            log.warn("Invalid incremental_cursor '{}', falling back to epoch", cursor);
+            return Instant.EPOCH;
         }
     }
 
+    // readOnlyMode=always là thứ thực sự cưỡng chế chỉ-đọc: driver gửi
+    // SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY ngay khi mở kết nối.
+    // KHÔNG bỏ tham số này — với mặc định (readOnlyMode=transaction) thì setReadOnly(true)
+    // chỉ có tác dụng khi autocommit tắt, tức là no-op ở đây, và một câu
+    // "WITH x AS (DELETE ... RETURNING ...) SELECT * FROM x" sẽ xoá thật dữ liệu khách hàng.
     private String buildJdbcUrl(ExternalSourceConnectionConfig config) {
         String sslMode = config.sslMode() != null ? config.sslMode() : "disable";
-        return "jdbc:postgresql://%s:%d/%s?sslmode=%s".formatted(config.host(), config.port(), config.database(), sslMode);
+        return "jdbc:postgresql://%s:%d/%s?sslmode=%s&readOnlyMode=always"
+                .formatted(config.host(), config.port(), config.database(), sslMode);
     }
 
     private Instant toInstant(Object value) {
@@ -187,6 +215,9 @@ public class ExternalQueryExecutorService {
             return "Unknown error";
         }
         return message.length() > 500 ? message.substring(0, 500) : message;
+    }
+
+    private record PreparedSql(String sql, int cursorParamCount) {
     }
 
     public record ExecutionResult(boolean success, int rowCount, Instant maxMeasuredAt, String error) {

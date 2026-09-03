@@ -19,6 +19,8 @@ interface FormDialogProps {
   submitLabel?: string
   cancelLabel?: string
   isPending?: boolean
+  /** Chặn submit khi form còn điều kiện chưa thoả (VD: chưa thử kết nối thành công). */
+  submitDisabled?: boolean
   onSubmit: React.FormEventHandler<HTMLFormElement>
   /** Các <Field> của form — FormDialog đã bọc sẵn FieldGroup nên không cần bọc lại. */
   children: React.ReactNode
@@ -33,6 +35,7 @@ export function FormDialog({
   submitLabel = 'Lưu',
   cancelLabel = 'Hủy',
   isPending = false,
+  submitDisabled = false,
   onSubmit,
   children,
   className,
@@ -46,7 +49,8 @@ export function FormDialog({
         </DialogHeader>
         <form className="flex flex-col gap-6" onSubmit={onSubmit} noValidate>
           <FieldGroup>{children}</FieldGroup>
-          <DialogFooter>
+          {/* Footer cùng màu với thân dialog, xem ghi chú ở ConfirmDialog. */}
+          <DialogFooter className="border-t-0 bg-transparent">
             <Button
               type="button"
               variant="outline"
@@ -55,7 +59,7 @@ export function FormDialog({
             >
               {cancelLabel}
             </Button>
-            <LoadingButton type="submit" isPending={isPending}>
+            <LoadingButton type="submit" isPending={isPending} disabled={submitDisabled}>
               {submitLabel}
             </LoadingButton>
           </DialogFooter>
