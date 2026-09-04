@@ -46,6 +46,12 @@ public class ExternalSourceJobServiceImpl implements ExternalSourceJobService {
     private final CronNextRunCalculator cronNextRunCalculator;
 
     @Override
+    public PreviewResponse sampleLatest(Long id, int limit) {
+        ExternalSourceJob job = getOrThrow(id);
+        return externalSourceQueryService.sampleLatest(job.getExternalSourceId(), job.getQueryConfig(), limit);
+    }
+
+    @Override
     public List<ExternalSourceJobResponse> list(Long externalSourceId) {
         return externalSourceJobRepository.findByExternalSourceId(externalSourceId).stream()
                 .map(externalSourceJobMapper::toResponse)

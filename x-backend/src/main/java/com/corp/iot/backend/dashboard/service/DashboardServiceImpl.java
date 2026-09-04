@@ -45,7 +45,7 @@ public class DashboardServiceImpl implements DashboardService {
     @Transactional
     public Dashboard getOrCreateEntity(Long tenantNodeId) {
         AppUserPrincipal principal = currentPrincipal();
-        return dashboardRepository.findByUserIdAndTenantNodeId(principal.userId(), tenantNodeId)
+        return dashboardRepository.findByUserIdAndTenantNodeIdAndExternalSourceIdIsNull(principal.userId(), tenantNodeId)
                 .orElseGet(() -> {
                     Dashboard dashboard = new Dashboard();
                     dashboard.setUserId(principal.userId());

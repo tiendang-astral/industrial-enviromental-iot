@@ -8,7 +8,8 @@ import java.util.List;
 
 public interface GatewayService {
 
-    List<GatewayResponse> list(Long tenantNodeId);
+    /** includeDescendants=true: gateway của cả subtree — widget SWITCH ở board node gộp cần tới. */
+    List<GatewayResponse> list(Long tenantNodeId, boolean includeDescendants);
 
     GatewayResponse create(CreateGatewayRequest request);
 

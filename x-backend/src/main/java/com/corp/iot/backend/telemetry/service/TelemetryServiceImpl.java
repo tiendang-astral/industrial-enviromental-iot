@@ -3,11 +3,14 @@ package com.corp.iot.backend.telemetry.service;
 import com.corp.iot.backend.common.influx.InfluxReadService;
 import com.corp.iot.backend.common.influx.ReadingPoint;
 import com.corp.iot.backend.common.security.AppUserPrincipal;
+import com.corp.iot.backend.datastream.entity.Datastream;
+import com.corp.iot.backend.datastream.repository.DatastreamRepository;
 import com.corp.iot.backend.gatewaypin.entity.GatewayPin;
 import com.corp.iot.backend.gatewaypin.entity.PinDirection;
 import com.corp.iot.backend.gatewaypin.repository.GatewayPinRepository;
 import com.corp.iot.backend.metric.entity.Metric;
 import com.corp.iot.backend.metric.repository.MetricRepository;
+import com.corp.iot.backend.telemetry.dto.DatastreamTelemetryResponse;
 import com.corp.iot.backend.telemetry.dto.PinTelemetryResponse;
 import com.corp.iot.backend.telemetry.dto.ReadingPointDto;
 import lombok.RequiredArgsConstructor;
@@ -25,6 +28,7 @@ public class TelemetryServiceImpl implements TelemetryService {
 
     private final GatewayPinRepository gatewayPinRepository;
     private final MetricRepository metricRepository;
+    private final DatastreamRepository datastreamRepository;
     private final InfluxReadService influxReadService;
 
     @Override
@@ -34,6 +38,38 @@ public class TelemetryServiceImpl implements TelemetryService {
                 .filter(pin -> pin.getDirection() == PinDirection.INPUT)
                 .map(pin -> toTelemetry(tenantId, gatewayId, pin, rangeMinutes))
                 .toList();
+    }
+
+    @Override
+    public List<DatastreamTelemetryResponse> getExternalSourceTelemetry(Long externalSourceId, int rangeMinutes) {
+        Long tenantId = currentPrincipal().tenantId();
+        return datastreamRepository.findByExternalSourceId(externalSourceId).stream()
+                .map(datastream -> toTelemetry(tenantId, datastream, rangeMinutes))
+                .toList();
+    }
+
+    private DatastreamTelemetryResponse toTelemetry(Long tenantId, Datastream datastream, int rangeMinutes) {
+        // Lọc theo (job, cột): 2 kênh cùng job có thể chung metric, lọc theo metric sẽ trộn lẫn.
+        Long jobId = datastream.getSourceId();
+        String sourceField = datastream.getSourceField();
+        Optional<ReadingPoint> latest = influxReadService.latestExternal(tenantId, jobId, sourceField);
+        List<ReadingPointDto> history = influxReadService
+                .historyExternal(tenantId, jobId, sourceField, rangeMinutes).stream()
+                .map(point -> new ReadingPointDto(point.value(), point.measuredAt()))
+                .toList();
+        Metric metric = metricRepository.findById(datastream.getMetricId()).orElse(null);
+
+        return new DatastreamTelemetryResponse(
+                datastream.getId(),
+                datastream.getName(),
+                sourceField,
+                metric != null ? metric.getCode() : null,
+                metric != null ? metric.getUnit() : null,
+                latest.map(ReadingPoint::value).orElse(null),
+                latest.map(ReadingPoint::measuredAt).orElse(null),
+                datastream.getOldestReadingAt(),
+                history
+        );
     }
 
     private PinTelemetryResponse toTelemetry(Long tenantId, Long gatewayId, GatewayPin pin, int rangeMinutes) {

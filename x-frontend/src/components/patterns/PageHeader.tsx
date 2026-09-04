@@ -4,7 +4,8 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
 interface PageHeaderProps {
-  title: string
+  /** ReactNode để trang chi tiết gắn được badge cạnh tiêu đề. */
+  title: React.ReactNode
   description?: string
   /** Nút quay lại — chỉ dùng ở trang chi tiết (/:id), trang danh sách đã có breadcrumb. */
   backTo?: string
@@ -36,7 +37,9 @@ export function PageHeader({
           không dính lên mép trên — khối trái cao 2 dòng nên căn start bị lệch rõ. */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex flex-col gap-1">
-          <h1 className="text-xl font-semibold tracking-tight text-foreground">{title}</h1>
+          <h1 className="flex flex-wrap items-center gap-2 text-xl font-semibold tracking-tight text-foreground">
+            {title}
+          </h1>
           {description && (
             <p className="max-w-[65ch] text-sm text-muted-foreground">{description}</p>
           )}

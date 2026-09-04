@@ -21,8 +21,10 @@ public class DatastreamController {
 
     @GetMapping("/api/v1/tenant-nodes/{nodeId}/datastreams")
     @PreAuthorize("hasAnyAuthority('TENANT_ADMIN','MANAGER','OPERATOR','VIEWER') and @nodeScope.canAccess(#nodeId)")
-    public ApiResponse<List<DatastreamResponse>> list(@PathVariable Long nodeId) {
-        return ApiResponse.of(datastreamService.list(nodeId));
+    public ApiResponse<List<DatastreamResponse>> list(
+            @PathVariable Long nodeId,
+            @RequestParam(defaultValue = "false") boolean includeDescendants) {
+        return ApiResponse.of(datastreamService.list(nodeId, includeDescendants));
     }
 
     @GetMapping("/api/v1/external-sources/{sourceId}/datastreams")

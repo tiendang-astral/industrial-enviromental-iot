@@ -10,6 +10,7 @@ import {
   descendantIdsOf,
   orderNodesDepthFirst,
 } from '@/lib/tenantNodeTree'
+import { NODE_ICON } from '@/lib/tenantNodeLabels'
 import { cn } from '@/lib/utils'
 import type { TenantNode } from '@/types/tenantNode'
 
@@ -24,6 +25,8 @@ interface BaseProps {
    * đó nằm dưới chi nhánh nào).
    */
   selectable?: (node: TenantNode) => boolean
+  /** Nhãn hiển thị mờ ngay trong ô, trước giá trị đã chọn — gọn hơn nhãn rời bên ngoài. */
+  label?: string
   placeholder?: string
   invalid?: boolean
   disabled?: boolean
@@ -42,7 +45,7 @@ type TenantNodePickerProps =
  * xuống toàn bộ cây con qua ltree, nên đây là cách duy nhất để ô tick nói đúng thứ sẽ được lưu.
  */
 export function TenantNodePicker(props: TenantNodePickerProps) {
-  const { id, nodes, selectable, placeholder = 'Chọn tổ chức', invalid, disabled, className } = props
+  const { id, nodes, selectable, label, placeholder = 'Chọn tổ chức', invalid, disabled, className } = props
   const [open, setOpen] = useState(false)
 
   const { ordered, byId, childrenByParent, minDepth } = useMemo(
@@ -114,8 +117,11 @@ export function TenantNodePicker(props: TenantNodePickerProps) {
             className
           )}
         >
-          <span className={cn('truncate', !summary && 'text-muted-foreground')}>
-            {summary ?? placeholder}
+          <span className="flex min-w-0 items-center gap-1.5">
+            {label && <span className="shrink-0 text-muted-foreground">{label}</span>}
+            <span className={cn('truncate', !summary && 'text-muted-foreground')}>
+              {summary ?? placeholder}
+            </span>
           </span>
           <ChevronDown className="shrink-0 text-muted-foreground" />
         </Button>
@@ -139,6 +145,8 @@ export function TenantNodePicker(props: TenantNodePickerProps) {
                 className="mb-1.5 size-2.5 shrink-0 rounded-bl-[3px] border-b border-l border-border"
               />
             )
+            const NodeIcon = NODE_ICON[node.nodeType]
+            const icon = <NodeIcon className="size-3.5 shrink-0 text-muted-foreground" />
 
             if (props.mode === 'multiple') {
               return (
@@ -156,6 +164,7 @@ export function TenantNodePicker(props: TenantNodePickerProps) {
                     disabled={!allowed}
                     onCheckedChange={(checked) => toggleMultiple(node, checked === true)}
                   />
+                  {icon}
                   <span className="truncate">{node.name}</span>
                 </Label>
               )
@@ -181,6 +190,7 @@ export function TenantNodePicker(props: TenantNodePickerProps) {
                 style={indent}
               >
                 {branch}
+                {icon}
                 <span className="truncate">{node.name}</span>
                 {isSelected && <Check className="ms-auto size-4 shrink-0 text-primary" />}
               </button>

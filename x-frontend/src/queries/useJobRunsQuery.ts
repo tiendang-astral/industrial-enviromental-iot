@@ -7,6 +7,6 @@ export function useJobRunsQuery(jobId: number | null, sinceHours = 12) {
     queryFn: () => listJobRuns(jobId!, sinceHours),
     enabled: !!jobId,
     // Job chạy theo cron nên không có event realtime — làm mới định kỳ là đủ.
-    refetchInterval: 30_000,
+    refetchInterval: 60_000,
   })
 }

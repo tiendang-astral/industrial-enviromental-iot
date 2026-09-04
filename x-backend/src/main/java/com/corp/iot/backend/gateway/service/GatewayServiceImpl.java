@@ -3,6 +3,7 @@ package com.corp.iot.backend.gateway.service;
 import com.corp.iot.backend.common.exception.BusinessException;
 import com.corp.iot.backend.common.scope.ScopeService;
 import com.corp.iot.backend.common.security.AppUserPrincipal;
+import com.corp.iot.backend.common.tenant.TenantContext;
 import com.corp.iot.backend.gateway.dto.CreateGatewayRequest;
 import com.corp.iot.backend.gateway.dto.GatewayResponse;
 import com.corp.iot.backend.gateway.dto.UpdateGatewayRequest;
@@ -32,9 +33,13 @@ public class GatewayServiceImpl implements GatewayService {
     private final ScopeService scopeService;
 
     @Override
-    public List<GatewayResponse> list(Long tenantNodeId) {
+    public List<GatewayResponse> list(Long tenantNodeId, boolean includeDescendants) {
         if (tenantNodeId != null) {
-            return gatewayRepository.findByTenantNodeId(tenantNodeId).stream()
+            // Gateway chỉ gắn vào SITE, nên lọc đúng 1 node ở cấp gộp luôn trả rỗng.
+            List<Gateway> found = includeDescendants
+                    ? gatewayRepository.findByTenantNodeIdIn(subtreeNodeIds(tenantNodeId))
+                    : gatewayRepository.findByTenantNodeId(tenantNodeId);
+            return found.stream()
                     .map(gatewayMapper::toResponse)
                     .toList();
         }
@@ -46,6 +51,12 @@ public class GatewayServiceImpl implements GatewayService {
                 .filter(gateway -> accessible == null || accessible.contains(gateway.getTenantNodeId()))
                 .map(gatewayMapper::toResponse)
                 .toList();
+    }
+
+    private List<Long> subtreeNodeIds(Long tenantNodeId) {
+        TenantNode node = tenantNodeRepository.findById(tenantNodeId)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "NODE_NOT_FOUND", "Không tìm thấy node"));
+        return tenantNodeRepository.findDescendantIdsIncludingSelf(TenantContext.getTenantId(), node.getPath());
     }
 
     @Override

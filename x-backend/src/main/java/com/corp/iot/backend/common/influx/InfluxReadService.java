@@ -38,18 +38,29 @@ public class InfluxReadService {
     }
 
     // Đọc InfluxDB measurement external_reading (xem DATABASE.md §4) cho trang chi tiết
-    // External Source — source_id ở đây = external_source_job.id (không phải external_source.id,
-    // xem ARCHITECTURE.md § Flow: External source data).
-    public Optional<ReadingPoint> latestExternal(Long tenantId, Long externalSourceJobId, String metricCode) {
+    // External Source. Lọc theo (job, cột) chứ không theo metric: một job được phép có 2 kênh
+    // cùng metric ở 2 cột khác nhau, lọc theo metric sẽ trộn chúng làm một.
+    public Optional<ReadingPoint> latestExternal(Long tenantId, Long externalSourceJobId, String sourceField) {
         String flux = """
                 from(bucket: "%s")
                   |> range(start: -8d)
                   |> filter(fn: (r) => r._measurement == "external_reading" and r._field == "value_float"
-                    and r.tenant_id == "%d" and r.source_id == "%d" and r.metric == "%s")
+                    and r.tenant_id == "%d" and r.external_source_job_id == "%d" and r.source_field == "%s")
                   |> last()
-                """.formatted(bucket, tenantId, externalSourceJobId, metricCode);
+                """.formatted(bucket, tenantId, externalSourceJobId, sourceField);
         List<ReadingPoint> points = execute(flux);
         return points.isEmpty() ? Optional.empty() : Optional.of(points.get(points.size() - 1));
+    }
+
+    public List<ReadingPoint> historyExternal(Long tenantId, Long externalSourceJobId, String sourceField, int rangeMinutes) {
+        String flux = """
+                from(bucket: "%s")
+                  |> range(start: -%dm)
+                  |> filter(fn: (r) => r._measurement == "external_reading" and r._field == "value_float"
+                    and r.tenant_id == "%d" and r.external_source_job_id == "%d" and r.source_field == "%s")
+                  |> sort(columns: ["_time"])
+                """.formatted(bucket, rangeMinutes, tenantId, externalSourceJobId, sourceField);
+        return execute(flux);
     }
 
     public List<ReadingPoint> history(Long tenantId, Long gatewayId, String pinType, Integer pinNumber, int rangeMinutes) {

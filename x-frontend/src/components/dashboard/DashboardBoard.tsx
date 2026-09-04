@@ -1,4 +1,5 @@
 import { memo, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useBlocker } from 'react-router-dom'
 import ReactGridLayout, { useContainerWidth } from 'react-grid-layout'
 import { GridBackground } from 'react-grid-layout/extras'
 import 'react-grid-layout/css/styles.css'
@@ -7,7 +8,9 @@ import { LayoutGrid, Pencil, Plus, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { ConfirmDialog } from '@/components/patterns/ConfirmDialog'
 import { EmptyState } from '@/components/patterns/EmptyState'
+import { LoadingButton } from '@/components/patterns/LoadingButton'
 import { AddWidgetDialog } from '@/components/widgets/AddWidgetDialog'
 import { DeviceListWidget } from '@/components/widgets/DeviceListWidget'
 import { DevicesOnlineWidget } from '@/components/widgets/DevicesOnlineWidget'
@@ -27,6 +30,8 @@ const ROW_HEIGHT = 60
 const MARGIN: [number, number] = [12, 12]
 
 interface DashboardBoardProps {
+  /** Định danh board (`node:{id}` / `source:{id}`) — chế độ chỉnh sửa bám theo board, xem useDashboardStore. */
+  boardKey: string
   leftHeader: ReactNode
   extraActions?: ReactNode
   dashboard: Dashboard | undefined
@@ -41,8 +46,9 @@ interface DashboardBoardProps {
   readings: Record<number, DatastreamReading>
   /** Không truyền = board không có widget SWITCH (VD board theo nguồn — allowDeviceWidgets=false). */
   commandUpdates?: Record<string, CommandUpdate>
-  onSaveDebounced: (widgets: WidgetT[]) => void
-  onSaveNow: (widgets: WidgetT[]) => void
+  /** Ghi bản nháp lên server — chỉ gọi khi người dùng bấm Lưu, không gọi theo từng cú kéo. */
+  onSave: (widgets: WidgetT[]) => Promise<unknown>
+  isSaving: boolean
 }
 
 /**
@@ -50,6 +56,7 @@ interface DashboardBoardProps {
  * tách ra từ DashboardPage cũ để 2 trang tái dùng cùng logic kéo-thả/resize/thêm-xóa widget.
  */
 export function DashboardBoard({
+  boardKey,
   leftHeader,
   extraActions,
   dashboard,
@@ -60,16 +67,33 @@ export function DashboardBoard({
   allowDeviceWidgets,
   readings,
   commandUpdates = {},
-  onSaveDebounced,
-  onSaveNow,
+  onSave,
+  isSaving,
 }: DashboardBoardProps) {
-  const { editMode, toggleEditMode } = useDashboardStore()
+  const editMode = useDashboardStore((state) => state.editingBoardKey === boardKey)
+  const dirty = useDashboardStore((state) => state.dirty)
+  const toggleEditMode = useDashboardStore((state) => state.toggleEditMode)
+  const markDirty = useDashboardStore((state) => state.markDirty)
+  const exitEdit = useDashboardStore((state) => state.exitEdit)
   const [isAddWidgetOpen, setIsAddWidgetOpen] = useState(false)
 
+  // Đang sửa = bản nháp cục bộ. Chỉ đồng bộ lại từ server khi đã ra khỏi chế độ sửa, nếu không thì
+  // mỗi lần cache đổi là đè mất thứ người dùng đang kéo dở. Đây cũng là đường bỏ nháp: `exitEdit()`
+  // tắt `editMode`, effect này kéo lại layout đã lưu.
   const [widgets, setWidgets] = useState<WidgetT[]>([])
   useEffect(() => {
-    if (dashboard) setWidgets(dashboard.widgets)
-  }, [dashboard])
+    if (dashboard && !editMode) setWidgets(dashboard.widgets)
+  }, [dashboard, editMode])
+
+  // Chặn mọi đường rời đi khi còn nháp: đổi tab và đổi đơn vị/nguồn đều đi qua điều hướng router
+  // (search param), nên một chốt ở đây phủ luôn cả bấm menu lẫn nút Back.
+  const blocker = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      editMode &&
+      dirty &&
+      (currentLocation.pathname !== nextLocation.pathname ||
+        currentLocation.search !== nextLocation.search)
+  )
 
   const datastreamById = useMemo(() => {
     const map = new Map<number, Datastream>()
@@ -88,8 +112,16 @@ export function DashboardBoard({
       const position = layout.find((item) => item.i === widget.id)
       return position ? { ...widget, layout: { x: position.x, y: position.y, w: position.w, h: position.h } } : widget
     })
+    // RGL bắn onLayoutChange cả lúc dựng lưới, không riêng lúc người dùng kéo — không so trước thì
+    // board vừa mở đã bị coi là có thay đổi chưa lưu và chặn rời đi vô cớ.
+    const changed = updated.some((widget, index) => {
+      const before = widgets[index].layout
+      const after = widget.layout
+      return before.x !== after.x || before.y !== after.y || before.w !== after.w || before.h !== after.h
+    })
+    if (!changed) return
     setWidgets(updated)
-    onSaveDebounced(updated)
+    markDirty()
   }
 
   const [liveMaxRow, setLiveMaxRow] = useState(0)
@@ -130,15 +162,13 @@ export function DashboardBoard({
       binding,
       config: {},
     }
-    const updated = [...widgets, widget]
-    setWidgets(updated)
-    onSaveNow(updated)
+    setWidgets([...widgets, widget])
+    markDirty()
   }
 
   function handleDeleteWidget(widgetId: string) {
-    const updated = widgets.filter((widget) => widget.id !== widgetId)
-    setWidgets(updated)
-    onSaveNow(updated)
+    setWidgets(widgets.filter((widget) => widget.id !== widgetId))
+    markDirty()
   }
 
   const committedMaxRow = widgets
@@ -147,8 +177,21 @@ export function DashboardBoard({
   const rows = Math.max(2, committedMaxRow, liveMaxRow) + 1
   const gridPixelHeight = rows * ROW_HEIGHT + (rows + 1) * MARGIN[1]
 
+  async function handleToggleEdit() {
+    // Thoát mà còn nháp thì ghi trước rồi mới tắt chế độ sửa — tắt trước sẽ khiến effect đồng bộ
+    // kéo lại layout cũ trong lúc request còn bay, board nháy về trạng thái trước đó.
+    if (editMode && dirty) {
+      try {
+        await onSave(widgets)
+      } catch {
+        return // giữ nguyên bản nháp để người dùng thử lại, không nuốt mất công sức
+      }
+    }
+    toggleEditMode(boardKey)
+  }
+
   function startAddingWidget() {
-    if (!editMode) toggleEditMode()
+    if (!editMode) toggleEditMode(boardKey)
     setIsAddWidgetOpen(true)
   }
 
@@ -180,10 +223,16 @@ export function DashboardBoard({
             </Button>
           )}
           {extraActions}
-          <Button size="sm" variant={editMode ? 'default' : 'outline'} onClick={toggleEditMode}>
-            <Pencil data-icon="inline-start" />
-            {editMode ? 'Xong' : 'Chỉnh sửa'}
-          </Button>
+          <LoadingButton
+            size="sm"
+            variant={editMode ? 'default' : 'outline'}
+            isPending={isSaving}
+            onClick={handleToggleEdit}
+          >
+            {!isSaving && <Pencil data-icon="inline-start" />}
+            {/* Nhãn nói rõ nút sẽ ghi lại, vì ở chế độ nháp "Xong" dễ đọc thành "bỏ qua". */}
+            {editMode ? (dirty ? 'Lưu' : 'Xong') : 'Chỉnh sửa'}
+          </LoadingButton>
         </div>
       </div>
 
@@ -254,6 +303,12 @@ export function DashboardBoard({
                     datastream={
                       widget.binding?.datastreamId != null ? datastreamById.get(widget.binding.datastreamId) : undefined
                     }
+                    // Kênh đã bind nhưng không có trong danh sách của board: bị chuyển sang đơn vị
+                    // ngoài phạm vi, hoặc đã xóa. Widget vẫn vẽ nhưng đứng im — phải nói ra.
+                    orphaned={
+                      widget.binding?.datastreamId != null &&
+                      !datastreamById.has(widget.binding.datastreamId)
+                    }
                     reading={widget.binding?.datastreamId != null ? readings[widget.binding.datastreamId] : undefined}
                     metricByCode={metricByCode}
                     commandUpdates={commandUpdates}
@@ -264,6 +319,20 @@ export function DashboardBoard({
           </>
         )}
       </div>
+
+      <ConfirmDialog
+        open={blocker.state === 'blocked'}
+        onOpenChange={(open) => !open && blocker.reset?.()}
+        title="Rời khỏi bảng điều khiển?"
+        question="Bạn đang chỉnh sửa và có thay đổi chưa lưu."
+        description="Rời khỏi đây sẽ bỏ toàn bộ thay đổi vừa thực hiện: vị trí widget đã kéo, widget đã thêm hoặc đã xóa. Chọn Hủy rồi bấm Lưu nếu muốn giữ lại."
+        confirmLabel="Rời và bỏ thay đổi"
+        destructive
+        onConfirm={() => {
+          exitEdit()
+          blocker.proceed?.()
+        }}
+      />
 
       <AddWidgetDialog
         open={isAddWidgetOpen}
@@ -284,6 +353,7 @@ const WidgetRenderer = memo(function WidgetRenderer({
   widget,
   tenantNodeId,
   datastream,
+  orphaned,
   reading,
   metricByCode,
   commandUpdates,
@@ -291,6 +361,7 @@ const WidgetRenderer = memo(function WidgetRenderer({
   widget: WidgetT
   tenantNodeId: number
   datastream?: Datastream
+  orphaned?: boolean
   reading?: DatastreamReading
   metricByCode: Map<string, Metric>
   commandUpdates: Record<string, CommandUpdate>
@@ -301,12 +372,13 @@ const WidgetRenderer = memo(function WidgetRenderer({
         <ValueWidget
           widget={widget}
           datastream={datastream}
+          orphaned={orphaned}
           reading={reading}
           metric={datastream?.metricCode ? metricByCode.get(datastream.metricCode) : undefined}
         />
       )
     case 'LINE':
-      return <LineWidget widget={widget} datastream={datastream} reading={reading} />
+      return <LineWidget widget={widget} datastream={datastream} orphaned={orphaned} reading={reading} />
     case 'DEVICE_LIST':
       return <DeviceListWidget widget={widget} tenantNodeId={tenantNodeId} />
     case 'DEVICES_ONLINE':

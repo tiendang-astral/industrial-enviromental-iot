@@ -41,6 +41,11 @@ app:
     query-timeout-seconds: 30
     max-rows-per-run: 500
     run-history-cleanup-interval-ms: 3600000
+    # Vá lịch sử (V13) — sweep riêng để tác vụ nặng không làm trễ nhịp cron của job sống.
+    backfill-sweep-interval-ms: 10000
+    backfill-batch-rows: 1000
+    backfill-window-hours: 24
+    backfill-time-budget-ms: 60000
   encryption:
     key: ${APP_ENCRYPTION_KEY:htcBFqnfOVeXpRFzOHXr3wAl1qRamivL3PBA5IC+hEY=}
 

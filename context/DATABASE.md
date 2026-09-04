@@ -2,7 +2,7 @@
 
 > Nguồn schema duy nhất là **Flyway**; Hibernate chạy `ddl-auto: validate`.
 > Tenant isolation: **Hibernate multi-tenancy DISCRIMINATOR** (bỏ RLS).
-> Migration đã squash thành baseline (2026-06-30): `V1__baseline_schema.sql`; các thay đổi sau baseline theo từng version riêng (`V2__auth_seed.sql`, `V3__refresh_token_platform_user.sql`, `V4__phase2_metric_seed.sql`, `V5__dev_seed_credentials.sql`, `V6__backfill_datastream_from_gateway_pin.sql`, `V7__phase4_dashboard_template_seed.sql`, `V8__weather_and_gas_metric_seed.sql`, `V9__platform_user_soft_delete.sql`, `V10__tenant_node_enabled.sql`, `V11__external_source_polling.sql`, `V12__external_source_sql_query.sql`...).
+> Migration đã squash thành baseline (2026-06-30): `V1__baseline_schema.sql`; các thay đổi sau baseline theo từng version riêng (`V2__auth_seed.sql`, `V3__refresh_token_platform_user.sql`, `V4__phase2_metric_seed.sql`, `V5__dev_seed_credentials.sql`, `V6__backfill_datastream_from_gateway_pin.sql`, `V7__phase4_dashboard_template_seed.sql`, `V8__weather_and_gas_metric_seed.sql`, `V9__platform_user_soft_delete.sql`, `V10__tenant_node_enabled.sql`, `V11__external_source_polling.sql`, `V12__external_source_sql_query.sql`, `V13__external_source_backfill.sql`, `V14__dashboard_template_seed.sql`...).
 
 ## 1. ERD
 
@@ -14,17 +14,19 @@ Các thực thể trong hệ thống và mối quan hệ giữa chúng.
 | platform_user | Tài khoản quản trị nền tảng |
 | tenant_user | Người dùng trong tenant |
 | refresh_token | Token làm mới JWT |
-| role | Vai trò |
-| user_role_scope | Phân quyền user ↔ role + scope node |
+| platform_role | Vai trò cho quản trị viên nền tảng |
+| tenant_role | Vai trò trong tenant |
+| user_role_scope | Phân quyền user ↔ tenant_role + scope node |
 | tenant_node | Cây tổ chức: TENANT_ROOT → BRANCH → PRODUCTION_AREA → SITE |
 | gateway | Gateway IoT (Advantech) |
 | gateway_pin | Chân vật lý trên gateway (INPUT=đo / OUTPUT=điều khiển) |
 | external_source | Nguồn dữ liệu ngoài (kết nối DB khác) |
 | external_source_job | Task scrape/pull dữ liệu từ external_source |
 | external_source_job_run | Lịch sử từng lần chạy của job (bảng log) |
+| external_source_job_backfill | Tác vụ đọc lại lịch sử cho 1 kênh dữ liệu (bảng log) |
 | dashboard | Bảng điều khiển (widget JSONB) |
 | dashboard_template | Template dashboard (SYSTEM/CUSTOM) |
-| datastream | Kênh dữ liệu/điều khiển (neo vào gateway_pin) |
+| datastream | Kênh dữ liệu đã chuẩn hoá — neo vào `gateway_pin` hoặc `external_source_job` |
 | alert_rule | Rule cảnh báo (SENSOR/GATEWAY) |
 | alert_channel | Kênh nhận cảnh báo (EMAIL/TELEGRAM) |
 | alert | Instance cảnh báo đang mở/closed |
@@ -40,48 +42,70 @@ Các thực thể trong hệ thống và mối quan hệ giữa chúng.
 | tenant_node — gateway | 1-n | Gateway thuộc SITE |
 | tenant_node — external_source | 1-n | External source thuộc node |
 | gateway — gateway_pin | 1-n | Chân vật lý trên gateway |
-| gateway_pin — datastream | 1-1 | Datastream neo vào gateway_pin (sensor) |
+| gateway_pin — datastream | 1-1 | Datastream neo vào gateway_pin INPUT (pin OUTPUT không có datastream) |
 | external_source — external_source_job | 1-n | Job scrape từ external_source |
-| external_source_job — datastream | 1-n | Datastream neo vào external_source_job |
+| external_source_job — datastream | 1-n | Datastream neo vào external_source_job (1 cột kết quả = 1 datastream) |
+| external_source_job — external_source_job_run | 1-n | Lịch sử mỗi lần job chạy |
+| datastream — external_source_job_backfill | 1-n | Các lượt đọc lại lịch sử của kênh |
 | datastream — dashboard | 1-n (qua JSONB) | Widget bind datastream |
 | alert_rule — alert_channel | 1-n | Nhiều kênh nhận 1 rule |
 | alert_rule — alert | 1-n | Rule tạo nhiều alert |
 | outbox_event | — | Transactional outbox, publish Kafka |
 
+> Sơ đồ dưới đây chỉ vẽ **bảng có thật trong Flyway**. Trước `V13` sơ đồ còn sót 3 thực thể không tồn tại: `DATAFLOW` (tên cũ của `external_source_job`), `COMMAND_EVENT` (chưa từng được tạo — timeline của lệnh nằm trong chính các cột `*_at` của `command`) và `ROLE` (thực tế tách thành `platform_role` và `tenant_role`).
+
 ```mermaid
 erDiagram
     TENANT ||--o{ TENANT_USER : has
     TENANT ||--o{ TENANT_NODE : has
-    TENANT ||--o{ ROLE : has
+    TENANT ||--o{ TENANT_ROLE : has
     TENANT ||--o{ DASHBOARD : has
     TENANT ||--o{ GATEWAY : has
     TENANT ||--o{ ALERT_RULE : has
     TENANT ||--o{ EXTERNAL_SOURCE : has
+    TENANT ||--o{ OUTBOX_EVENT : publishes
+
+    PLATFORM_USER ||--o{ REFRESH_TOKEN : holds
+    TENANT_USER ||--o{ REFRESH_TOKEN : holds
+    PLATFORM_ROLE {
+        string value "PLATFORM_ADMIN"
+    }
 
     TENANT_USER ||--o{ USER_ROLE_SCOPE : has
-    USER_ROLE_SCOPE }o--|| ROLE : assigned
+    USER_ROLE_SCOPE }o--|| TENANT_ROLE : assigned
     USER_ROLE_SCOPE }o--o| TENANT_NODE : scoped
 
     TENANT_NODE ||--o{ TENANT_NODE : parent
     TENANT_NODE ||--o{ GATEWAY : hosts
     TENANT_NODE ||--o{ DASHBOARD : anchors
     TENANT_NODE ||--o{ EXTERNAL_SOURCE : owns
+    TENANT_NODE ||--o{ DATASTREAM : anchors
 
     GATEWAY ||--o{ GATEWAY_PIN : has
-    GATEWAY_PIN ||--|| DATASTREAM : feeds
+    GATEWAY_PIN ||--o| DATASTREAM : feeds
+    METRIC ||--o{ GATEWAY_PIN : types
+    METRIC ||--o{ DATASTREAM : types
+    METRIC ||--o{ ALERT_RULE : monitors
 
-    EXTERNAL_SOURCE ||--o{ DATAFLOW : pulls
-    DATAFLOW ||--o{ DATASTREAM : produces
-    DATASTREAM ||--o{ DASHBOARD : binds
+    EXTERNAL_SOURCE ||--o{ EXTERNAL_SOURCE_JOB : pulls
+    EXTERNAL_SOURCE ||--o| DASHBOARD : anchors
+    EXTERNAL_SOURCE_JOB ||--o{ DATASTREAM : produces
+    EXTERNAL_SOURCE_JOB ||--o{ EXTERNAL_SOURCE_JOB_RUN : logs
+    EXTERNAL_SOURCE_JOB ||--o{ EXTERNAL_SOURCE_JOB_BACKFILL : backfills
+    DATASTREAM ||--o{ EXTERNAL_SOURCE_JOB_BACKFILL : refilled_by
+
+    DASHBOARD_TEMPLATE ||--o{ DASHBOARD : seeds
 
     ALERT_RULE ||--o{ ALERT_CHANNEL : notifies
     ALERT_RULE ||--o{ ALERT : generates
+    DATASTREAM ||--o{ ALERT : violates
 
     GATEWAY ||--o{ COMMAND : receives
-    COMMAND ||--o{ COMMAND_EVENT : timeline
-
-    TENANT ||--o{ OUTBOX_EVENT : publishes
 ```
+
+> **`DATASTREAM` là điểm gặp của hai nhánh nguồn.** Nhánh phần cứng: `gateway → gateway_pin → datastream` (1-1, tạo tự động cùng pin INPUT; pin OUTPUT là relay điều khiển nên **không** có datastream). Nhánh database ngoài: `external_source → external_source_job → datastream` (1-n, gắn thủ công từng cột). Dashboard chỉ bind `datastream`, không cần biết phía sau là pin hay câu SQL.
+>
+> Quan hệ `DATASTREAM — DASHBOARD` không có FK: widget nằm trong `dashboard.layout_json` (JSONB), tham chiếu `datastreamId` ở tầng ứng dụng. Cũng vì vậy xoá datastream không tự dọn widget đang bind (xem § datastream).
 
 ## 2. Các bảng
 
@@ -360,6 +384,37 @@ erDiagram
 - Index `ix_job_run_recent (tenant_id, external_source_job_id, started_at DESC)`.
 - Tự dọn bản ghi cũ hơn 7 ngày (`ExternalSourceSchedulerService.cleanupRunHistory`, fixed-delay 1h) — job chạy mỗi phút nên bảng lớn nhanh.
 
+### external_source_job_backfill
+**Vì sao cần:** Đọc lại phần lịch sử mà kênh dữ liệu chưa có (`V13`). Bảng log — không soft delete, `x-backend` tạo, `x-ingestion-service` chạy và cập nhật tiến độ.
+
+Kênh gắn sau khi job đã chạy sẽ mất sạch dữ liệu trước `incremental_cursor`: câu SQL chỉ đọc dòng mới hơn cursor, còn Processing Service thì vứt mọi field chưa có datastream để resolve. Backfill đọc lại khoảng đó bằng **đúng câu SQL của job**, chỉ đổi giá trị bind vào `:cursor`.
+
+| Column | Type | Constraint | Mô tả |
+|--------|------|------------|-------|
+| id | bigint | PK auto increment | |
+| tenant_id | bigint | NOT NULL | |
+| external_source_job_id | bigint | NOT NULL | Job cung cấp câu SQL |
+| datastream_id | bigint | NOT NULL, FK datastream ON DELETE CASCADE | Kênh (tức là cột) cần vá |
+| target_from | timestamptz | NOT NULL | Đích cần vá tới, cố định suốt tác vụ |
+| covered_from | timestamptz | NOT NULL | Cận trên ban đầu = nơi dữ liệu hiện có bắt đầu |
+| cursor_at | timestamptz | NOT NULL | Đang lùi tới đâu trong dải `[target_from, covered_from]` |
+| status | varchar | NOT NULL, CHECK IN ('PENDING','RUNNING','SUCCESS','FAILED') | `PENDING` = đã tạo, chờ ingestion nhặt |
+| row_count | bigint | NOT NULL DEFAULT 0 | Số dòng đã đọc lại luỹ kế |
+| error | text | | Lỗi nếu FAILED |
+| started_at | timestamptz | | |
+| finished_at | timestamptz | | |
+| created_at | timestamptz | NOT NULL | |
+| created_by | bigint | | |
+| updated_at | timestamptz | NOT NULL | |
+
+- Composite FK `(tenant_id, external_source_job_id) → external_source_job`. CHECK `target_from < covered_from`.
+- Partial unique `uq_backfill_open (datastream_id) WHERE status IN ('PENDING','RUNNING')` — bấm hai lần không sinh hai lượt cày song song trên database khách hàng.
+- Index `ix_backfill_due (status, created_at) WHERE status IN ('PENDING','RUNNING')` cho sweep, `ix_backfill_recent (tenant_id, datastream_id, created_at DESC)` cho FE poll tiến độ.
+- **Đọc lùi (mới → cũ), không đọc tiến.** `cursor_at` giảm dần từ `covered_from` về `target_from`, và `datastream.oldest_reading_at` được kéo theo sau **mỗi lô**. Nhờ vậy dữ liệu của kênh luôn là một dải liền mạch: ngắt giữa chừng (service restart, hết ngân sách thời gian, lỗi kết nối) chỉ làm dải ngắn đi, không bao giờ thủng ở giữa.
+- Câu SQL của người dùng chỉ có cận dưới (`:cursor`) nên để có cận trên, Ingestion bọc nó thành bảng con: `SELECT * FROM (<sql>) t WHERE t.<timestampColumn> < ? ORDER BY ... DESC`. `LIMIT` cuối câu bị gỡ trước khi bọc — giữ lại thì mọi lô đều trả về đúng bấy nhiêu dòng.
+- Tiến độ = `(covered_from - cursor_at) / (covered_from - target_from)`, tính ở `x-backend` khi trả response.
+- Message backfill mang cờ `backfill=true` trong Kafka `external-data-raw` và **bỏ qua dedup** ở Processing Service — xem `ARCHITECTURE.md` § Flow: External source backfill.
+
 ### dashboard
 **Vì sao cần:** Bảng điều khiển. Widget + layout lưu JSONB (`layout_json`).
 
@@ -380,7 +435,9 @@ erDiagram
 - Unique `(tenant_id, user_id, tenant_node_id, COALESCE(external_source_id, 0))` — `V11` đổi từ unique `(tenant_id, user_id, tenant_node_id)` cũ, vì Postgres coi nhiều `NULL` là phân biệt nên phải `COALESCE` (giống pattern `uq_user_role_scope`).
 - WidgetType: VALUE/LINE/SWITCH (gắn nguồn); DEVICE_COUNT/DEVICES_ONLINE/DEVICE_TABLE/EVENT_* (tổng hợp theo node) — **board theo nguồn (`external_source_id NOT NULL`) chỉ cho phép VALUE/LINE**, không có khái niệm gateway/subtree để tổng hợp DEVICE_COUNT/DEVICES_ONLINE.
 - `binding` theo `type` — **`VALUE`/`LINE`**: `{ datastreamId }`; **`SWITCH`** (Phase 7): `{ gatewayId, pinId }` — pin OUTPUT (`DO`/`AO`) không có `datastream` nên không dùng chung shape với VALUE/LINE; **`DEVICE_COUNT`/`DEVICES_ONLINE`**: `null` (tổng hợp theo subtree node, không bind 1 nguồn cụ thể).
-- Điều hướng FE (từ `V11`): vào node không phải SITE → card-grid flatten toàn bộ subtree (tất cả `external_source` + tất cả `SITE` bên dưới, bất kể sâu bao nhiêu cấp) thay vì dashboard trực tiếp; vào SITE → 2 tab "Xem site" (board theo node, như cũ) / "Xem theo nguồn" (card các source gắn tại chính site đó → board riêng từng nguồn).
+- Điều hướng FE: **mọi** node đều có board riêng, không riêng SITE — `uq_dashboard_user_node` vốn đã không ràng buộc `node_type`, giới hạn cũ chỉ nằm ở frontend. Đổi node bằng `TenantNodePicker` ngay trên trang (cây có thụt lề + rẽ nhánh + icon theo cấp), không còn sidebar cây tổ chức thường trực. Mỗi node có 2 tab: "Xem đơn vị" (board theo node, có ô chọn đơn vị) / "Xem theo nguồn" (dropdown chọn nguồn rồi hiện thẳng board riêng của nguồn đó tại chỗ — cùng một board với tab "Dashboard" ở trang chi tiết nguồn). Tab nguồn liệt kê **toàn bộ nguồn trong scope người dùng** (`GET /external-sources`), không lọc theo node đang chọn, nên ô chọn đơn vị **ẩn** ở tab này — để lại thì nó là ô điều khiển không điều khiển gì. Nguồn đang xem nằm ở query param `?source=<id>`; có param = đang ở tab nguồn, nên reload/chia sẻ link giữ đúng tab lẫn nguồn. Route cũ `/dashboard/source/:id` giữ lại làm redirect.
+- **Board ở node gộp bind được kênh của site con.** Widget vẫn `binding = { datastreamId }` như cũ, chỉ khác là danh sách kênh chọn được lấy theo subtree (`GET /tenant-nodes/{id}/datastreams?includeDescendants=true`). Widget nào bind kênh ngoài node của board thì tên mặc định kèm tên site (`Chuồng A · Nhiệt độ`) — không có nó thì board khu sản xuất là N ô cùng tên "Nhiệt độ".
+- Kênh của một site vẫn publish vào đúng channel `realtime:{tenantId}:{siteId}` của nó, nên FE subscribe **nhiều** STOMP topic cho một board — tập topic suy ra từ chính widget đang có (xem `ARCHITECTURE.md` § Contract STOMP/WebSocket). Board ở SITE thu về đúng 1 topic như trước.
 
 ### dashboard_template
 **Vì sao cần:** Template dashboard. Global seed data — mọi tenant đều dùng được. Template chỉ định loại widget + metric, khi áp dụng vào node thì hệ thống tự tìm tất cả datastream có metric đó và tạo widget cho từng datastream.
@@ -395,6 +452,8 @@ erDiagram
 | created_by | bigint | | |
 | updated_at | timestamptz | NOT NULL | |
 | updated_by | bigint | | |
+
+Seed sẵn 6 mẫu: "Giám sát cơ bản" (`V7`) và 5 mẫu thêm ở `V14` — Môi trường chuồng trại, Khí độc & an toàn, Chất lượng không khí, Thời tiết ngoài trời, Điện năng. `metric` trong `layout_json` phải khớp `metric.code`, sai thì entry đó bị bỏ qua **im lặng** lúc áp. Widget `DEVICE_LIST`/`DEVICES_ONLINE` chưa dùng được trong template vì cơ chế áp mẫu đi từ metric ra datastream.
 
 **logic áp dụng:**
 ```
@@ -421,6 +480,7 @@ Template layout = [
 | source_type | varchar | NOT NULL, CHECK IN ('GATEWAY_PIN','EXTERNAL_SOURCE_JOB') | Loại nguồn |
 | source_id | bigint | NOT NULL | ID nguồn (gateway_pin hoặc external_source_job) |
 | source_field | varchar | NULLABLE — `V11`, CHECK (GATEWAY_PIN ⇒ NULL, EXTERNAL_SOURCE_JOB ⇒ NOT NULL) | Tên cột trong **kết quả truy vấn** của job (bí danh nếu có `AS`) mà datastream này bind vào — cần vì 1 `external_source_job` có thể sinh nhiều datastream (khác gateway_pin luôn 1-1). Từ `V12` cột hợp lệ được xác định bằng cách chạy thử truy vấn, không còn khai trước ở `valueColumns` |
+| oldest_reading_at | timestamptz | NULLABLE — `V13` | Mốc sớm nhất kênh có số đo **liền mạch**: dữ liệu của kênh là dải `[oldest_reading_at → nay]`. Đặt bằng `incremental_cursor` của job lúc tạo kênh, rồi lùi dần sau mỗi lô backfill. NULL với `GATEWAY_PIN` (chỉ external mới có khái niệm đọc lại lịch sử) |
 | created_at | timestamptz | NOT NULL | |
 | created_by | bigint | | |
 | updated_at | timestamptz | NOT NULL | |
@@ -431,6 +491,7 @@ Template layout = [
 - Unique `(tenant_id, tenant_node_id, lower(name))` = `uq_datastream_name`.
 - **Tự động tạo 1-1** khi tạo `gateway_pin` INPUT (`GatewayPinServiceImpl.create()`, cùng transaction) — không có endpoint tạo/xóa datastream riêng, khớp nguyên tắc "1 gateway_pin → 1 datastream" ở bảng `gateway_pin`. Backfill 1 lần cho pin có trước tính năng Dashboard qua `V6__backfill_datastream_from_gateway_pin.sql`.
 - **`EXTERNAL_SOURCE_JOB` — tạo/xóa thủ công** (`V11`, khác gateway_pin): `POST /external-source-jobs/{jobId}/datastreams` (chọn `metricId` + `sourceField` khớp `query_config.valueColumns` của job), `DELETE /datastreams/{id}` chỉ cho phép khi `sourceType=EXTERNAL_SOURCE_JOB` (400 nếu là `GATEWAY_PIN`, giữ nguyên invariant lifecycle gateway_pin sở hữu ở trên).
+- **Gắn kênh muộn để lại lỗ hổng** (`V13`): job đã chạy thì phần trước `incremental_cursor` đã bị Processing Service vứt (không có datastream để resolve). Lúc tạo kênh, API nhận thêm `startFrom` để xếp luôn một tác vụ vá; kênh cũ vá sau qua `POST /datastreams/{id}/backfill`. Xem § external_source_job_backfill.
 - **KHÔNG bị xóa khi pin bị tắt** (`gateway_pin.enabled=false`) — `id` phải ổn định để widget Dashboard đang bind không mất liên kết khi user bật lại pin; lúc pin tắt chỉ dừng nhận data (Processing Service đã skip từ Phase 3), Backend expose thêm `sourceEnabled` (API.md) để FE hiện badge "Pin đã tắt" thay vì hiển thị âm thầm dữ liệu cũ.
 
 ### alert_rule
@@ -558,6 +619,7 @@ Template layout = [
 | `uq_gateway_pin` | gateway_pin | `(tenant_id, gateway_id, type, pin_number)` | Chân vật lý duy nhất TRONG mỗi type/gateway |
 | `uq_datastream_name` | datastream | `(tenant_id, tenant_node_id, lower(name))` | Tên kênh duy nhất trong anchor node |
 | `ix_job_run_recent` | external_source_job_run | `(tenant_id, external_source_job_id, started_at DESC)` | Dải nhịp chạy + biểu đồ dòng/giờ — `V12` |
+| `uq_backfill_open` | external_source_job_backfill | `(datastream_id) WHERE status IN ('PENDING','RUNNING')` | 1 lượt đọc lại đang chạy/kênh — `V13` |
 | `uq_datastream_external_field` | datastream | `(tenant_id, source_type, source_id, source_field) WHERE source_type='EXTERNAL_SOURCE_JOB'` | Chặn map trùng 1 field vào 2 datastream — `V11` |
 | `uq_dashboard_user_node` | dashboard | `(tenant_id, user_id, tenant_node_id, COALESCE(external_source_id, 0))` | 1 board/user/node **hoặc** 1 board/user/nguồn — `V11` |
 | `uq_alert_open` | alert | `(tenant_id, fingerprint) WHERE status IN ('PENDING','ACTIVE')` | 1 alert đang mở/fingerprint |
@@ -586,9 +648,16 @@ Fields: value_float (double), quality (string)
 ```text
 measurement: external_reading
 timestamp: measuredAt (WritePrecision.NS)
-Tags: tenant_id, tenant_node_id, source_id (external_source_job_id), metric
+Tags: tenant_id, tenant_node_id, external_source_job_id, source_field, metric
 Fields: value_float (double), quality (string)
 ```
+
+> **Đổi bộ nhãn (sau `V13`)** — trước đó là `tenant_id, tenant_node_id, source_id, metric`:
+>
+> - `source_id` → **`external_source_job_id`**: cột cũ chứa id của *job* nhưng tên đọc ra tưởng id của *nguồn*, phải có chú thích mới hiểu.
+> - **`source_field` (mới)** là thứ phân biệt hai kênh của **cùng một job**. `uq_datastream_external_field` chỉ unique theo *cột*, nên một job hoàn toàn được phép có 2 kênh cùng metric ở 2 cột khác nhau (VD `temp_in` và `temp_out` cùng map vào `temperature`). Thiếu nhãn này thì hai kênh đó có **cùng bộ nhãn + cùng timestamp** → InfluxDB coi là một điểm và **ghi đè nhau, mất dữ liệu ngay lúc ghi** (đã kiểm chứng trực tiếp trên InfluxDB).
+> - Dùng **tên cột** chứ không phải `datastream_id`: bỏ gán rồi gán lại đúng cột đó sẽ sinh id mới, làm lịch sử cũ mồ côi. Đây cũng là cách `sensor_reading` làm — định danh bằng `pin_type`+`pin_number` (vật lý), không bằng id bản ghi cấu hình.
+> - Dữ liệu ghi trước thay đổi này mang nhãn cũ nên không khớp truy vấn mới; bucket `raw` retention 7 ngày nên tự đồng nhất sau một tuần.
 
 ### Bucket và retention
 

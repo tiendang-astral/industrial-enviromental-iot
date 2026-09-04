@@ -40,13 +40,21 @@ public class InfluxWriterService {
     }
 
     // Ghi InfluxDB measurement external_reading (xem DATABASE.md §4) — luồng External source
-    // polling (Phase 5, ARCHITECTURE.md § Flow: External source data). source_id = externalSourceJobId.
+    // polling (ARCHITECTURE.md § Flow: External source data).
+    //
+    // source_field là thứ phân biệt hai kênh của CÙNG một job: một job được phép có 2 kênh cùng
+    // metric ở 2 cột khác nhau (uq_datastream_external_field chỉ unique theo cột). Thiếu nhãn này
+    // thì hai kênh đó có cùng bộ nhãn + cùng timestamp, InfluxDB coi là một điểm và ghi đè nhau.
+    // Dùng tên cột chứ không phải datastream_id để bỏ gán rồi gán lại không mất lịch sử — cùng
+    // triết lý với sensor_reading (định danh bằng pin_type+pin_number, không bằng id cấu hình).
     public void writeExternalReading(
-            Long tenantId, Long tenantNodeId, Long externalSourceJobId, String metricCode, Double value, Instant measuredAt) {
+            Long tenantId, Long tenantNodeId, Long externalSourceJobId, String sourceField,
+            String metricCode, Double value, Instant measuredAt) {
         Point point = Point.measurement("external_reading")
                 .addTag("tenant_id", String.valueOf(tenantId))
                 .addTag("tenant_node_id", String.valueOf(tenantNodeId))
-                .addTag("source_id", String.valueOf(externalSourceJobId))
+                .addTag("external_source_job_id", String.valueOf(externalSourceJobId))
+                .addTag("source_field", sourceField)
                 .addTag("metric", metricCode)
                 .addField("value_float", value)
                 .addField("quality", "GOOD")

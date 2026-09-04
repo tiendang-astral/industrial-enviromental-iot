@@ -2,9 +2,8 @@ import { Navigate } from 'react-router-dom'
 import { useTenantNodesQuery } from '@/queries/useTenantNodesQuery'
 
 /**
- * "Tổng quan" trong Sidebar không gắn sẵn 1 node cụ thể — resolve về TENANT_ROOT
- * (dashboard.tenant_node_id có thể là bất kỳ node nào, xem DATABASE.md § dashboard),
- * mỗi Site có Dashboard riêng của nó truy cập qua /dashboard/:nodeId.
+ * "Dashboard" trong Sidebar không gắn sẵn 1 node cụ thể — resolve về TENANT_ROOT. Mọi node đều có
+ * board riêng, đổi node bằng ô chọn đơn vị ngay trên trang (xem DATABASE.md § dashboard).
  */
 export default function DashboardOverviewRedirect() {
   const { data: nodes, isLoading } = useTenantNodesQuery()

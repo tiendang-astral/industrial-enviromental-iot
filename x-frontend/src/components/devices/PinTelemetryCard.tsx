@@ -1,11 +1,8 @@
-import { useMemo } from 'react'
-import ReactECharts from 'echarts-for-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { EnumBadge } from '@/components/patterns/EnumBadge'
 import { StatusBadge } from '@/components/patterns/StatusBadge'
-import { buildPinTrendOption } from '@/lib/echarts'
-import { useChartPalette } from '@/hooks/useChartPalette'
+import { TrendChart } from '@/components/patterns/TrendChart'
 import { formatClock } from '@/lib/datetime'
 import { getMetricStatus, METRIC_STATUS_VALUE_CLASS } from '@/lib/metricStatus'
 import { pinLabel } from '@/lib/pinLabels'
@@ -41,11 +38,6 @@ export function PinTelemetryCardSkeleton() {
  * đang đi lên".
  */
 export function PinTelemetryCard({ pin, metric }: { pin: PinTelemetry; metric?: Metric }) {
-  const palette = useChartPalette()
-  const chartOption = useMemo(
-    () => buildPinTrendOption(pin.history, palette, TREND_RANGE_MINUTES, Date.now()),
-    [pin.history, palette]
-  )
   const status = getMetricStatus(pin.latestValue, metric?.minValue, metric?.maxValue)
 
   return (
@@ -109,7 +101,9 @@ export function PinTelemetryCard({ pin, metric }: { pin: PinTelemetry; metric?: 
             )}
           </div>
 
-          <ReactECharts option={chartOption} style={{ height: CHART_HEIGHT }} notMerge />
+          <div className="flex" style={{ height: CHART_HEIGHT }}>
+            <TrendChart history={pin.history} variant="sparkline" rangeMinutes={TREND_RANGE_MINUTES} />
+          </div>
         </div>
       </CardContent>
     </Card>

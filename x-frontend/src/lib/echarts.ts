@@ -46,17 +46,28 @@ export function buildPinTrendOption(
   rangeMinutes: number,
   now: number
 ) {
+  // Cửa sổ đầy đủ là TRẦN chứ không phải khung cứng. Kênh mới bật chỉ có 1 giờ số đo mà vẫn trải
+  // trục 12 giờ thì toàn bộ dữ liệu dồn vào ~8% bề ngang, thành một vệt dựng đứng đọc không ra.
+  // Bắt đầu từ điểm đầu tiên khi dữ liệu chưa phủ hết — kênh chưa có số đo nào vẫn giữ khung đủ
+  // mốc giờ theo đúng lý do ở trên.
+  const windowStart = now - rangeMinutes * 60_000
+  const firstPoint = history.length > 0 ? new Date(history[0].measuredAt).getTime() : windowStart
+
   return {
     grid: { left: 0, right: 8, top: 8, bottom: 0, containLabel: true },
     xAxis: {
       type: 'time',
-      min: now - rangeMinutes * 60_000,
+      min: Math.max(windowStart, firstPoint),
       max: now,
       axisLine: { lineStyle: { color: palette.grid } },
       axisTick: { lineStyle: { color: palette.grid } },
+      // Khung sparkline chỉ rộng vài trăm px: để ECharts tự chọn số mốc thì chúng đè lên nhau
+      // thành một vệt. splitNumber giảm mật độ, hideOverlap bỏ nốt mốc nào vẫn còn chạm nhau.
+      splitNumber: 4,
       axisLabel: {
         fontSize: 10,
         color: palette.text,
+        hideOverlap: true,
         /*
          * Cửa sổ 24h trượt luôn vắt qua nửa đêm, nên nếu mốc nào cũng chỉ có `HH:mm` thì trục đọc
          * ra như chạy ngược (16:00 → 12:00) — không có gì cho biết 16:00 là của hôm qua. Mốc rơi
@@ -103,6 +114,7 @@ export function buildAxisLineOption(
       axisLabel: {
         fontSize: 10,
         color: palette.text,
+        hideOverlap: true,
         formatter: (value: string) =>
           new Date(value).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
       },

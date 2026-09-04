@@ -1,6 +1,7 @@
 package com.corp.iot.backend.telemetry.service;
 
 import com.corp.iot.backend.common.influx.InfluxReadService;
+import com.corp.iot.backend.datastream.repository.DatastreamRepository;
 import com.corp.iot.backend.common.influx.ReadingPoint;
 import com.corp.iot.backend.common.security.AppUserPrincipal;
 import com.corp.iot.backend.common.security.UserType;
@@ -42,7 +43,8 @@ class TelemetryServiceImplTest {
         gatewayPinRepository = mock(GatewayPinRepository.class);
         metricRepository = mock(MetricRepository.class);
         influxReadService = mock(InfluxReadService.class);
-        service = new TelemetryServiceImpl(gatewayPinRepository, metricRepository, influxReadService);
+        service = new TelemetryServiceImpl(gatewayPinRepository, metricRepository,
+                mock(DatastreamRepository.class), influxReadService);
 
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(PRINCIPAL, null, List.of()));

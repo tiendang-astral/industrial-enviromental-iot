@@ -99,7 +99,7 @@ Mỗi app tự có bản riêng (không share code, đúng nguyên tắc ở đ�
 - **Styling approach:** Tailwind CSS + shadcn/ui (Radix primitives), biến thể qua `cn()` helper, không viết CSS-in-JS
 - **Realtime (chỉ `x-frontend`):** `@stomp/stompjs` connect endpoint `/ws` (JWT header CONNECT), subscribe STOMP topic `/topic/realtime/{tenantId}/{tenantNodeId}`; khi nhận event → `queryClient.setQueryData`/`invalidateQueries` tương ứng, không tạo state riêng song song với cache
 - **Chart (chỉ `x-frontend`):** Apache ECharts duy nhất cho time-series (zoom/pan/brush); không trộn thêm chart lib khác
-- **Dashboard layout (chỉ `x-frontend`):** `react-grid-layout` cho kéo-thả/resize; lưu `layout_json` lên server qua debounce (tránh gọi API mỗi lần kéo)
+- **Dashboard layout (chỉ `x-frontend`):** `react-grid-layout` cho kéo-thả/resize. Chế độ Chỉnh sửa là **bản nháp cục bộ** — kéo-thả, thêm, xóa widget chỉ đổi state trong máy; bấm **Lưu** mới ghi `layout_json` lên server (không debounce theo từng cú kéo). Rời đi khi còn nháp bị `useBlocker` chặn kèm hộp xác nhận bỏ thay đổi. Chế độ sửa bám theo **một** board (`useDashboardStore.editingBoardKey` = `node:{id}`/`source:{id}`), không phải cờ boolean dùng chung — đổi tab/đơn vị/nguồn là board mới về chế độ xem
 - **Điều khiển relay (chỉ `x-frontend`):** `RelaySwitch` **luôn hỏi xác nhận** qua `ConfirmDialog` trước khi gửi lệnh — switch nằm trên board kéo-thả, bấm nhầm sẽ bật/tắt thiết bị thật ngoài hiện trường. Hộp xác nhận nêu tên chân (`pinName`) để không tắt nhầm thiết bị
 - **Thinking in React:** Chia UI thành hierarchy → build static trước → tìm minimal state → xác định state sống ở đâu → thêm inverse data flow
 

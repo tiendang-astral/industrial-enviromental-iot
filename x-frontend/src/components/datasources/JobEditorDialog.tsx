@@ -1,26 +1,34 @@
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { Play } from 'lucide-react'
+import { CalendarDays, Clock, Play, TriangleAlert } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Calendar } from '@/components/ui/calendar'
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field'
+import { Field, FieldError, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { LoadingButton } from '@/components/patterns/LoadingButton'
+import { CursorExplainer } from '@/components/datasources/CursorExplainer'
 import { PreviewTable } from '@/components/datasources/PreviewTable'
 import { SchemaTree } from '@/components/datasources/SchemaTree'
 import { SqlEditor } from '@/components/datasources/SqlEditor'
 import { getApiErrorMessage } from '@/lib/apiError'
 import { formatDateTime } from '@/lib/datetime'
-import { externalSourceJobSchema } from '@/lib/externalSourceJobSchema'
+import { CURSOR_TOKEN, externalSourceJobSchema } from '@/lib/externalSourceJobSchema'
 import { buildStarterSql, CRON_PRESETS } from '@/lib/sqlTemplate'
 import { cn } from '@/lib/utils'
 import { useCreateExternalSourceJobMutation } from '@/queries/useCreateExternalSourceJobMutation'
@@ -34,6 +42,18 @@ const START_FROM_OPTIONS: { value: StartFrom; label: string }[] = [
   { value: 'ALL_HISTORY', label: 'toàn bộ lịch sử' },
   { value: 'FROM_DATE', label: 'từ ngày cụ thể' },
 ]
+
+const SQL_PLACEHOLDER = '-- Chọn một bảng ở bên trái để bắt đầu'
+
+/** Nhãn cột trái cho khối cài đặt — gọn hơn FieldLabel xếp trên mỗi ô một hàng. */
+function SettingRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+      <span className="w-20 shrink-0 text-[12.5px] text-muted-foreground">{label}</span>
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">{children}</div>
+    </div>
+  )
+}
 
 export function JobEditorDialog({
   externalSourceId,
@@ -68,6 +88,32 @@ export function JobEditorDialog({
   const updateMutation = useUpdateExternalSourceJobMutation(externalSourceId)
   const isSaving = createMutation.isPending || updateMutation.isPending
 
+  // Giá trị :cursor sẽ mang ở lần chạy tới. Job đang sửa có mốc thật; job mới thì do "Đọc từ"
+  // quyết định — nên dòng này cũng làm rõ luôn ba lựa chọn đó nghĩa là gì.
+  const nextCursorValue = job
+    ? job.incrementalCursor
+      ? formatDateTime(job.incrementalCursor)
+      : 'đầu (01/01/1970)'
+    : startFrom === 'ALL_HISTORY'
+      ? 'đầu (01/01/1970)'
+      : startFrom === 'FROM_DATE'
+        ? startFromDate
+          ? formatDateTime(startFromDate.toISOString())
+          : 'chưa chọn ngày'
+        : 'thời điểm lưu job'
+
+  // Chỉ lên tiếng khi câu SQL thực sự sai, và nói luôn phải sửa thế nào. Câu đúng thì im lặng —
+  // một dấu tích thường trực chẳng dạy được gì cho người chưa biết luật.
+  const sqlHint = !sql.trim()
+    ? null
+    : !/^\s*(select|with)\b/i.test(sql)
+      ? 'Câu truy vấn phải bắt đầu bằng SELECT hoặc WITH.'
+      : sql.replace(/;\s*$/, '').includes(';')
+        ? 'Chỉ chạy được một câu lệnh — bỏ dấu ; ở giữa câu.'
+        : !new RegExp(`${CURSOR_TOKEN}\\b`).test(sql)
+          ? `Thiếu ${CURSOR_TOKEN} — thêm vào điều kiện thời gian để mỗi lần chạy chỉ đọc dòng mới, ví dụ: WHERE measured_at > ${CURSOR_TOKEN}`
+          : null
+
   useEffect(() => {
     if (!open) return
     setName(job?.name ?? '')
@@ -80,6 +126,10 @@ export function JobEditorDialog({
     setPreview(null)
     setPreviewError(null)
     setErrors({})
+    // Job đang sửa đã có SQL — chạy thử luôn để bảng kết quả (và ô chọn cột thời gian nằm trong
+    // đó) có mặt ngay, khỏi bắt người dùng bấm một phát chỉ để thấy thứ vốn đã cấu hình xong.
+    if (job) runPreview(job.queryConfig.sql, job.queryConfig.timestampColumn)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, job])
 
   function handleSelectTable(table: SchemaTable) {
@@ -185,14 +235,13 @@ export function JobEditorDialog({
       <DialogContent className="flex max-h-[92vh] flex-col gap-4 overflow-hidden sm:max-w-6xl">
         <DialogHeader>
           <DialogTitle>{job ? `Sửa job “${job.name}”` : 'Job đồng bộ mới'}</DialogTitle>
-          <DialogDescription>
-            Viết câu SELECT lấy dữ liệu cần theo dõi. Điều kiện lọc nằm trong WHERE, đổi đơn vị hay gộp nằm trong
-            SELECT. Bắt buộc có <span className="font-mono">:cursor</span> để hệ thống chỉ đọc dòng mới.
-          </DialogDescription>
         </DialogHeader>
 
+        {/* Bảng kết quả chốt 5 dòng nên nội dung cao có giới hạn — để chính khối này cuộn, khỏi
+            lồng thêm vùng cuộn nào bên trong. */}
         <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto lg:grid-cols-[236px_minmax(0,1fr)]">
-          <div className="min-h-0 lg:border-r lg:border-border lg:pr-4">
+          {/* Cây bảng vẫn tự cuộn: database khách hàng có thể hàng trăm bảng, thả tự do sẽ kéo modal dài vô tận. */}
+          <div className="min-h-0 lg:max-h-[26rem] lg:border-r lg:border-border lg:pr-4">
             {schemaError ? (
               <p className="text-sm text-muted-foreground">
                 Không đọc được cấu trúc database. Kiểm tra lại kết nối của nguồn này.
@@ -209,42 +258,9 @@ export function JobEditorDialog({
           </div>
 
           <div className="flex min-w-0 flex-col gap-4">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field data-invalid={!!errors.name}>
-                <FieldLabel htmlFor="job-name" data-required>
-                  Tên job
-                </FieldLabel>
-                <Input
-                  id="job-name"
-                  value={name}
-                  onChange={(event) => setName(event.target.value)}
-                  aria-invalid={!!errors.name}
-                />
-                <FieldError errors={errors.name ? [{ message: errors.name }] : undefined} />
-              </Field>
-
-              <Field data-invalid={!!errors.timestampColumn}>
-                <FieldLabel htmlFor="job-ts" data-required>
-                  Cột thời gian trong kết quả
-                </FieldLabel>
-                <Input
-                  id="job-ts"
-                  value={timestampColumn}
-                  onChange={(event) => setTimestampColumn(event.target.value)}
-                  placeholder="measured_at"
-                  className="font-mono"
-                  aria-invalid={!!errors.timestampColumn}
-                />
-                <FieldDescription>Dùng để lấy mốc thời gian và tính vị trí đọc tiếp theo.</FieldDescription>
-                <FieldError errors={errors.timestampColumn ? [{ message: errors.timestampColumn }] : undefined} />
-              </Field>
-            </div>
-
             <Field data-invalid={!!errors.sql}>
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <FieldLabel htmlFor="job-sql" data-required>
-                  Câu truy vấn
-                </FieldLabel>
+                <FieldLabel htmlFor="job-sql">Câu truy vấn</FieldLabel>
                 <Button
                   type="button"
                   size="sm"
@@ -264,11 +280,18 @@ export function JobEditorDialog({
                 onRun={() => runPreview()}
                 invalid={!!errors.sql}
                 rows={10}
+                placeholder={SQL_PLACEHOLDER}
               />
-              <FieldDescription>
-                Bấm tên bảng bên trái để hệ thống viết sẵn câu đầu tiên. Ctrl/⌘ + Enter để chạy thử.
-              </FieldDescription>
-              <FieldError errors={errors.sql ? [{ message: errors.sql }] : undefined} />
+              {sqlHint ? (
+                <p className="flex items-start gap-1.5 text-[12.5px] text-destructive">
+                  <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+                  <span>{sqlHint}</span>
+                </p>
+              ) : sql.trim() ? (
+                <CursorExplainer nextValue={nextCursorValue} />
+              ) : (
+                <FieldError errors={errors.sql ? [{ message: errors.sql }] : undefined} />
+              )}
             </Field>
 
             <PreviewTable
@@ -276,69 +299,111 @@ export function JobEditorDialog({
               isPending={previewMutation.isPending}
               error={previewError}
               timestampColumn={timestampColumn}
+              headerAction={
+                // Nằm trên thanh tiêu đề bảng: luôn nhìn thấy dù kết quả dài bao nhiêu, và vẫn
+                // kề ngay các cột vừa hiện ra để quan hệ "chọn một trong số này" tự nói.
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">Cột thời gian</span>
+                  <Select value={timestampColumn} onValueChange={setTimestampColumn}>
+                    <SelectTrigger
+                      id="job-ts"
+                      size="sm"
+                      className="h-7 w-56 font-mono text-xs"
+                      aria-invalid={!!errors.timestampColumn}
+                      aria-label="Cột thời gian"
+                    >
+                      <SelectValue placeholder="Chọn cột" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        {(preview?.columns ?? []).map((column) => (
+                          <SelectItem key={column.name} value={column.name}>
+                            <span className="flex items-center gap-2">
+                              {/^timestamp|^date/i.test(column.dataType) && (
+                                <Clock className="size-3.5 text-primary" />
+                              )}
+                              <span className="font-mono">{column.name}</span>
+                              <span className="text-[11px] text-muted-foreground">{column.dataType}</span>
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                </div>
+              }
             />
+          </div>
+        </div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field>
-                <FieldLabel>Đọc dữ liệu mới</FieldLabel>
-                <div className="flex flex-wrap gap-2">
-                  {CRON_PRESETS.map((preset) => (
+        <div className="flex flex-col gap-3 border-t border-border pt-4">
+          <SettingRow label="Tên job">
+            <Input
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              aria-label="Tên job"
+              aria-invalid={!!errors.name}
+              className="h-8 max-w-80"
+            />
+            {errors.name && <span className="text-[12.5px] text-destructive">{errors.name}</span>}
+          </SettingRow>
+          <SettingRow label="Chạy">
+            {CRON_PRESETS.map((preset) => (
+              <Button
+                key={preset.value}
+                type="button"
+                size="sm"
+                variant={scheduleCron === preset.value ? 'default' : 'outline'}
+                onClick={() => setScheduleCron(preset.value)}
+              >
+                {preset.label}
+              </Button>
+            ))}
+            <Input
+              value={scheduleCron}
+              onChange={(event) => setScheduleCron(event.target.value)}
+              className="tabular h-8 w-36 font-mono"
+              aria-label="Lịch chạy dạng cron"
+            />
+          </SettingRow>
+
+          {!job && (
+            <SettingRow label="Đọc từ">
+              {START_FROM_OPTIONS.map((option) => (
+                <Button
+                  key={option.value}
+                  type="button"
+                  size="sm"
+                  variant={startFrom === option.value ? 'default' : 'outline'}
+                  onClick={() => setStartFrom(option.value)}
+                >
+                  {option.label}
+                </Button>
+              ))}
+              {startFrom === 'FROM_DATE' && (
+                <Popover>
+                  <PopoverTrigger asChild>
                     <Button
-                      key={preset.value}
                       type="button"
                       size="sm"
-                      variant={scheduleCron === preset.value ? 'default' : 'outline'}
-                      onClick={() => setScheduleCron(preset.value)}
+                      variant="outline"
+                      className={cn(!startFromDate && 'text-muted-foreground')}
                     >
-                      {preset.label}
+                      <CalendarDays data-icon="inline-start" />
+                      {startFromDate ? formatDateTime(startFromDate.toISOString()) : 'Chọn ngày'}
                     </Button>
-                  ))}
-                </div>
-                <Input
-                  value={scheduleCron}
-                  onChange={(event) => setScheduleCron(event.target.value)}
-                  className="tabular font-mono"
-                  aria-label="Lịch chạy dạng cron"
-                />
-                <FieldError errors={errors.scheduleCron ? [{ message: errors.scheduleCron }] : undefined} />
-              </Field>
-
-              {!job && (
-                <Field data-invalid={!!errors.startFromDate}>
-                  <FieldLabel>Đọc từ mốc</FieldLabel>
-                  <div className="flex flex-wrap gap-2">
-                    {START_FROM_OPTIONS.map((option) => (
-                      <Button
-                        key={option.value}
-                        type="button"
-                        size="sm"
-                        variant={startFrom === option.value ? 'default' : 'outline'}
-                        onClick={() => setStartFrom(option.value)}
-                      >
-                        {option.label}
-                      </Button>
-                    ))}
-                  </div>
-                  {startFrom === 'FROM_DATE' && (
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <Button variant="outline" className={cn('w-fit', !startFromDate && 'text-muted-foreground')}>
-                          {startFromDate ? formatDateTime(startFromDate.toISOString()) : 'Chọn ngày bắt đầu'}
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0" align="start">
-                        <Calendar mode="single" selected={startFromDate} onSelect={setStartFromDate} />
-                      </PopoverContent>
-                    </Popover>
-                  )}
-                  <FieldDescription>
-                    “Toàn bộ lịch sử” trên bảng lớn có thể mất vài lần chạy để đuổi kịp.
-                  </FieldDescription>
-                  <FieldError errors={errors.startFromDate ? [{ message: errors.startFromDate }] : undefined} />
-                </Field>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar mode="single" selected={startFromDate} onSelect={setStartFromDate} />
+                  </PopoverContent>
+                </Popover>
               )}
-            </div>
-          </div>
+              {errors.startFromDate && (
+                <span className="text-[12.5px] text-destructive">{errors.startFromDate}</span>
+              )}
+            </SettingRow>
+          )}
+
         </div>
 
         <DialogFooter>

@@ -1,6 +1,7 @@
 package com.corp.iot.backend.externalsourcejob.controller;
 
 import com.corp.iot.backend.common.dto.ApiResponse;
+import com.corp.iot.backend.externaldb.dto.ExternalDbDtos.PreviewResponse;
 import com.corp.iot.backend.externalsourcejob.dto.CreateExternalSourceJobRequest;
 import com.corp.iot.backend.externalsourcejob.dto.ExternalSourceJobResponse;
 import com.corp.iot.backend.externalsourcejob.dto.ExternalSourceJobRunResponse;
@@ -51,6 +52,15 @@ public class ExternalSourceJobController {
             @PathVariable Long id,
             @RequestParam(defaultValue = "12") int sinceHours) {
         return ApiResponse.of(externalSourceJobService.listRuns(id, sinceHours));
+    }
+
+    // Dòng mới nhất job đọc được — trang chi tiết job dùng để nhìn dữ liệu thật đang chảy về.
+    @GetMapping("/api/v1/external-source-jobs/{id}/sample")
+    @PreAuthorize("hasAnyAuthority('TENANT_ADMIN','MANAGER','OPERATOR','VIEWER') and @nodeScope.canAccessJob(#id)")
+    public ApiResponse<PreviewResponse> sample(
+            @PathVariable Long id,
+            @RequestParam(defaultValue = "10") int limit) {
+        return ApiResponse.of(externalSourceJobService.sampleLatest(id, limit));
     }
 
     @DeleteMapping("/api/v1/external-source-jobs/{id}")

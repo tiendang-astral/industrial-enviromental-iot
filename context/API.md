@@ -113,7 +113,6 @@ Yêu cầu `tenant_user` đã login + scope theo node (custom `@PreAuthorize` Sp
 | PUT | /api/v1/tenant-nodes/{id}/move | `{ newParentId }` | `{ data: TenantNodeResponse }` | Re-parent, rebuild `path`/`depth` cho cả subtree |
 | PUT | /api/v1/tenant-nodes/{id}/status | `{ enabled }` | `{ data: TenantNodeResponse }` | Activate/Deactivate — chỉ đổi cờ hiển thị + chặn tạo node con mới dưới node đã tắt, KHÔNG chặn luồng data/alert (ngoài phạm vi tenant-node, xem `x-processing-service` nếu cần) |
 | DELETE | /api/v1/tenant-nodes/{id} | — | 200, no body | Soft delete; 409 `NODE_HAS_CHILDREN`/`NODE_HAS_DEPENDENCIES` nếu còn con hoặc gateway/external_source gắn vào |
-| GET | /api/v1/tenant-nodes/{id}/overview | — | `{ data: TenantNodeOverviewResponse }` | **Mới — Phase 5.** Flatten toàn bộ subtree (ltree `path <@`) của node: tất cả `external_source` + tất cả node kiểu `SITE` bên dưới, bất kể sâu bao nhiêu cấp. FE dùng cho card-grid khi vào node không phải SITE (xem `ARCHITECTURE.md`/`DATABASE.md` § dashboard) |
 
 `TenantNodeResponse`: `{ id, parentId, nodeType, name, path, depth, enabled }`.
 
@@ -133,7 +132,7 @@ Scope theo node như Tenant Node ở trên.
 
 | Method | Path | Body / Query | Response mẫu | Mô tả |
 |--------|------|--------------|--------------|-------|
-| GET | /api/v1/gateways | Query `tenantNodeId` (optional) | `{ data: GatewayResponse[] }` | Không truyền `tenantNodeId` → toàn bộ gateway trong scope user (trang "Thiết bị"); có truyền → theo đúng 1 Site (không phân trang) |
+| GET | /api/v1/gateways | Query `tenantNodeId` (optional), `includeDescendants` (optional, mặc định `false`) | `{ data: GatewayResponse[] }` | Không truyền `tenantNodeId` → toàn bộ gateway trong scope user (trang "Thiết bị"); có truyền → theo đúng 1 Site (không phân trang). `includeDescendants=true` lấy cả subtree — widget `SWITCH` trên board ở node gộp cần tới (gateway chỉ gắn vào SITE) |
 | POST | /api/v1/gateways | `{ tenantNodeId, name, macAddress }` | `{ data: GatewayResponse }` | Tạo — `tenantNodeId` bắt buộc, phải là node `SITE`; `macAddress` unique toàn platform |
 | PUT | /api/v1/gateways/{id} | `{ name, macAddress?, tenantNodeId? }` | `{ data: GatewayResponse }` | Sửa tên và/hoặc MAC address (unique toàn platform, loại trừ chính gateway) và/hoặc Site (`tenantNodeId` mới phải là node `SITE`) — bỏ trống field nào thì giữ nguyên field đó |
 | DELETE | /api/v1/gateways/{id} | — | 200, no body | Soft delete |
@@ -161,9 +160,17 @@ Scope theo node như Tenant Node ở trên.
 
 `PinTelemetryResponse`: `{ pinId, pinNumber, type, name, metricCode, unit, latestValue, latestMeasuredAt, history: [{ value, measuredAt }] }`.
 
+| Method | Path | Body / Query | Response mẫu | Mô tả |
+|--------|------|--------------|--------------|-------|
+| GET | /api/v1/external-sources/{id}/telemetry | Query `rangeMinutes` (optional, default 720, trần 10080) | `{ data: DatastreamTelemetryResponse[] }` | **Mới.** Số đo **mọi kênh của 1 nguồn** trong một lần gọi — trang tổng quan nguồn vẽ sparkline cho từng kênh, gọi lẻ sẽ thành N request cho một màn hình. Đọc InfluxDB `external_reading`, scope `@nodeScope.canAccessSource` |
+
+`DatastreamTelemetryResponse`: `{ datastreamId, name, sourceField, metricCode, unit, latestValue, latestMeasuredAt, oldestReadingAt, history: [{ value, measuredAt }] }`.
+
+Lọc InfluxDB theo `(external_source_job_id, source_field)` chứ **không** theo `metric`: một job được phép có 2 kênh cùng metric ở 2 cột khác nhau, lọc theo metric sẽ trộn chúng làm một (xem `DATABASE.md` §4).
+
 ### WebSocket (STOMP)
 
-Endpoint `/ws` (không SockJS) — CONNECT header `Authorization: Bearer {accessToken}`. Subscribe `/topic/realtime/{tenantId}/{tenantNodeId}` để nhận reading mới realtime (payload xem `ARCHITECTURE.md` § Flow: Gateway sensor data). Chặn subscribe nếu `tenantId` không khớp JWT hoặc ngoài scope user (`ScopeService`).
+Endpoint `/ws` (không SockJS) — CONNECT header `Authorization: Bearer {accessToken}`. Subscribe `/topic/realtime/{tenantId}/{tenantNodeId}` để nhận reading mới realtime (payload xem `ARCHITECTURE.md` § Flow: Gateway sensor data). Chặn subscribe nếu `tenantId` không khớp JWT hoặc ngoài scope user (`ScopeService`). Một board có thể mở **nhiều** SUBSCRIBE trên cùng một kết nối — board ở node gộp bind kênh của nhiều site, mà mỗi site là một topic riêng.
 
 ### Module: Datastream (`DatastreamController`)
 
@@ -171,15 +178,15 @@ Scope theo node như module Gateway ở trên. `datastream` tự động sinh 1-
 
 | Method | Path | Body / Query | Response mẫu | Mô tả |
 |--------|------|--------------|--------------|-------|
-| GET | /api/v1/tenant-nodes/{id}/datastreams | — | `{ data: DatastreamResponse[] }` | List datastream theo node |
+| GET | /api/v1/tenant-nodes/{id}/datastreams | Query `includeDescendants` (optional, mặc định `false`) | `{ data: DatastreamResponse[] }` | List datastream theo node. `includeDescendants=true` lấy cả subtree (ltree `path <@`) — board ở node gộp (BRANCH/PRODUCTION_AREA/TENANT_ROOT) cần tới vì `datastream` chỉ neo vào SITE, lọc đúng 1 node ở cấp trên luôn trả rỗng |
 | PUT | /api/v1/datastreams/{id} | `{ name }` | `{ data: DatastreamResponse }` | Đổi tên datastream |
 
-`DatastreamResponse`: `{ id, tenantNodeId, name, metricId, metricCode, metricUnit, sourceType, sourceId, sourceField, sourceGatewayId, sourcePinType, sourcePinNumber, sourceEnabled }`. `metricUnit` = đơn vị thật (VD `°C`) — dùng để hiện trên biểu đồ, khác `metricCode` (VD `temperature`) chỉ để so khớp logic. `sourceGatewayId`/`sourcePinType`/`sourcePinNumber` chỉ có khi `sourceType=GATEWAY_PIN` (denormalize để FE map `RealtimeReadingMessage` → đúng `datastreamId`). `sourceField` chỉ có khi `sourceType=EXTERNAL_SOURCE_JOB` — tên cột trong kết quả truy vấn của job mà datastream này bind vào. `sourceEnabled` = `gateway_pin.enabled` hiện tại — `false` khi pin bị tắt; **datastream không bị xóa khi tắt pin**, chỉ dừng nhận data, FE dùng field này để hiện badge "Pin đã tắt".
+`DatastreamResponse`: `{ id, tenantNodeId, name, metricId, metricCode, metricUnit, sourceType, sourceId, sourceField, sourceGatewayId, sourcePinType, sourcePinNumber, sourceEnabled }`. `metricUnit` = đơn vị thật (VD `°C`) — dùng để hiện trên biểu đồ, khác `metricCode` (VD `temperature`) chỉ để so khớp logic. `sourceGatewayId`/`sourcePinType`/`sourcePinNumber` chỉ có khi `sourceType=GATEWAY_PIN` (denormalize để FE map `RealtimeReadingMessage` → đúng `datastreamId`). `sourceField` chỉ có khi `sourceType=EXTERNAL_SOURCE_JOB` — tên cột trong kết quả truy vấn của job mà datastream này bind vào. `oldestReadingAt` (`V13`) = mốc sớm nhất kênh có số đo liền mạch — FE hiện "Có số đo từ…" và dùng làm cận trên khi đọc lại lịch sử; NULL với `GATEWAY_PIN`. `sourceEnabled` = `gateway_pin.enabled` hiện tại — `false` khi pin bị tắt; **datastream không bị xóa khi tắt pin**, chỉ dừng nhận data, FE dùng field này để hiện badge "Pin đã tắt".
 
 | Method | Path | Body / Query | Response mẫu | Mô tả |
 |--------|------|--------------|--------------|-------|
 | GET | /api/v1/external-sources/{sourceId}/datastreams | — | `{ data: DatastreamResponse[] }` | List datastream thuộc 1 nguồn (join qua job) — dùng cho dialog "Thêm widget" ở dashboard theo nguồn |
-| POST | /api/v1/external-source-jobs/{jobId}/datastreams | `{ name, metricId, sourceField }` | `{ data: DatastreamResponse }` | Tạo datastream thủ công cho `external_source_job` (khác gateway_pin tự động) — `sourceField` phải là **cột thật trong kết quả truy vấn** của job (backend chạy thử để đối chiếu), 400 `INVALID_SOURCE_FIELD` nếu không có |
+| POST | /api/v1/external-source-jobs/{jobId}/datastreams | `{ name, metricId, sourceField, startFrom?, startFromDate? }` | `{ data: DatastreamResponse }` | Tạo datastream thủ công cho `external_source_job` (khác gateway_pin tự động) — `sourceField` phải là **cột thật trong kết quả truy vấn** của job (backend chạy thử để đối chiếu), 400 `INVALID_SOURCE_FIELD` nếu không có. `startFrom` (`V13`) chỉ có tác dụng khi job đã chạy (`lastRunAt != null`): khác `NEW_ONLY` thì xếp luôn một tác vụ vá lịch sử cho kênh vừa tạo |
 | DELETE | /api/v1/datastreams/{id} | — | 200, no body | Chỉ cho phép khi `sourceType=EXTERNAL_SOURCE_JOB` — 400 nếu là `GATEWAY_PIN` (lifecycle vẫn thuộc gateway_pin) |
 
 ### Module: External Source (`ExternalSourceController`)
@@ -212,6 +219,31 @@ Ba endpoint mở JDBC thẳng tới database của nguồn, phục vụ luồng 
 `SchemaTable`: `{ schema, name, estimatedRows, columns: SchemaColumn[] }`. `SchemaColumn`: `{ name, dataType, timestamp, numeric }`.
 
 `PreviewResponse`: `{ columns: [{ name, dataType, numeric }], rows: any[][], rowCount, elapsedMs }`. Lỗi SQL → 400 `QUERY_FAILED` kèm thông báo Postgres nguyên văn; thiếu cột thời gian trong kết quả → 400 `TIMESTAMP_COLUMN_MISSING`; SQL không có `:cursor` → 400 `MISSING_CURSOR_PLACEHOLDER` (chạy thử cùng luật với lúc lưu, tránh cảnh "thử xanh, lưu đỏ").
+
+#### Đọc lại lịch sử theo kênh (`ExternalSourceJobBackfillController`) — **Mới `V13`**
+
+Kênh gắn sau khi job đã chạy sẽ thiếu phần lịch sử trước `incremental_cursor`. Ba endpoint dưới đây chạy lại **đúng câu SQL của job** trên khoảng còn thiếu, chỉ đổi giá trị bind vào `:cursor`. Quyền `TENANT_ADMIN/MANAGER/OPERATOR` + `@nodeScope.canAccessDatastream` — `VIEWER` chỉ đọc được tiến độ.
+
+| Method | Path | Body / Query | Response mẫu | Mô tả |
+|--------|------|--------------|--------------|-------|
+| POST | /api/v1/datastreams/{id}/backfill/estimate | `{ startFrom, startFromDate? }` | `{ data: BackfillEstimateResponse }` | Đếm trước khi chạy. Bọc câu SQL thành bảng con, gỡ `LIMIT` cuối câu rồi `count(*)`. Đếm quá `statement_timeout` → `rowCount = null` (vẫn chạy backfill được, chỉ là không có con số) |
+| POST | /api/v1/datastreams/{id}/backfill | `{ startFrom, startFromDate? }` | `{ data: BackfillResponse }` | Xếp tác vụ `PENDING`; `x-ingestion-service` nhặt trong ≤10s. 409 `BACKFILL_IN_PROGRESS` nếu kênh đang có lượt chạy dở |
+| GET | /api/v1/datastreams/{id}/backfill | — | `{ data: BackfillResponse \| null }` | Tác vụ gần nhất, `null` nếu chưa vá lần nào — FE poll để hiện tiến độ |
+
+`BackfillEstimateResponse`: `{ rowCount, targetFrom, coveredFrom, elapsedMs }`.
+
+`BackfillResponse`: `{ id, datastreamId, targetFrom, coveredFrom, cursorAt, status, rowCount, error, startedAt, finishedAt, progressPercent }`. `status` ∈ `PENDING`/`RUNNING`/`SUCCESS`/`FAILED`. `cursorAt` **giảm dần** từ `coveredFrom` về `targetFrom` (đọc mới → cũ, xem `ARCHITECTURE.md` § Flow: External source backfill); `progressPercent` tính theo khoảng thời gian đã lùi được.
+
+`startFrom` dùng lại enum lúc tạo job: `ALL_HISTORY` (vá về epoch) | `FROM_DATE` (cần `startFromDate`) | `NEW_ONLY` → 400 `INVALID_START_FROM` (không có gì để đọc lại).
+
+**Mã lỗi:**
+
+| Code | Khi nào |
+|------|---------|
+| `BACKFILL_NOT_SUPPORTED` | Kênh có `sourceType=GATEWAY_PIN` — dữ liệu gateway do thiết bị đẩy lên, không đọc lại được |
+| `NOTHING_TO_BACKFILL` | Mốc chọn không sớm hơn `oldestReadingAt` hiện có |
+| `BACKFILL_IN_PROGRESS` | Kênh còn tác vụ `PENDING`/`RUNNING` (409) |
+| `START_DATE_REQUIRED` | `FROM_DATE` mà thiếu `startFromDate` |
 
 ### Module: External Source Job (`ExternalSourceJobController`)
 

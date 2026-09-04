@@ -129,7 +129,8 @@ public class ExternalQueryExecutorService {
             }
             String messageId = messageIdGenerator.generate(job.getId(), column, measuredAt);
             ExternalReadingEvent event = new ExternalReadingEvent(
-                    messageId, job.getTenantId(), source.getTenantNodeId(), job.getId(), column, value, measuredAt);
+                    messageId, job.getTenantId(), source.getTenantNodeId(), job.getId(), column, value, measuredAt,
+                    false);
             externalDataRawProducer.send(event, correlationId);
         }
     }

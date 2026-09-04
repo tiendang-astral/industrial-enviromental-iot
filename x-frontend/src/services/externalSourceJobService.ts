@@ -1,9 +1,13 @@
 import { httpClient } from '@/services/httpClient'
 import type { ApiEnvelope } from '@/types/api'
 import type {
+  BackfillEstimate,
+  BackfillRequest,
+  BackfillTask,
   CreateExternalSourceJobRequest,
   ExternalSourceJob,
   ExternalSourceJobRun,
+  PreviewResult,
   UpdateExternalSourceJobRequest,
 } from '@/types/externalSource'
 
@@ -45,4 +49,31 @@ export async function listJobRuns(id: number, sinceHours = 12): Promise<External
     params: { sinceHours },
   })
   return data.data!
+}
+
+/** Dòng MỚI NHẤT job đọc được — khác `previewQuery` vốn trả dòng cũ nhất (cursor = epoch). */
+export async function sampleJobRows(id: number, limit = 10): Promise<PreviewResult> {
+  const { data } = await httpClient.get<ApiEnvelope<PreviewResult>>(`/external-source-jobs/${id}/sample`, {
+    params: { limit },
+  })
+  return data.data!
+}
+
+export async function estimateBackfill(datastreamId: number, payload: BackfillRequest): Promise<BackfillEstimate> {
+  const { data } = await httpClient.post<ApiEnvelope<BackfillEstimate>>(
+    `/datastreams/${datastreamId}/backfill/estimate`,
+    payload
+  )
+  return data.data!
+}
+
+export async function createBackfill(datastreamId: number, payload: BackfillRequest): Promise<BackfillTask> {
+  const { data } = await httpClient.post<ApiEnvelope<BackfillTask>>(`/datastreams/${datastreamId}/backfill`, payload)
+  return data.data!
+}
+
+/** null khi kênh chưa vá lần nào. */
+export async function getLatestBackfill(datastreamId: number): Promise<BackfillTask | null> {
+  const { data } = await httpClient.get<ApiEnvelope<BackfillTask | null>>(`/datastreams/${datastreamId}/backfill`)
+  return data.data ?? null
 }

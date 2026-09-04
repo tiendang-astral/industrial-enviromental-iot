@@ -22,8 +22,10 @@ public class GatewayController {
 
     @GetMapping
     @PreAuthorize("hasAnyAuthority('TENANT_ADMIN','MANAGER','OPERATOR','VIEWER') and (#tenantNodeId == null or @nodeScope.canAccess(#tenantNodeId))")
-    public ApiResponse<List<GatewayResponse>> list(@RequestParam(required = false) Long tenantNodeId) {
-        return ApiResponse.of(gatewayService.list(tenantNodeId));
+    public ApiResponse<List<GatewayResponse>> list(
+            @RequestParam(required = false) Long tenantNodeId,
+            @RequestParam(defaultValue = "false") boolean includeDescendants) {
+        return ApiResponse.of(gatewayService.list(tenantNodeId, includeDescendants));
     }
 
     @PostMapping

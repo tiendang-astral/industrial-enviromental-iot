@@ -25,6 +25,10 @@ function highlight(sql: string) {
     )
 }
 
+function escapeHtml(text: string) {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
 export const SqlEditor = forwardRef<HTMLTextAreaElement, {
   value: string
   onChange: (value: string) => void
@@ -32,8 +36,16 @@ export const SqlEditor = forwardRef<HTMLTextAreaElement, {
   invalid?: boolean
   id?: string
   rows?: number
-}>(function SqlEditor({ value, onChange, onRun, invalid, id, rows = 12 }, ref) {
-  const highlighted = useMemo(() => highlight(value) + '\n', [value])
+  /** Hiện khi ô rỗng — textarea ở đây trong suốt nên placeholder gốc không nhìn thấy được. */
+  placeholder?: string
+}>(function SqlEditor({ value, onChange, onRun, invalid, id, rows = 12, placeholder }, ref) {
+  const highlighted = useMemo(
+    () =>
+      (value
+        ? highlight(value)
+        : `<span class="text-muted-foreground">${escapeHtml(placeholder ?? '')}</span>`) + '\n',
+    [value, placeholder]
+  )
 
   return (
     <div

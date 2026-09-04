@@ -1,26 +1,22 @@
-import { memo, useMemo } from 'react'
+import { memo } from 'react'
 import { ChartLine } from 'lucide-react'
 import { Widget } from '@/components/widgets/Widget'
-import { ResizableChart } from '@/components/widgets/ResizableChart'
+import { TrendChart } from '@/components/patterns/TrendChart'
 import { Badge } from '@/components/ui/badge'
-import { buildAxisLineOption } from '@/lib/echarts'
-import { useChartPalette } from '@/hooks/useChartPalette'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import type { Datastream, DatastreamReading, Widget as WidgetT } from '@/types/dashboard'
 
 interface LineWidgetProps {
   widget: WidgetT
   datastream?: Datastream
+  /** Widget bind kênh không có trong phạm vi board — xem DashboardBoard. */
+  orphaned?: boolean
   reading?: DatastreamReading
 }
 
 // memo — tránh nháy widget khi kéo/resize widget khác trên cùng dashboard (xem ValueWidget).
-export const LineWidget = memo(function LineWidget({ widget, datastream, reading }: LineWidgetProps) {
+export const LineWidget = memo(function LineWidget({ widget, datastream, reading, orphaned }: LineWidgetProps) {
   const history = reading?.history ?? []
-  const palette = useChartPalette()
-  const chartOption = useMemo(
-    () => buildAxisLineOption(history, datastream?.metricUnit, palette),
-    [history, datastream?.metricUnit, palette]
-  )
 
   return (
     <Widget>
@@ -29,7 +25,19 @@ export const LineWidget = memo(function LineWidget({ widget, datastream, reading
         icon={ChartLine}
         iconClassName="text-muted-foreground"
         badge={
-          datastream?.sourceEnabled === false ? (
+          orphaned ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Badge variant="destructive" className="shrink-0">
+                  Ngoài phạm vi
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent>
+                Kênh này không còn thuộc đơn vị đang xem (có thể đã chuyển sang đơn vị khác) hoặc đã
+                bị xóa. Widget sẽ không nhận dữ liệu mới ở đây.
+              </TooltipContent>
+            </Tooltip>
+          ) : datastream?.sourceEnabled === false ? (
             <Badge variant="outline" className="shrink-0">
               Pin đã tắt
             </Badge>
@@ -37,13 +45,12 @@ export const LineWidget = memo(function LineWidget({ widget, datastream, reading
         }
       />
       <Widget.Body>
-        {history.length > 1 ? (
-          <ResizableChart option={chartOption} />
-        ) : (
-          <div className="flex min-h-0 flex-1 items-center justify-center text-xs text-muted-foreground">
-            Chưa đủ dữ liệu để vẽ biểu đồ
-          </div>
-        )}
+        <TrendChart
+          history={history}
+          variant="axis"
+          unit={datastream?.metricUnit}
+          emptyLabel="Chưa đủ dữ liệu để vẽ biểu đồ"
+        />
       </Widget.Body>
     </Widget>
   )

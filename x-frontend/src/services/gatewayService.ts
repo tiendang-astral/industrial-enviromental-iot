@@ -2,9 +2,12 @@ import { httpClient } from '@/services/httpClient'
 import type { ApiEnvelope } from '@/types/api'
 import type { CreateGatewayRequest, Gateway, UpdateGatewayRequest } from '@/types/gateway'
 
-export async function listGateways(tenantNodeId?: number): Promise<Gateway[]> {
+export async function listGateways(
+  tenantNodeId?: number,
+  includeDescendants = false
+): Promise<Gateway[]> {
   const { data } = await httpClient.get<ApiEnvelope<Gateway[]>>('/gateways', {
-    params: tenantNodeId ? { tenantNodeId } : undefined,
+    params: tenantNodeId ? { tenantNodeId, includeDescendants } : undefined,
   })
   return data.data!
 }

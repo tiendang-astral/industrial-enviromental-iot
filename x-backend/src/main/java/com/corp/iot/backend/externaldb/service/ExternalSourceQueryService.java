@@ -2,6 +2,7 @@ package com.corp.iot.backend.externaldb.service;
 
 import com.corp.iot.backend.common.crypto.CredentialEncryptionService;
 import com.corp.iot.backend.common.exception.BusinessException;
+import com.corp.iot.backend.externaldb.dto.ExternalDbDtos.BackfillEstimateResponse;
 import com.corp.iot.backend.externaldb.dto.ExternalDbDtos.PreviewResponse;
 import com.corp.iot.backend.externaldb.dto.ExternalDbDtos.SchemaTable;
 import com.corp.iot.backend.externaldb.dto.ExternalDbDtos.TestConnectionResponse;
@@ -9,12 +10,14 @@ import com.corp.iot.backend.externalsource.dto.ExternalSourceConnectionConfig;
 import com.corp.iot.backend.externalsource.dto.ExternalSourceCredential;
 import com.corp.iot.backend.externalsource.entity.ExternalSource;
 import com.corp.iot.backend.externalsource.repository.ExternalSourceRepository;
+import com.corp.iot.backend.externalsourcejob.dto.ExternalSourceQueryConfig;
 import com.corp.iot.backend.externalsourcejob.util.SqlQueryValidator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 
+import java.time.Instant;
 import java.util.List;
 
 // Ghép nguồn đã lưu (giải mã credential) với ExternalDbGateway. Tách khỏi Gateway để Gateway
@@ -49,6 +52,22 @@ public class ExternalSourceQueryService {
     public List<SchemaTable> listSchema(Long sourceId) {
         ExternalSource source = getOrThrow(sourceId);
         return externalDbGateway.listSchema(source.getConnectionConfig(), credentialOf(source));
+    }
+
+    // Ước lượng khối lượng backfill của 1 job — dùng chính câu SQL đã lưu, không nhận SQL từ
+    // ngoài vào (khác preview: ở đó người dùng đang soạn câu, chưa có gì để lưu).
+    public BackfillEstimateResponse estimateBackfill(Long sourceId, ExternalSourceQueryConfig queryConfig,
+                                                     Instant targetFrom, Instant coveredFrom) {
+        ExternalSource source = getOrThrow(sourceId);
+        return externalDbGateway.estimate(source.getConnectionConfig(), credentialOf(source),
+                queryConfig.sql(), queryConfig.timestampColumn(), targetFrom, coveredFrom);
+    }
+
+    // Dòng mới nhất của một job đã lưu — dùng chính câu SQL đã lưu, không nhận SQL từ ngoài vào.
+    public PreviewResponse sampleLatest(Long sourceId, ExternalSourceQueryConfig queryConfig, int limit) {
+        ExternalSource source = getOrThrow(sourceId);
+        return externalDbGateway.sample(source.getConnectionConfig(), credentialOf(source),
+                queryConfig.sql(), queryConfig.timestampColumn(), limit);
     }
 
     public PreviewResponse preview(Long sourceId, String sql, String timestampColumn) {

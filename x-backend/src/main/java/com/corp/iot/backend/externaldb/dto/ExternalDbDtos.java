@@ -63,4 +63,14 @@ public final class ExternalDbDtos {
             long elapsedMs
     ) {
     }
+
+    // rowCount null = đếm không kịp trong statement_timeout. Hiện khoảng thời gian thay vì
+    // đưa ra một con số bịa — người dùng vẫn quyết định được, chỉ là ít thông tin hơn.
+    public record BackfillEstimateResponse(
+            Long rowCount,
+            java.time.Instant targetFrom,
+            java.time.Instant coveredFrom,
+            long elapsedMs
+    ) {
+    }
 }

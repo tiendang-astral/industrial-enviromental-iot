@@ -13,6 +13,8 @@ public interface DatastreamRepository extends JpaRepository<Datastream, Long> {
 
     List<Datastream> findByTenantNodeId(Long tenantNodeId);
 
+    List<Datastream> findByTenantNodeIdIn(Collection<Long> tenantNodeIds);
+
     List<Datastream> findByTenantNodeIdAndMetricId(Long tenantNodeId, Long metricId);
 
     List<Datastream> findByTenantNodeIdInAndMetricId(Collection<Long> tenantNodeIds, Long metricId);
@@ -22,6 +24,10 @@ public interface DatastreamRepository extends JpaRepository<Datastream, Long> {
     List<Datastream> findBySourceTypeAndSourceId(SourceType sourceType, Long sourceId);
 
     boolean existsBySourceTypeAndSourceIdAndSourceField(SourceType sourceType, Long sourceId, String sourceField);
+
+    // Khớp đúng uq_datastream_name: unique theo (tenant_id, tenant_node_id, lower(name)).
+    // tenant_id do @TenantId lọc sẵn nên ở đây chỉ cần node + tên không phân biệt hoa thường.
+    boolean existsByTenantNodeIdAndNameIgnoreCase(Long tenantNodeId, String name);
 
     /**
      * Datastream thuộc 1 external_source (qua job) — join external_source_job vì

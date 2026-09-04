@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { Building, Building2, MapPinHouse, Network, Pencil, Plus, Trash2, Warehouse } from 'lucide-react'
+import { Network, Pencil, Plus, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { TableCell, TableRow } from '@/components/ui/table'
@@ -24,10 +24,10 @@ import { CreateNodeDialog, EditNodeDialog } from '@/components/organization/Node
 import { getApiErrorMessage } from '@/lib/apiError'
 import { orderNodesDepthFirst } from '@/lib/tenantNodeTree'
 import { cn } from '@/lib/utils'
-import { NEXT_TYPE, NODE_LABEL, NODE_LABEL_SHORT } from '@/lib/tenantNodeLabels'
+import { NEXT_TYPE, NODE_ICON, NODE_LABEL, NODE_LABEL_SHORT } from '@/lib/tenantNodeLabels'
 import { useDeleteTenantNodeMutation } from '@/queries/useDeleteTenantNodeMutation'
 import { useTenantNodesQuery } from '@/queries/useTenantNodesQuery'
-import type { NodeType, TenantNode } from '@/types/tenantNode'
+import type { TenantNode } from '@/types/tenantNode'
 
 /**
  * Nút hành động trong hàng cây. `showLabel` cho hai hành động hay dùng nhất (Thêm, Sửa) hiện nhãn
@@ -74,15 +74,6 @@ function RowAction({
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>
   )
-}
-
-/** Khớp bộ icon cây tổ chức ở trang chi tiết tenant (x-frontend-admin) — cùng một cây thì cùng
- *  một bộ ký hiệu, dù hai app deploy riêng. */
-const NODE_ICON: Record<NodeType, typeof Building2> = {
-  TENANT_ROOT: Building2,
-  BRANCH: Building,
-  PRODUCTION_AREA: Warehouse,
-  SITE: MapPinHouse,
 }
 
 export default function OrganizationPage() {

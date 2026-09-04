@@ -1,40 +1,57 @@
 import { useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
-import { DatabaseZap, LayoutDashboard, Pencil, Plus, Trash2, Unplug } from 'lucide-react'
+import { DatabaseZap, Plus, Unplug } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ConfirmDialog } from '@/components/patterns/ConfirmDialog'
 import { EmptyState } from '@/components/patterns/EmptyState'
 import { PageHeader } from '@/components/patterns/PageHeader'
 import { EditSourceDialog } from '@/components/datasources/EditSourceDialog'
-import { JobCard } from '@/components/datasources/JobCard'
 import { JobEditorDialog } from '@/components/datasources/JobEditorDialog'
-import { SourceInfoCard } from '@/components/datasources/SourceInfoCard'
+import { JobsTable } from '@/components/datasources/JobsTable'
+import { SourceMetaBar } from '@/components/datasources/SourceMetaBar'
+import { SourceOverview } from '@/components/datasources/SourceOverview'
 import { getApiErrorMessage } from '@/lib/apiError'
 import { useDatastreamsByExternalSourceQuery } from '@/queries/useDatastreamsByExternalSourceQuery'
 import { useDeleteExternalSourceMutation } from '@/queries/useDeleteExternalSourceMutation'
 import { useExternalSourceJobsQuery } from '@/queries/useExternalSourceJobsQuery'
 import { useExternalSourcesQuery } from '@/queries/useExternalSourcesQuery'
-import { useMetricsQuery } from '@/queries/useMetricsQuery'
 import { useTenantNodesQuery } from '@/queries/useTenantNodesQuery'
 
+const TABS = ['config', 'overview'] as const
+type TabValue = (typeof TABS)[number]
+
+// Slug cũ (3 tab) vẫn còn trong bookmark và lịch sử trình duyệt — chuyển hướng thay vì 404.
+const LEGACY_TABS: Record<string, TabValue> = {
+  connection: 'config',
+  data: 'config',
+  dashboard: 'overview',
+}
+
 export default function DataSourceDetailPage() {
-  const { sourceId } = useParams()
+  const { sourceId, tab } = useParams()
   const externalSourceId = Number(sourceId)
   const navigate = useNavigate()
+  const activeTab: TabValue = TABS.includes(tab as TabValue) ? (tab as TabValue) : 'config'
+  const legacyTarget = tab && !TABS.includes(tab as TabValue) ? LEGACY_TABS[tab] : undefined
 
   const { data: sources, isLoading: sourcesLoading } = useExternalSourcesQuery()
   const source = sources?.find((item) => item.id === externalSourceId)
   const { data: nodes } = useTenantNodesQuery()
   const { data: jobs, isLoading: jobsLoading } = useExternalSourceJobsQuery(externalSourceId)
   const { data: datastreams } = useDatastreamsByExternalSourceQuery(externalSourceId)
-  const { data: metrics } = useMetricsQuery()
 
   const deleteSourceMutation = useDeleteExternalSourceMutation()
   const [isEditOpen, setIsEditOpen] = useState(false)
   const [isCreateJobOpen, setIsCreateJobOpen] = useState(false)
   const [isDeleteOpen, setIsDeleteOpen] = useState(false)
+
+  if (legacyTarget) {
+    return <Navigate to={`/data-sources/${externalSourceId}/${legacyTarget}`} replace />
+  }
 
   function confirmDeleteSource() {
     deleteSourceMutation.mutate(externalSourceId, {
@@ -53,7 +70,6 @@ export default function DataSourceDetailPage() {
     return (
       <div className="flex flex-col gap-6">
         <Skeleton className="h-9 w-64" />
-        <Skeleton className="h-36 w-full rounded-xl" />
         <Skeleton className="h-64 w-full rounded-xl" />
       </div>
     )
@@ -79,74 +95,67 @@ export default function DataSourceDetailPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader
-        title={source.name}
-        description="PostgreSQL ngoài. Mỗi job là một câu truy vấn chạy theo lịch; mỗi cột trong kết quả gắn được vào một metric thành kênh dữ liệu."
-        backTo="/data-sources"
-        backLabel="Nguồn dữ liệu"
-        actions={
-          <>
-            <Button variant="outline" asChild>
-              <Link to={`/dashboard/source/${externalSourceId}`}>
-                <LayoutDashboard data-icon="inline-start" />
-                Xem dashboard
-              </Link>
-            </Button>
-            <Button variant="outline" onClick={() => setIsEditOpen(true)}>
-              <Pencil data-icon="inline-start" />
-              Sửa
-            </Button>
-            <Button
-              variant="outline"
-              className="text-destructive hover:text-destructive"
-              onClick={() => setIsDeleteOpen(true)}
-            >
-              <Trash2 data-icon="inline-start" />
-              Xóa
-            </Button>
-          </>
-        }
-      />
-
-      <SourceInfoCard source={source} nodeName={nodeName} />
-
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-base font-medium">
-          Job đồng bộ
-          {jobs && jobs.length > 0 && (
-            <span className="ml-2 text-sm text-muted-foreground tabular">{jobs.length}</span>
-          )}
-        </h2>
-        <Button onClick={() => setIsCreateJobOpen(true)}>
-          <Plus data-icon="inline-start" />
-          Thêm job
-        </Button>
-      </div>
-
-      {jobsLoading && <Skeleton className="h-64 w-full rounded-xl" />}
-
-      {!jobsLoading && (jobs?.length ?? 0) === 0 && (
-        <EmptyState
-          icon={DatabaseZap}
-          title="Chưa có job nào"
-          description="Job quyết định truy vấn nào được chạy và chạy bao lâu một lần. Chưa có job thì nguồn này chưa đưa dữ liệu nào về hệ thống."
-          action={
-            <Button variant="outline" onClick={() => setIsCreateJobOpen(true)}>
-              Thêm job đầu tiên
-            </Button>
+      <Tabs
+        value={activeTab}
+        onValueChange={(value) => navigate(`/data-sources/${externalSourceId}/${value}`)}
+        className="gap-6"
+      >
+        {/* Tab strip đặt vào slot actions của PageHeader — hàng đó vốn justify-between nên tiêu
+            đề và tab tự dạt về hai đầu, không cần dựng thêm một hàng riêng. */}
+        <PageHeader
+          backTo="/data-sources"
+          title={
+            <>
+              Nguồn {source.name}
+              <Badge variant="secondary" className="font-mono text-[11px] font-normal">
+                {source.connectionType}
+              </Badge>
+            </>
+          }
+          actions={
+            <TabsList>
+              <TabsTrigger value="config">Cấu hình</TabsTrigger>
+              <TabsTrigger value="overview">Tổng quan</TabsTrigger>
+            </TabsList>
           }
         />
-      )}
 
-      {jobs?.map((job) => (
-        <JobCard
-          key={job.id}
-          externalSourceId={externalSourceId}
-          job={job}
-          datastreams={datastreams?.filter((item) => item.sourceId === job.id) ?? []}
-          metrics={metrics ?? []}
-        />
-      ))}
+        <TabsContent value="config" className="flex flex-col gap-6">
+          <SourceMetaBar
+            source={source}
+            nodeName={nodeName}
+            onEdit={() => setIsEditOpen(true)}
+            onDelete={() => setIsDeleteOpen(true)}
+          />
+
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 className="text-base font-medium">Job đồng bộ</h2>
+              <Button onClick={() => setIsCreateJobOpen(true)}>
+                <Plus data-icon="inline-start" />
+                Thêm job
+              </Button>
+            </div>
+
+            <JobsTable
+              externalSourceId={externalSourceId}
+              jobs={jobs ?? []}
+              datastreams={datastreams ?? []}
+              isLoading={jobsLoading}
+              empty={
+                <EmptyState
+                  icon={DatabaseZap}
+                  title="Chưa có job nào"
+                />
+              }
+            />
+          </div>
+        </TabsContent>
+
+        <TabsContent value="overview">
+          <SourceOverview source={source} jobs={jobs ?? []} isLoading={jobsLoading} />
+        </TabsContent>
+      </Tabs>
 
       <EditSourceDialog
         source={source}

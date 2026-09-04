@@ -1,3 +1,4 @@
+import { Building, Building2, MapPinHouse, Warehouse, type LucideIcon } from 'lucide-react'
 import type { NodeType } from '@/types/tenantNode'
 
 /** Cấp con hợp lệ ngay dưới mỗi cấp — khớp CHECK thứ bậc của `tenant_node` ở DB. */
@@ -23,4 +24,15 @@ export const NODE_LABEL_SHORT: Record<NodeType, string> = {
   BRANCH: 'Chi nhánh',
   PRODUCTION_AREA: 'Khu sản xuất',
   SITE: 'Xưởng',
+}
+
+/**
+ * Khớp bộ icon cây tổ chức ở trang chi tiết tenant (x-frontend-admin) — cùng một cây thì cùng một
+ * bộ ký hiệu, dù hai app deploy riêng. Dùng chung giữa bảng trang Tổ chức và `TenantNodePicker`.
+ */
+export const NODE_ICON: Record<NodeType, LucideIcon> = {
+  TENANT_ROOT: Building2,
+  BRANCH: Building,
+  PRODUCTION_AREA: Warehouse,
+  SITE: MapPinHouse,
 }

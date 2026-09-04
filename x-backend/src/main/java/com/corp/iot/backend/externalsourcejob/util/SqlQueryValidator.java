@@ -58,6 +58,53 @@ public class SqlQueryValidator {
         return new PreparedSql(out.toString(), count);
     }
 
+    // Câu của người dùng dùng làm BẢNG CON cho backfill (đọc lùi) và cho phép đếm ước lượng.
+    // Phải bỏ comment (bảng con không cần) và gỡ LIMIT/OFFSET cuối câu — giữ lại thì mọi lô đều
+    // trả về đúng bấy nhiêu dòng tính từ đích, tức là đếm sai và vá sai.
+    public String toInnerSql(String sql) {
+        String withoutComments = stripComments(sql).trim();
+        String withoutSemicolon = TRAILING_SEMICOLON.matcher(withoutComments).replaceAll("");
+        return TRAILING_LIMIT.matcher(withoutSemicolon).replaceAll("").trim();
+    }
+
+    // LIMIT nằm trong bảng con của chính người dùng (kết thúc bằng dấu đóng ngoặc) thuộc về bảng
+    // con đó, không phải câu ngoài — vì vậy chỉ neo vào cuối câu, không quét toàn bộ.
+    private static final Pattern TRAILING_LIMIT = Pattern.compile(
+            "\\s+LIMIT\\s+\\d+(\\s+OFFSET\\s+\\d+)?\\s*$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern TRAILING_SEMICOLON = Pattern.compile(";\\s*$");
+
+    // Quét một lượt, giữ nguyên chuỗi literal — khác strip() bên dưới vốn xoá luôn nội dung chuỗi
+    // (chấp nhận được khi chỉ để kiểm tra cú pháp, nhưng sẽ phá câu nếu đem đi chạy thật).
+    private String stripComments(String sql) {
+        StringBuilder out = new StringBuilder(sql.length());
+        boolean inString = false;
+        for (int i = 0; i < sql.length(); i++) {
+            char c = sql.charAt(i);
+            if (inString) {
+                out.append(c);
+                if (c == '\'') {
+                    inString = false;
+                }
+                continue;
+            }
+            if (c == '\'') {
+                inString = true;
+                out.append(c);
+            } else if (c == '-' && i + 1 < sql.length() && sql.charAt(i + 1) == '-') {
+                int end = sql.indexOf('\n', i);
+                i = end < 0 ? sql.length() : end - 1;
+                out.append('\n');
+            } else if (c == '/' && i + 1 < sql.length() && sql.charAt(i + 1) == '*') {
+                int end = sql.indexOf("*/", i + 2);
+                i = end < 0 ? sql.length() : end + 1;
+                out.append(' ');
+            } else {
+                out.append(c);
+            }
+        }
+        return out.toString();
+    }
+
     private boolean insideStringOrComment(String sql, int index) {
         String head = sql.substring(0, index);
         long quotes = head.chars().filter(c -> c == '\'').count();

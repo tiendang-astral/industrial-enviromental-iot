@@ -1,10 +1,10 @@
 import { useQuery } from '@tanstack/react-query'
 import { listGateways } from '@/services/gatewayService'
 
-export function useGatewaysQuery(tenantNodeId: number) {
+export function useGatewaysQuery(tenantNodeId: number, includeDescendants = false) {
   return useQuery({
-    queryKey: ['gateways', tenantNodeId],
-    queryFn: () => listGateways(tenantNodeId),
+    queryKey: ['gateways', tenantNodeId, includeDescendants],
+    queryFn: () => listGateways(tenantNodeId, includeDescendants),
     enabled: !!tenantNodeId,
   })
 }

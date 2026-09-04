@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Controller, useForm } from 'react-hook-form'
 import { ArrowLeft } from 'lucide-react'
@@ -18,6 +18,7 @@ import {
   SelectContent,
   SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
@@ -32,6 +33,8 @@ import {
 } from '@/lib/addWidgetSchema'
 import { useGatewayPinsQuery } from '@/queries/useGatewayPinsQuery'
 import { useGatewaysQuery } from '@/queries/useGatewaysQuery'
+import { useTenantNodesQuery } from '@/queries/useTenantNodesQuery'
+import { orderNodesDepthFirst } from '@/lib/tenantNodeTree'
 import type { Datastream, WidgetType } from '@/types/dashboard'
 
 interface AddWidgetDialogProps {
@@ -83,7 +86,25 @@ export function AddWidgetDialog({
   const gatewayId = watch('gatewayId')
   const pinId = watch('pinId')
 
-  const { data: gateways } = useGatewaysQuery(tenantNodeId ?? 0)
+  const { data: gateways } = useGatewaysQuery(tenantNodeId ?? 0, true)
+  const { data: tenantNodes } = useTenantNodesQuery()
+
+  // Board ở cấp gộp kê kênh của nhiều site cạnh nhau; không tách nhóm thì hai chuồng cùng có
+  // "Nhiệt độ" đọc ra y hệt nhau. Board ở SITE chỉ có 1 nhóm nên bỏ tiêu đề nhóm cho đỡ nhiễu.
+  const datastreamGroups = useMemo(() => {
+    const nodeName = new Map(tenantNodes?.map((node) => [node.id, node.name]) ?? [])
+    const order = orderNodesDepthFirst(tenantNodes ?? []).map((node) => node.id)
+    const byNode = new Map<number, Datastream[]>()
+    for (const datastream of datastreams) {
+      const list = byNode.get(datastream.tenantNodeId) ?? []
+      list.push(datastream)
+      byNode.set(datastream.tenantNodeId, list)
+    }
+    return [...byNode.entries()]
+      .sort((a, b) => order.indexOf(a[0]) - order.indexOf(b[0]))
+      .map(([nodeId, items]) => ({ nodeId, name: nodeName.get(nodeId) ?? `#${nodeId}`, items }))
+  }, [datastreams, tenantNodes])
+  const showGroupLabels = datastreamGroups.length > 1
   const { data: gatewayPins } = useGatewayPinsQuery(gatewayId ? Number(gatewayId) : 0)
   const outputPins = gatewayPins?.filter((pin) => pin.direction === 'OUTPUT') ?? []
 
@@ -93,7 +114,13 @@ export function AddWidgetDialog({
     }
     const datastream = datastreams.find((item) => String(item.id) === datastreamId)
     if (datastream) {
-      setValue('title', datastream.name)
+      const site = datastreamGroups.find((group) => group.nodeId === datastream.tenantNodeId)
+      setValue(
+        'title',
+        datastream.tenantNodeId !== tenantNodeId && site
+          ? `${site.name} · ${datastream.name}`
+          : datastream.name
+      )
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [datastreamId])
@@ -230,21 +257,24 @@ export function AddWidgetDialog({
                           <SelectValue placeholder="Chọn datastream" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectGroup>
-                            {datastreams.map((datastream) => (
-                              <SelectItem key={datastream.id} value={String(datastream.id)}>
-                                {datastream.name} ({datastream.metricCode ?? 'chưa gán metric'})
-                              </SelectItem>
-                            ))}
-                          </SelectGroup>
+                          {datastreamGroups.map((group) => (
+                            <SelectGroup key={group.nodeId}>
+                              {showGroupLabels && <SelectLabel>{group.name}</SelectLabel>}
+                              {group.items.map((datastream) => (
+                                <SelectItem key={datastream.id} value={String(datastream.id)}>
+                                  {datastream.name} ({datastream.metricCode ?? 'chưa gán metric'})
+                                </SelectItem>
+                              ))}
+                            </SelectGroup>
+                          ))}
                         </SelectContent>
                       </Select>
                     )}
                   />
                   {datastreams.length === 0 && (
                     <FieldDescription>
-                      Node này chưa có datastream nào — khai báo pin INPUT trên gateway hoặc thêm
-                      datastream cho nguồn dữ liệu trước.
+                      Đơn vị này và các đơn vị bên dưới chưa có kênh dữ liệu nào — khai báo pin
+                      INPUT trên gateway hoặc gắn kênh cho nguồn dữ liệu trước.
                     </FieldDescription>
                   )}
                   <FieldError errors={[errors.datastreamId]} />

@@ -77,6 +77,11 @@ CONNECT: header Authorization: Bearer {accessToken} — StompAuthChannelIntercep
          set Principal; SUBSCRIBE bị chặn nếu tenantId trong destination không khớp JWT hoặc
          ScopeService.canAccessNode(...) = false (tái dùng cơ chế phân quyền theo tenant_node đã có).
 SUBSCRIBE: /topic/realtime/{tenantId}/{tenantNodeId}
+           1 board có thể SUBSCRIBE nhiều topic trên cùng 1 kết nối: reading của mỗi site publish vào
+           channel Redis riêng của site đó, nên board ở node gộp (BRANCH/PRODUCTION_AREA/TENANT_ROOT)
+           bind kênh của N site thì nghe N topic. Tập topic suy ra từ widget đang có trên board, nên
+           chi phí gắn với board chứ không gắn với kích thước cây tổ chức. Backend/Processing không
+           đổi: không fan-out lên node cha, không nhân bản publish.
 Message payload (JSON, forward nguyên văn từ Redis): {gatewayId, metric, pinNumber, pinType, value, measuredAt}
 ```
 
@@ -130,7 +135,7 @@ Payload:
 | 4 | Ingestion Service | Với mỗi row kết quả, **unbundle 1 Kafka message/field** (giống unbundle batch MQTT ở Phase 3) — field = mọi cột trong `ResultSetMetaData` trừ `timestampColumn`; sinh `messageId = sha256(jobId+sourceField+measuredAt)`, publish Kafka `external-data-raw` (partition `tenant_id`+`external_source_job_id`) |
 | 5 | Kafka | Buffer `external-data-raw` riêng khỏi luồng gateway (đặc tính khác: theo cron, không push liên tục) |
 | 6 | Processing Service | Consume, dedup theo `messageId` (tái dùng `telemetry-dedup` Redis key, TTL 6h — dedup logic không quan tâm nguồn), resolve `Datastream` theo `(sourceType=EXTERNAL_SOURCE_JOB, sourceId=externalSourceJobId, sourceField)` → `metric_id` → `Metric.code`; không tìm thấy → log + skip (giống pattern gateway_pin không khớp) |
-| 7 | Processing Service | Ghi InfluxDB measurement `external_reading` (tag `tenant_id`, `tenant_node_id`, `source_id`=`externalSourceJobId`, `metric`) |
+| 7 | Processing Service | Ghi InfluxDB measurement `external_reading` (tag `tenant_id`, `tenant_node_id`, `external_source_job_id`, `source_field`, `metric`). `source_field` bắt buộc để tách 2 kênh cùng job cùng metric — thiếu nó thì chúng trùng bộ nhãn + timestamp và ghi đè nhau, xem `DATABASE.md` §4 |
 | 8 | Ingestion Service | Cập nhật `incremental_cursor = max(timestampColumn)`, `total_row_count += n`, `last_run_status=SUCCESS`, `next_run_at` (tính lại qua `cron-utils` từ `schedule_cron`); lỗi JDBC/connection → `last_run_status=FAILED`, `last_error`, vẫn advance `next_run_at` (log + skip, không throw, không retry-storm). Ghi thêm 1 dòng `external_source_job_run` mỗi lần chạy (`V12`) để Backend dựng dải nhịp chạy và biểu đồ số dòng/giờ |
 | 9 | Processing Service | Publish event realtime lên Redis pub/sub channel `realtime:{tenantId}:{tenantNodeId}` — payload **khác** flow sensor: `{datastreamId, metric, value, measuredAt}` (không có `gatewayId/pinType/pinNumber` vì external không có pin) |
 | 10 | Backend → Frontend | `RedisRealtimeBridge` forward nguyên văn (không phân biệt payload gateway/external) → STOMP topic `/topic/realtime/{tenantId}/{tenantNodeId}`; FE nhận payload có `datastreamId` thì match thẳng, không cần tra theo `gatewayId+pinType+pinNumber` |
@@ -142,9 +147,35 @@ Payload:
   "messageId": "sha256-hex(externalSourceJobId+sourceField+measuredAt)",
   "tenantId": 12, "tenantNodeId": 56, "externalSourceJobId": 7,
   "sourceField": "temperature_c", "value": 23.5,
-  "measuredAt": "2026-08-13T09:41:00Z"
+  "measuredAt": "2026-08-13T09:41:00Z",
+  "backfill": false
 }
 ```
+
+`backfill` (`V13`) đánh dấu message do luồng vá lịch sử sinh ra. Processing Service **bỏ qua dedup** với chúng: những dòng cần vá đã từng được publish rồi bị vứt vì chưa có datastream, `messageId` vẫn nằm trong Redis `telemetry-dedup` 6 tiếng nên sẽ bị chặn oan đúng phần lỗ hổng. Ghi InfluxDB idempotent theo `tag + timestamp` nên bỏ dedup không mất tính đúng, chỉ mất một chút tiết kiệm. Message do bản ingestion cũ ghi không có field này — Jackson map thành `false`, đúng ngữ nghĩa luồng sống.
+
+### Flow: External source backfill (đọc lại lịch sử theo kênh)
+
+```text
+[Frontend] → [Backend: ước lượng + ghi tác vụ] → [PostgreSQL: external_source_job_backfill]
+                                                        ↓ sweep riêng (~10s)
+[Ingestion: đọc lùi theo lô] → [Kafka: external-data-raw (backfill=true)] → [Processing] → [InfluxDB]
+```
+
+Kênh dữ liệu gắn **sau** khi job đã chạy thì mất phần lịch sử trước `incremental_cursor`. Backfill đọc lại phần đó bằng đúng câu SQL của job, chỉ đổi giá trị bind vào `:cursor`.
+
+| Bước | Service | Xử lý gì |
+|------|---------|-----------|
+| 1 | Backend | Ước lượng khối lượng: bọc câu SQL thành bảng con và đếm — `SELECT count(*) FROM (<sql, :cursor = target>) t WHERE t.<timestampColumn> < <coveredFrom>`. Gỡ `LIMIT` cuối câu trước khi bọc, nếu không phép đếm luôn trả về đúng trần đó. Quá `statement_timeout` → trả `rowCount = null`, chỉ hiện khoảng thời gian |
+| 2 | Backend | Ghi 1 dòng `external_source_job_backfill` (`status=PENDING`, `target_from`, `covered_from = datastream.oldest_reading_at`). Không gọi RPC sang Ingestion — đúng ranh giới 3 service, cùng pattern `run-now` |
+| 3 | Ingestion Service | `@Scheduled` sweep **riêng** (~10s, `ExternalBackfillSchedulerService`) — tách khỏi sweep của job sống để tác vụ nặng không làm trễ nhịp cron |
+| 4 | Ingestion Service | Đọc **lùi** theo lô: mỗi lô chặn hai đầu `[cursor_at - windowHours, cursor_at)`, `ORDER BY <timestampColumn> DESC`, trần `backfill-batch-rows`. Chặn hai đầu để Postgres đẩy được điều kiện xuống bảng con thay vì quét lại từ đích mỗi lần |
+| 5 | Ingestion Service | Chỉ publish **đúng một cột** của kênh đang vá (các kênh khác đã có dữ liệu ở khoảng đó rồi), cờ `backfill=true` |
+| 6 | Ingestion Service | Sau mỗi lô: lô đầy trần → `cursor_at = min(measuredAt vừa đọc)`; chưa đầy → cửa sổ đã cạn, `cursor_at = đầu cửa sổ`. Cập nhật luôn `datastream.oldest_reading_at` — dải dữ liệu nới sang trái ngay, không đợi tác vụ xong |
+| 7 | Ingestion Service | Chạy liên tiếp nhiều lô cho tới khi hết **ngân sách thời gian** (`backfill-time-budget-ms`) rồi nhả; tiến độ nằm trong DB nên lượt sweep sau chạy tiếp đúng chỗ. Chạm `target_from` → `SUCCESS`, lỗi → `FAILED` |
+| 8 | Processing Service | Như flow polling, chỉ khác: `backfill=true` thì bỏ qua dedup |
+
+**Vì sao đọc lùi chứ không đọc tiến:** dữ liệu mỗi kênh giữ bất biến "một dải liền mạch `[oldest_reading_at → nay]`". Đọc tiến từ đích lên thì ngắt giữa chừng để lại **lỗ ở giữa** hai vùng có dữ liệu; đọc lùi thì chỉ làm dải ngắn đi, và lượt sau nối tiếp đúng chỗ.
 
 ### Flow: Alert (threshold, đa kênh)
 

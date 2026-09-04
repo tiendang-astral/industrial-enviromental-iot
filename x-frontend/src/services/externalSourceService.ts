@@ -2,6 +2,7 @@ import { httpClient } from '@/services/httpClient'
 import type { ApiEnvelope } from '@/types/api'
 import type {
   CreateExternalSourceRequest,
+  DatastreamTelemetry,
   ExternalSource,
   ExternalSourceConnectionConfig,
   ExternalSourceCredential,
@@ -72,5 +73,17 @@ export async function previewQuery(id: number, sql: string, timestampColumn: str
     sql,
     timestampColumn,
   })
+  return data.data!
+}
+
+/** Mọi kênh của nguồn kèm lịch sử, trong một lần gọi — trang tổng quan cần vẽ sparkline từng kênh. */
+export async function getSourceTelemetry(
+  externalSourceId: number,
+  rangeMinutes = 720
+): Promise<DatastreamTelemetry[]> {
+  const { data } = await httpClient.get<ApiEnvelope<DatastreamTelemetry[]>>(
+    `/external-sources/${externalSourceId}/telemetry`,
+    { params: { rangeMinutes } }
+  )
   return data.data!
 }

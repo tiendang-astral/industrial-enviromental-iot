@@ -2,6 +2,7 @@ import { memo } from 'react'
 import { Gauge } from 'lucide-react'
 import { Widget } from '@/components/widgets/Widget'
 import { Badge } from '@/components/ui/badge'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { getMetricStatus, METRIC_STATUS_BADGE_VARIANT, METRIC_STATUS_VALUE_CLASS } from '@/lib/metricStatus'
 import type { Datastream, DatastreamReading, Widget as WidgetT } from '@/types/dashboard'
@@ -10,13 +11,15 @@ import type { Metric } from '@/types/metric'
 interface ValueWidgetProps {
   widget: WidgetT
   datastream?: Datastream
+  /** Widget bind kênh không có trong phạm vi board — xem DashboardBoard. */
+  orphaned?: boolean
   reading?: DatastreamReading
   metric?: Metric
 }
 
 // memo — DashboardPage re-render liên tục lúc kéo/resize 1 widget (track liveMaxRow),
 // không memo thì MỌI widget khác cũng re-render theo, gây nháy dù props không đổi.
-export const ValueWidget = memo(function ValueWidget({ widget, datastream, reading, metric }: ValueWidgetProps) {
+export const ValueWidget = memo(function ValueWidget({ widget, datastream, reading, metric, orphaned }: ValueWidgetProps) {
   const status = getMetricStatus(reading?.latestValue, metric?.minValue, metric?.maxValue)
 
   return (
@@ -26,7 +29,19 @@ export const ValueWidget = memo(function ValueWidget({ widget, datastream, readi
         icon={Gauge}
         iconClassName="text-primary"
         badge={
-          datastream?.sourceEnabled === false ? (
+          orphaned ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Badge variant="destructive" className="shrink-0">
+                  Ngoài phạm vi
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent>
+                Kênh này không còn thuộc đơn vị đang xem (có thể đã chuyển sang đơn vị khác) hoặc đã
+                bị xóa. Widget sẽ không nhận dữ liệu mới ở đây.
+              </TooltipContent>
+            </Tooltip>
+          ) : datastream?.sourceEnabled === false ? (
             <Badge variant="outline" className="shrink-0">
               Pin đã tắt
             </Badge>

@@ -78,7 +78,7 @@ export default function DevicesPage() {
       header: 'Xưởng / Chuồng trại',
       filter: {
         type: 'select',
-        placeholder: 'Tất cả xưởng',
+        placeholder: 'Xưởng',
         getValue: (row) => String(row.tenantNodeId),
         options: sites.map((site) => ({ value: String(site.id), label: site.name })),
       },
@@ -89,7 +89,7 @@ export default function DevicesPage() {
       header: 'Trạng thái',
       filter: {
         type: 'select',
-        placeholder: 'Tất cả trạng thái',
+        placeholder: 'Trạng thái',
         getValue: (row) => (isOnline(row.lastSeenAt) ? 'ONLINE' : 'OFFLINE'),
         options: [
           { value: 'ONLINE', label: 'Trực tuyến' },

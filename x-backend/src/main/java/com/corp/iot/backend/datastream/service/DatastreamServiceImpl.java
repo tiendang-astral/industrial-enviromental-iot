@@ -15,17 +15,23 @@ import com.corp.iot.backend.externaldb.dto.ExternalDbDtos.PreviewColumn;
 import com.corp.iot.backend.externaldb.service.ExternalSourceQueryService;
 import com.corp.iot.backend.externalsource.entity.ExternalSource;
 import com.corp.iot.backend.externalsource.repository.ExternalSourceRepository;
+import com.corp.iot.backend.externalsourcejob.dto.BackfillDtos.BackfillRequest;
+import com.corp.iot.backend.externalsourcejob.dto.StartFrom;
 import com.corp.iot.backend.externalsourcejob.entity.ExternalSourceJob;
 import com.corp.iot.backend.externalsourcejob.repository.ExternalSourceJobRepository;
+import com.corp.iot.backend.externalsourcejob.service.ExternalSourceJobBackfillService;
 import com.corp.iot.backend.gatewaypin.entity.GatewayPin;
 import com.corp.iot.backend.gatewaypin.repository.GatewayPinRepository;
 import com.corp.iot.backend.metric.entity.Metric;
 import com.corp.iot.backend.metric.repository.MetricRepository;
+import com.corp.iot.backend.tenantnode.entity.TenantNode;
+import com.corp.iot.backend.tenantnode.repository.TenantNodeRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -38,14 +44,24 @@ public class DatastreamServiceImpl implements DatastreamService {
     private final GatewayPinRepository gatewayPinRepository;
     private final MetricRepository metricRepository;
     private final ExternalSourceJobRepository externalSourceJobRepository;
+    private final ExternalSourceJobBackfillService backfillService;
     private final ExternalSourceRepository externalSourceRepository;
     private final ExternalSourceQueryService externalSourceQueryService;
+    private final TenantNodeRepository tenantNodeRepository;
     private final DatastreamMapper datastreamMapper;
     private final InfluxReadService influxReadService;
 
     @Override
-    public List<DatastreamResponse> list(Long tenantNodeId) {
-        return toResponses(datastreamRepository.findByTenantNodeId(tenantNodeId), false);
+    public List<DatastreamResponse> list(Long tenantNodeId, boolean includeDescendants) {
+        if (!includeDescendants) {
+            return toResponses(datastreamRepository.findByTenantNodeId(tenantNodeId), false);
+        }
+        // Datastream chỉ neo vào SITE, nên board ở node gộp (BRANCH/PRODUCTION_AREA/TENANT_ROOT)
+        // phải quét cả subtree mới có gì để bind — cùng cách applyToNode đang làm.
+        TenantNode node = tenantNodeRepository.findById(tenantNodeId)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "NODE_NOT_FOUND", "Không tìm thấy node"));
+        List<Long> subtreeNodeIds = tenantNodeRepository.findDescendantIdsIncludingSelf(TenantContext.getTenantId(), node.getPath());
+        return toResponses(datastreamRepository.findByTenantNodeIdIn(subtreeNodeIds), false);
     }
 
     @Override
@@ -97,6 +113,11 @@ public class DatastreamServiceImpl implements DatastreamService {
         ExternalSource source = externalSourceRepository.findById(job.getExternalSourceId())
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "SOURCE_NOT_FOUND", "Không tìm thấy nguồn dữ liệu"));
 
+        if (datastreamRepository.existsByTenantNodeIdAndNameIgnoreCase(source.getTenantNodeId(), request.name())) {
+            throw new BusinessException(HttpStatus.CONFLICT, "DATASTREAM_NAME_TAKEN",
+                    "Đơn vị này đã có kênh tên \"" + request.name() + "\" — đặt tên khác");
+        }
+
         Datastream datastream = new Datastream();
         datastream.setTenantNodeId(source.getTenantNodeId());
         datastream.setName(request.name());
@@ -104,9 +125,33 @@ public class DatastreamServiceImpl implements DatastreamService {
         datastream.setSourceType(SourceType.EXTERNAL_SOURCE_JOB);
         datastream.setSourceId(jobId);
         datastream.setSourceField(request.sourceField());
+        // Kênh bắt đầu nhận dữ liệu từ mốc đọc hiện tại của job trở đi — mọi thứ trước đó là
+        // lỗ hổng, và startFrom bên dưới là chỗ người dùng quyết định có vá nó không.
+        datastream.setOldestReadingAt(parseCursor(job.getIncrementalCursor()));
         datastreamRepository.save(datastream);
 
+        if (needsBackfill(job, request)) {
+            backfillService.create(datastream.getId(),
+                    new BackfillRequest(request.startFrom(), request.startFromDate()));
+        }
+
         return datastreamMapper.toResponse(datastream, metric, null);
+    }
+
+    // Job chưa chạy lần nào thì không có gì bị bỏ lỡ — không làm phiền người dùng bằng một
+    // tác vụ vá rỗng.
+    private boolean needsBackfill(ExternalSourceJob job, CreateDatastreamRequest request) {
+        return job.getLastRunAt() != null
+                && request.startFrom() != null
+                && request.startFrom() != StartFrom.NEW_ONLY;
+    }
+
+    private Instant parseCursor(String cursor) {
+        try {
+            return cursor != null && !cursor.isBlank() ? Instant.parse(cursor) : Instant.now();
+        } catch (Exception e) {
+            return Instant.now();
+        }
     }
 
     @Override
@@ -139,8 +184,8 @@ public class DatastreamServiceImpl implements DatastreamService {
                 .map(d -> {
                     Metric metric = metricsById.get(d.getMetricId());
                     GatewayPin sourcePin = d.getSourceType() == SourceType.GATEWAY_PIN ? pinsById.get(d.getSourceId()) : null;
-                    ReadingPoint latest = includeLatest && d.getSourceType() == SourceType.EXTERNAL_SOURCE_JOB && metric != null
-                            ? influxReadService.latestExternal(tenantId, d.getSourceId(), metric.getCode()).orElse(null)
+                    ReadingPoint latest = includeLatest && d.getSourceType() == SourceType.EXTERNAL_SOURCE_JOB
+                            ? influxReadService.latestExternal(tenantId, d.getSourceId(), d.getSourceField()).orElse(null)
                             : null;
                     return datastreamMapper.toResponse(d, metric, sourcePin, latest);
                 })

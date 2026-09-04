@@ -1,5 +1,6 @@
 package com.corp.iot.backend.externalsourcejob.service;
 
+import com.corp.iot.backend.externaldb.dto.ExternalDbDtos.PreviewResponse;
 import com.corp.iot.backend.externalsourcejob.dto.CreateExternalSourceJobRequest;
 import com.corp.iot.backend.externalsourcejob.dto.ExternalSourceJobResponse;
 import com.corp.iot.backend.externalsourcejob.dto.ExternalSourceJobRunResponse;
@@ -20,4 +21,7 @@ public interface ExternalSourceJobService {
     ExternalSourceJobResponse runNow(Long id);
 
     List<ExternalSourceJobRunResponse> listRuns(Long id, int sinceHours);
+
+    /** Mẫu dòng MỚI NHẤT của job — để quan sát dữ liệu đang chảy về, không phải để soạn câu. */
+    PreviewResponse sampleLatest(Long id, int limit);
 }

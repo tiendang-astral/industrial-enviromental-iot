@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { createDatastreamForJob } from '@/services/datastreamService'
+import type { CreateDatastreamForJobPayload } from '@/services/datastreamService'
 
 /** externalSourceId chỉ để invalidate đúng cache list — API thật gọi theo jobId. */
 export function useCreateDatastreamForJobMutation(externalSourceId: number) {
@@ -11,7 +12,7 @@ export function useCreateDatastreamForJobMutation(externalSourceId: number) {
       payload,
     }: {
       jobId: number
-      payload: { name: string; metricId: number; sourceField: string }
+      payload: CreateDatastreamForJobPayload
     }) => createDatastreamForJob(jobId, payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['datastreams-by-source', externalSourceId] })

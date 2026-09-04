@@ -116,3 +116,47 @@ export interface PreviewResult {
   rowCount: number
   elapsedMs: number
 }
+
+/** Tác vụ đọc lại lịch sử cho 1 kênh dữ liệu (V13). */
+export interface BackfillTask {
+  id: number
+  datastreamId: number
+  /** Đích cần vá tới. */
+  targetFrom: string
+  /** Cận trên của dải cần vá — nơi dữ liệu hiện có bắt đầu. */
+  coveredFrom: string
+  /** Đang lùi tới đâu; chạy mới → cũ nên giá trị này giảm dần. */
+  cursorAt: string
+  status: 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILED'
+  rowCount: number
+  error: string | null
+  startedAt: string | null
+  finishedAt: string | null
+  progressPercent: number | null
+}
+
+export interface BackfillRequest {
+  startFrom: StartFrom
+  startFromDate?: string
+}
+
+export interface BackfillEstimate {
+  /** null = đếm quá lâu và đã bị dừng; chỉ hiện khoảng thời gian. */
+  rowCount: number | null
+  targetFrom: string
+  coveredFrom: string
+  elapsedMs: number
+}
+
+/** Số đo của 1 kênh dữ liệu external, gộp metadata + lịch sử từ InfluxDB. */
+export interface DatastreamTelemetry {
+  datastreamId: number
+  name: string
+  sourceField: string
+  metricCode: string | null
+  unit: string | null
+  latestValue: number | null
+  latestMeasuredAt: string | null
+  oldestReadingAt: string | null
+  history: { value: number; measuredAt: string }[]
+}

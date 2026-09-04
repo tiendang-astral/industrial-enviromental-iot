@@ -12,6 +12,7 @@ import LoginPage from '@/pages/LoginPage'
 import OrganizationPage from '@/pages/OrganizationPage'
 import ReportsPage from '@/pages/ReportsPage'
 import UsersPage from '@/pages/UsersPage'
+import JobDetailPage from '@/pages/JobDetailPage'
 import SourceDashboardPage from '@/pages/SourceDashboardPage'
 
 export const router = createBrowserRouter([
@@ -46,8 +47,22 @@ export const router = createBrowserRouter([
             element: <DataSourcesPage />,
           },
           {
+            // Tab nằm trong đường dẫn (không phải state cục bộ) để chia sẻ link và nút Back
+            // trỏ đúng tab. Không có tab → về "data", nơi công việc thực sự diễn ra.
             path: '/data-sources/:sourceId',
+            element: <Navigate to="config" replace />,
+          },
+          {
+            path: '/data-sources/:sourceId/:tab',
             element: <DataSourceDetailPage />,
+          },
+          {
+            path: '/data-sources/:sourceId/jobs/:jobId',
+            element: <Navigate to="config" replace />,
+          },
+          {
+            path: '/data-sources/:sourceId/jobs/:jobId/:tab',
+            element: <JobDetailPage />,
           },
           {
             path: '/dashboard',

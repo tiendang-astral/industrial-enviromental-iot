@@ -12,6 +12,11 @@ public record ExternalReadingEvent(
         Long externalSourceJobId,
         String sourceField,
         Double value,
-        Instant measuredAt
+        Instant measuredAt,
+        // true = message do luồng vá lịch sử sinh ra. Processing Service bỏ qua dedup với
+        // chúng: dòng cũ đã từng bị publish rồi bị vứt vì chưa có kênh, messageId vẫn nằm
+        // trong Redis nên sẽ bị chặn oan. Ghi InfluxDB idempotent theo tag+timestamp nên
+        // bỏ dedup không mất tính đúng, chỉ mất một chút tiết kiệm.
+        boolean backfill
 ) {
 }

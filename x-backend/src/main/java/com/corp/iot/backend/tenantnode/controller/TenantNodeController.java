@@ -3,7 +3,6 @@ package com.corp.iot.backend.tenantnode.controller;
 import com.corp.iot.backend.common.dto.ApiResponse;
 import com.corp.iot.backend.tenantnode.dto.CreateTenantNodeRequest;
 import com.corp.iot.backend.tenantnode.dto.MoveTenantNodeRequest;
-import com.corp.iot.backend.tenantnode.dto.TenantNodeOverviewResponse;
 import com.corp.iot.backend.tenantnode.dto.TenantNodeResponse;
 import com.corp.iot.backend.tenantnode.dto.UpdateTenantNodeRequest;
 import com.corp.iot.backend.tenantnode.dto.UpdateTenantNodeStatusRequest;
@@ -27,12 +26,6 @@ public class TenantNodeController {
     @PreAuthorize("hasAnyAuthority('TENANT_ADMIN','MANAGER','OPERATOR','VIEWER')")
     public ApiResponse<List<TenantNodeResponse>> list() {
         return ApiResponse.of(tenantNodeService.list());
-    }
-
-    @GetMapping("/{id}/overview")
-    @PreAuthorize("hasAnyAuthority('TENANT_ADMIN','MANAGER','OPERATOR','VIEWER') and @nodeScope.canAccess(#id)")
-    public ApiResponse<TenantNodeOverviewResponse> overview(@PathVariable Long id) {
-        return ApiResponse.of(tenantNodeService.overview(id));
     }
 
     @PostMapping

@@ -37,7 +37,8 @@ public class DatastreamMapper {
                 sourcePin != null ? sourcePin.getPinNumber() : null,
                 sourcePin != null ? sourcePin.isEnabled() : null,
                 latest != null ? latest.value() : null,
-                latest != null ? latest.measuredAt() : null
+                latest != null ? latest.measuredAt() : null,
+                datastream.getOldestReadingAt()
         );
     }
 }

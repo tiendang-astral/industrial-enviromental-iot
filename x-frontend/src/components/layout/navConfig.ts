@@ -49,11 +49,3 @@ export const NAV_ITEMS: NavItem[] = NAV_GROUPS.flatMap((group) => group.items)
 export function findNavItem(pathname: string): NavItem | undefined {
   return NAV_ITEMS.find((item) => pathname.startsWith(item.href))
 }
-
-/**
- * Cây tổ chức và bộ chọn khoảng thời gian chỉ có nghĩa ở nhóm trang Dashboard — các trang còn lại
- * là danh sách/cấu hình theo toàn bộ scope, không neo vào một đơn vị cụ thể.
- */
-export function isNodeScopedRoute(pathname: string) {
-  return pathname.startsWith('/dashboard')
-}

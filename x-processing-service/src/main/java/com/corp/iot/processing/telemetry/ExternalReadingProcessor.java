@@ -30,7 +30,9 @@ public class ExternalReadingProcessor {
     private final RealtimePublisher realtimePublisher;
 
     public void process(ExternalReadingEvent event) {
-        if (!telemetryDedupService.markIfNew(event.tenantId(), event.messageId())) {
+        // Message vá lịch sử cố ý phát lại messageId đã từng thấy — dedup sẽ chặn oan đúng
+        // phần lỗ hổng cần vá (xem ExternalReadingEvent.backfill).
+        if (!event.backfill() && !telemetryDedupService.markIfNew(event.tenantId(), event.messageId())) {
             log.debug("Duplicate messageId={}, skip", event.messageId());
             return;
         }
@@ -50,7 +52,8 @@ public class ExternalReadingProcessor {
         }
 
         influxWriterService.writeExternalReading(
-                event.tenantId(), event.tenantNodeId(), event.externalSourceJobId(), metricCode, event.value(), event.measuredAt());
+                event.tenantId(), event.tenantNodeId(), event.externalSourceJobId(), event.sourceField(),
+                metricCode, event.value(), event.measuredAt());
         realtimePublisher.publishExternalReading(
                 event.tenantId(), event.tenantNodeId(), datastream.get().getId(), metricCode, event.value(), event.measuredAt());
     }

@@ -1,8 +1,7 @@
 import { Outlet, useLocation, useMatch } from 'react-router-dom'
 import { AppSidebar } from '@/components/layout/AppSidebar'
 import { AppTopbar, type Crumb } from '@/components/layout/AppTopbar'
-import { OrgTreePanel } from '@/components/layout/OrgTreePanel'
-import { findNavItem, isNodeScopedRoute } from '@/components/layout/navConfig'
+import { findNavItem } from '@/components/layout/navConfig'
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { useTenantNodesQuery } from '@/queries/useTenantNodesQuery'
@@ -33,7 +32,6 @@ function useBreadcrumbTrail(): Crumb[] {
 }
 
 export default function AppShell() {
-  const { pathname } = useLocation()
   const trail = useBreadcrumbTrail()
   const sidebarOpen = useUiStore((state) => state.sidebarOpen)
   const setSidebarOpen = useUiStore((state) => state.setSidebarOpen)
@@ -44,12 +42,9 @@ export default function AppShell() {
         <AppSidebar />
         <SidebarInset className="bg-app flex min-h-svh min-w-0 flex-col">
           <AppTopbar trail={trail} />
-          <div className="flex min-h-0 flex-1">
-            {isNodeScopedRoute(pathname) && <OrgTreePanel />}
-            <main className="min-w-0 flex-1 p-6">
-              <Outlet />
-            </main>
-          </div>
+          <main className="min-w-0 flex-1 p-6">
+            <Outlet />
+          </main>
         </SidebarInset>
       </SidebarProvider>
     </TooltipProvider>

@@ -8,7 +8,8 @@ import java.util.List;
 
 public interface DatastreamService {
 
-    List<DatastreamResponse> list(Long tenantNodeId);
+    /** includeDescendants=true: lấy cả subtree — board ở node gộp bind được kênh của site con. */
+    List<DatastreamResponse> list(Long tenantNodeId, boolean includeDescendants);
 
     List<DatastreamResponse> listByExternalSource(Long externalSourceId);
 

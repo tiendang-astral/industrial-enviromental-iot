@@ -48,6 +48,12 @@ public class Datastream {
     @Column(name = "source_field", updatable = false)
     private String sourceField;
 
+    // Mốc sớm nhất kênh có số đo liền mạch — dữ liệu là dải [oldestReadingAt → nay] (V13).
+    // Backfill nới dải này sang trái sau mỗi lô, nên ngắt giữa chừng chỉ làm dải ngắn đi.
+    // NULL với GATEWAY_PIN: chỉ external mới có khái niệm đọc lại lịch sử.
+    @Column(name = "oldest_reading_at")
+    private Instant oldestReadingAt;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;

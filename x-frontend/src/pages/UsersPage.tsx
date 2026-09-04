@@ -100,7 +100,7 @@ export default function UsersPage() {
       header: 'Vai trò',
       filter: {
         type: 'select',
-        placeholder: 'Tất cả vai trò',
+        placeholder: 'Vai trò',
         // Khớp "có chứa" chứ không so bằng: một user nhiều vai trò vẫn phải hiện ra khi lọc
         // theo bất kỳ vai trò nào nó đang giữ.
         getValue: roleValuesOf,
@@ -129,7 +129,7 @@ export default function UsersPage() {
       header: 'Trạng thái',
       filter: {
         type: 'select',
-        placeholder: 'Tất cả trạng thái',
+        placeholder: 'Trạng thái',
         getValue: (row) => row.status,
         options: [
           { value: 'ACTIVE', label: 'Đang hoạt động' },

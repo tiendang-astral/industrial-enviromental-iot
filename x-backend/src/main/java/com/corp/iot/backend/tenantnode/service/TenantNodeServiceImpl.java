@@ -4,14 +4,11 @@ import com.corp.iot.backend.common.exception.BusinessException;
 import com.corp.iot.backend.common.scope.ScopeService;
 import com.corp.iot.backend.common.security.AppUserPrincipal;
 import com.corp.iot.backend.common.tenant.TenantContext;
-import com.corp.iot.backend.externalsource.entity.ExternalSource;
-import com.corp.iot.backend.externalsource.repository.ExternalSourceRepository;
 import com.corp.iot.backend.gateway.repository.GatewayRepository;
 import com.corp.iot.backend.tenant.entity.Tenant;
 import com.corp.iot.backend.tenant.repository.TenantRepository;
 import com.corp.iot.backend.tenantnode.dto.CreateTenantNodeRequest;
 import com.corp.iot.backend.tenantnode.dto.MoveTenantNodeRequest;
-import com.corp.iot.backend.tenantnode.dto.TenantNodeOverviewResponse;
 import com.corp.iot.backend.tenantnode.dto.TenantNodeResponse;
 import com.corp.iot.backend.tenantnode.dto.UpdateTenantNodeRequest;
 import com.corp.iot.backend.tenantnode.dto.UpdateTenantNodeStatusRequest;
@@ -43,30 +40,8 @@ public class TenantNodeServiceImpl implements TenantNodeService {
     private final TenantNodeRepository tenantNodeRepository;
     private final GatewayRepository gatewayRepository;
     private final TenantRepository tenantRepository;
-    private final ExternalSourceRepository externalSourceRepository;
     private final TenantNodeMapper tenantNodeMapper;
     private final ScopeService scopeService;
-
-    @Override
-    public TenantNodeOverviewResponse overview(Long id) {
-        TenantNode node = getOrThrow(id);
-        List<Long> subtreeNodeIds = tenantNodeRepository.findDescendantIdsIncludingSelf(TenantContext.getTenantId(), node.getPath());
-
-        List<TenantNodeOverviewResponse.ExternalSourceSummary> sources = externalSourceRepository.findByTenantNodeIdIn(subtreeNodeIds).stream()
-                .map(this::toSourceSummary)
-                .toList();
-        List<TenantNodeOverviewResponse.SiteSummary> sites = tenantNodeRepository.findAllById(subtreeNodeIds).stream()
-                .filter(n -> n.getNodeType() == NodeType.SITE)
-                .map(n -> new TenantNodeOverviewResponse.SiteSummary(n.getId(), n.getName(), n.getPath()))
-                .toList();
-
-        return new TenantNodeOverviewResponse(sources, sites);
-    }
-
-    private TenantNodeOverviewResponse.ExternalSourceSummary toSourceSummary(ExternalSource source) {
-        String path = tenantNodeRepository.findById(source.getTenantNodeId()).map(TenantNode::getPath).orElse(null);
-        return new TenantNodeOverviewResponse.ExternalSourceSummary(source.getId(), source.getName(), source.getTenantNodeId(), path);
-    }
 
     @Override
     public List<TenantNodeResponse> list() {

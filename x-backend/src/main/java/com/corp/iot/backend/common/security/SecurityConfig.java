@@ -1,5 +1,6 @@
 package com.corp.iot.backend.common.security;
 
+import jakarta.servlet.DispatcherType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -41,6 +42,11 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
+                        // Lỗi chưa bắt được forward sang /error trên dispatch ERROR; session
+                        // STATELESS nên lần đi qua chuỗi filter thứ hai không còn Authentication
+                        // và anyRequest().authenticated() trả 403 rỗng — che mất 500 thật, client
+                        // chỉ thấy "không có quyền" cho một lỗi chẳng liên quan gì tới quyền.
+                        .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
                         .requestMatchers("/actuator/**").permitAll()
                         .requestMatchers(
                                 "/api/v1/platform/auth/login", "/api/v1/platform/auth/refresh", "/api/v1/platform/auth/logout",

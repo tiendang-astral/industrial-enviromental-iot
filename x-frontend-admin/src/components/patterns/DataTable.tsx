@@ -282,6 +282,9 @@ export function DataTable<T>({
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
+                          {/* placeholder của filter select là DANH TỪ TRẦN ("Trạng thái") —
+                              nhãn "tất cả" được ghép ở đây. Truyền sẵn "Tất cả trạng thái" sẽ
+                              thành "Tất cả tất cả trạng thái". */}
                           <SelectItem value={ALL}>
                             {column.filter.placeholder
                               ? `Tất cả ${column.filter.placeholder.toLowerCase()}`

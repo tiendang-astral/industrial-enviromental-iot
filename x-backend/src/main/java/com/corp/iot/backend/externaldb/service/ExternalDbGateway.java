@@ -1,6 +1,7 @@
 package com.corp.iot.backend.externaldb.service;
 
 import com.corp.iot.backend.common.exception.BusinessException;
+import com.corp.iot.backend.externaldb.dto.ExternalDbDtos.BackfillEstimateResponse;
 import com.corp.iot.backend.externaldb.dto.ExternalDbDtos.PreviewColumn;
 import com.corp.iot.backend.externaldb.dto.ExternalDbDtos.PreviewResponse;
 import com.corp.iot.backend.externaldb.dto.ExternalDbDtos.SchemaColumn;
@@ -51,6 +52,9 @@ public class ExternalDbGateway {
 
     @Value("${app.external.preview-max-rows}")
     private int previewMaxRows;
+
+    @Value("${app.external.sample-max-rows}")
+    private int sampleMaxRows;
 
     public TestConnectionResponse test(ExternalSourceConnectionConfig config, ExternalSourceCredential credential) {
         long start = System.nanoTime();
@@ -133,6 +137,107 @@ public class ExternalDbGateway {
         } catch (SQLException e) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "QUERY_FAILED", explain(e));
         }
+    }
+
+    // Mẫu dữ liệu MỚI NHẤT của một job đã lưu. Khác preview ở chỗ preview bind cursor = epoch và
+    // trả về những dòng ĐẦU TIÊN job sẽ đọc — đúng cho lúc soạn câu, sai cho lúc quan sát job đang
+    // chạy. Ở đây bọc câu người dùng thành bảng con rồi ORDER BY cột thời gian giảm dần.
+    public PreviewResponse sample(ExternalSourceConnectionConfig config, ExternalSourceCredential credential,
+                                  String sql, String timestampColumn, int limit) {
+        long start = System.nanoTime();
+        SqlQueryValidator.PreparedSql inner = sqlQueryValidator.toPreparedSql(sqlQueryValidator.toInnerSql(sql));
+
+        try (Connection connection = open(config, credential)) {
+            String column = quote(resolveColumnLabel(connection, inner.sql(), timestampColumn));
+            String sampleSql = "SELECT * FROM (%s) t ORDER BY t.%s DESC".formatted(inner.sql(), column);
+
+            try (PreparedStatement statement = connection.prepareStatement(sampleSql)) {
+                statement.setQueryTimeout(queryTimeoutSeconds);
+                statement.setMaxRows(Math.min(limit, sampleMaxRows));
+                bindCursor(statement, inner.cursorParamCount(), PREVIEW_CURSOR);
+
+                try (ResultSet rs = statement.executeQuery()) {
+                    List<PreviewColumn> columns = readColumns(rs.getMetaData());
+                    List<List<Object>> rows = new ArrayList<>();
+                    while (rs.next()) {
+                        List<Object> row = new ArrayList<>(columns.size());
+                        for (int i = 1; i <= columns.size(); i++) {
+                            row.add(normalize(rs.getObject(i)));
+                        }
+                        rows.add(row);
+                    }
+                    return new PreviewResponse(columns, rows, rows.size(), elapsedMs(start));
+                }
+            }
+        } catch (SQLException e) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "QUERY_FAILED", explain(e));
+        }
+    }
+
+    // Ước lượng khối lượng backfill: đếm dòng trong khoảng (targetFrom, coveredFrom) bằng chính
+    // câu SQL của job, bọc thành bảng con. Đếm quá lâu thì trả rowCount null thay vì để người
+    // dùng chờ — con số là để họ quyết định, không phải điều kiện để chạy.
+    public BackfillEstimateResponse estimate(ExternalSourceConnectionConfig config, ExternalSourceCredential credential,
+                                             String sql, String timestampColumn, Instant targetFrom, Instant coveredFrom) {
+        long start = System.nanoTime();
+        SqlQueryValidator.PreparedSql inner = sqlQueryValidator.toPreparedSql(sqlQueryValidator.toInnerSql(sql));
+
+        try (Connection connection = open(config, credential)) {
+            String column = quote(resolveColumnLabel(connection, inner.sql(), timestampColumn));
+            String countSql = "SELECT count(*) FROM (%s) t WHERE t.%s < ?".formatted(inner.sql(), column);
+
+            try (PreparedStatement statement = connection.prepareStatement(countSql)) {
+                statement.setQueryTimeout(queryTimeoutSeconds);
+                int index = bindCursor(statement, inner.cursorParamCount(), targetFrom);
+                statement.setTimestamp(index, Timestamp.from(coveredFrom));
+
+                try (ResultSet rs = statement.executeQuery()) {
+                    Long rowCount = rs.next() ? rs.getLong(1) : null;
+                    return new BackfillEstimateResponse(rowCount, targetFrom, coveredFrom, elapsedMs(start));
+                }
+            }
+        } catch (SQLException e) {
+            // 57014 = statement_timeout: câu đếm quá nặng, không phải câu hỏng.
+            if ("57014".equals(e.getSQLState())) {
+                return new BackfillEstimateResponse(null, targetFrom, coveredFrom, elapsedMs(start));
+            }
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "QUERY_FAILED", explain(e));
+        }
+    }
+
+    // Tên cột phải khớp CHÍNH XÁC khi nhúng vào SQL (khác rs.getObject vốn so khớp không phân
+    // biệt hoa thường). Describe câu bảng con lấy nhãn thật mà không đọc dòng nào.
+    private String resolveColumnLabel(Connection connection, String innerSql, String timestampColumn)
+            throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(innerSql)) {
+            ResultSetMetaData metaData = statement.getMetaData();
+            if (metaData != null) {
+                for (int i = 1; i <= metaData.getColumnCount(); i++) {
+                    String label = metaData.getColumnLabel(i);
+                    if (label.equalsIgnoreCase(timestampColumn)) {
+                        return label;
+                    }
+                }
+            }
+        }
+        throw new BusinessException(HttpStatus.BAD_REQUEST, "TIMESTAMP_COLUMN_MISSING",
+                "Kết quả không có cột thời gian \"" + timestampColumn + "\"");
+    }
+
+    private int bindCursor(PreparedStatement statement, int cursorParamCount, Instant value) throws SQLException {
+        int index = 1;
+        for (; index <= cursorParamCount; index++) {
+            statement.setTimestamp(index, Timestamp.from(value));
+        }
+        return index;
+    }
+
+    private String quote(String identifier) {
+        return "\"" + identifier.replace("\"", "\"\"") + "\"";
+    }
+
+    private long elapsedMs(long startNanos) {
+        return (System.nanoTime() - startNanos) / 1_000_000;
     }
 
     private void requireTimestampColumn(List<PreviewColumn> columns, String timestampColumn) {

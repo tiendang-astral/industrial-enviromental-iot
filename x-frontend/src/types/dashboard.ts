@@ -42,7 +42,7 @@ export interface Datastream {
   metricUnit: string | null
   sourceType: 'GATEWAY_PIN' | 'EXTERNAL_SOURCE_JOB'
   sourceId: number
-  /** Chỉ có khi sourceType=EXTERNAL_SOURCE_JOB — field trong query_config.valueColumns. */
+  /** Chỉ có khi sourceType=EXTERNAL_SOURCE_JOB — tên cột trong kết quả truy vấn của job. */
   sourceField: string | null
   sourceGatewayId: number | null
   sourcePinType: 'AI' | 'DI' | null
@@ -52,6 +52,8 @@ export interface Datastream {
   /** Chỉ có giá trị khi lấy qua listDatastreamsByExternalSource (đọc InfluxDB) — null ở nơi khác. */
   latestValue: number | null
   latestMeasuredAt: string | null
+  /** Mốc sớm nhất kênh có số đo liền mạch (V13) — NULL với GATEWAY_PIN. */
+  oldestReadingAt: string | null
 }
 
 export interface DashboardTemplateWidget {

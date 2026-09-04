@@ -47,6 +47,9 @@ app:
   external:
     query-timeout-seconds: 10
     preview-max-rows: 50
+    # Trần riêng cho mẫu dữ liệu ở trang chi tiết job: ở đó người dùng ĐỌC dữ liệu nên cần đủ
+    # dòng để cuộn, khác chạy thử lúc soạn câu vốn chỉ cần biết câu chạy được hay không.
+    sample-max-rows: 500
 
 server:
   port: 8080

@@ -1,6 +1,5 @@
 import { httpClient } from '@/services/httpClient'
 import type { ApiEnvelope } from '@/types/api'
-import type { TenantNodeOverview } from '@/types/overview'
 import type {
   CreateTenantNodeRequest,
   MoveTenantNodeRequest,
@@ -11,11 +10,6 @@ import type {
 
 export async function listTenantNodes(): Promise<TenantNode[]> {
   const { data } = await httpClient.get<ApiEnvelope<TenantNode[]>>('/tenant-nodes')
-  return data.data!
-}
-
-export async function getTenantNodeOverview(id: number): Promise<TenantNodeOverview> {
-  const { data } = await httpClient.get<ApiEnvelope<TenantNodeOverview>>(`/tenant-nodes/${id}/overview`)
   return data.data!
 }
 
