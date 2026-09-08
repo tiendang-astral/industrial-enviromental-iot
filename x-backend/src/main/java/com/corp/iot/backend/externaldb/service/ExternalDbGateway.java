@@ -241,6 +241,9 @@ public class ExternalDbGateway {
     }
 
     private void requireTimestampColumn(List<PreviewColumn> columns, String timestampColumn) {
+        // Chưa chọn cột thì không có gì để kiểm — lần chạy thử đầu tiên tồn tại chính là để
+        // người dùng biết có những cột nào mà chọn.
+        if (timestampColumn == null || timestampColumn.isBlank()) return;
         boolean present = columns.stream().anyMatch(c -> c.name().equalsIgnoreCase(timestampColumn));
         if (!present) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "TIMESTAMP_COLUMN_MISSING",

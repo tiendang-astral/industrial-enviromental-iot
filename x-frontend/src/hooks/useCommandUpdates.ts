@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
 import type { CommandUpdate } from '@/types/command'
-import type { RealtimeReadingMessage } from '@/types/telemetry'
+import { isCommandStatus, type RealtimeReadingMessage } from '@/types/telemetry'
 
 /**
  * Gom message realtime dạng Command (commandId có mặt) thành map commandId -> update mới
@@ -11,12 +11,14 @@ export function useCommandUpdates() {
   const [commandUpdates, setCommandUpdates] = useState<Record<string, CommandUpdate>>({})
 
   const handleCommandMessage = useCallback((message: RealtimeReadingMessage) => {
-    if (!message.commandId || !message.status) return
+    // status dùng chung với payload Alert nên phải lọc, không chỉ kiểm tra "có giá trị".
+    if (!message.commandId || !isCommandStatus(message.status)) return
     const commandId = message.commandId
+    const status = message.status
     setCommandUpdates((prev) => ({
       ...prev,
       [commandId]: {
-        status: message.status!,
+        status,
         powerReportedState: message.powerReportedState ?? null,
         error: message.error ?? null,
       },

@@ -1,10 +1,12 @@
 package com.corp.iot.processing.telemetry;
 
+import com.corp.iot.processing.alert.AlertEvaluationService;
 import com.corp.iot.processing.dto.SensorReadingEvent;
 import com.corp.iot.processing.entity.GatewayPin;
 import com.corp.iot.processing.entity.Metric;
 import com.corp.iot.processing.influx.InfluxWriterService;
 import com.corp.iot.processing.realtime.RealtimePublisher;
+import com.corp.iot.processing.repository.DatastreamRepository;
 import com.corp.iot.processing.repository.GatewayPinRepository;
 import com.corp.iot.processing.repository.GatewayRepository;
 import com.corp.iot.processing.repository.MetricRepository;
@@ -34,6 +36,8 @@ class SensorReadingProcessorTest {
     private GatewayRepository gatewayRepository;
     private InfluxWriterService influxWriterService;
     private RealtimePublisher realtimePublisher;
+    private DatastreamRepository datastreamRepository;
+    private AlertEvaluationService alertEvaluationService;
     private SensorReadingProcessor processor;
 
     @BeforeEach
@@ -44,9 +48,11 @@ class SensorReadingProcessorTest {
         gatewayRepository = mock(GatewayRepository.class);
         influxWriterService = mock(InfluxWriterService.class);
         realtimePublisher = mock(RealtimePublisher.class);
+        datastreamRepository = mock(DatastreamRepository.class);
+        alertEvaluationService = mock(AlertEvaluationService.class);
         processor = new SensorReadingProcessor(
                 dedupService, gatewayPinRepository, metricRepository, gatewayRepository,
-                influxWriterService, realtimePublisher);
+                influxWriterService, realtimePublisher, datastreamRepository, alertEvaluationService);
 
         when(dedupService.markIfNew(EVENT.tenantId(), EVENT.messageId())).thenReturn(true);
     }

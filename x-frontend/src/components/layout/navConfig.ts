@@ -27,7 +27,7 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Dữ liệu',
     items: [
-      { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+      { label: 'Tổng quan', href: '/dashboard', icon: LayoutDashboard },
       { label: 'Báo cáo', href: '/reports', icon: FileBarChart },
     ],
   },

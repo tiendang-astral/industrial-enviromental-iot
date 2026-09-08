@@ -89,6 +89,7 @@ Mỗi app tự có bản riêng (không share code, đúng nguyên tắc ở đ�
 - **Ngày giờ:** dùng `lib/datetime.ts` (`formatDateTime`, `formatRelativeTime`), không gọi `toLocaleString('vi-VN')` rải rác trong page.
 - **Animation:** chỉ dùng 3 biến `--motion-fast|base|slow` + `--motion-ease` khai trong `index.css`, cấm duration rời rạc. Toàn bộ animation tắt dưới `prefers-reduced-motion: reduce`.
 - **Số liệu đo:** thêm class `.tabular` (tabular-nums) để chữ số không nhảy ngang khi giá trị realtime đổi.
+- **Widget Dashboard không có icon ở tiêu đề.** Năm loại widget chia nhau vài icon chung chung thì icon không phân biệt được gì, chỉ ăn chỗ của tên kênh vốn đã bị `truncate`. Phân biệt loại bằng **nền, viền và bố cục**: `Widget` nhận `tone` (`card` mặc định / `muted` cho widget gửi lệnh xuống thiết bị) và `accent` (`info` cho nhóm widget tổng hợp theo đơn vị); biểu đồ tràn sát mép card; `Widget.StatusBar` vẽ vạch màu sát đáy **chỉ khi** vượt/gần ngưỡng — vạch xanh dưới mọi widget bình thường là nhiễu, mắt sẽ học cách bỏ qua đúng vùng cần nhìn lúc có sự cố.
 - **Field bắt buộc:** gắn `data-required` lên `<FieldLabel>`, dấu `*` do `index.css` vẽ. Đối chiếu với zod schema *và* `@NotBlank`/`@NotNull` ở backend — đánh dấu sai còn tệ hơn không đánh dấu.
 
 ### Đặc điểm riêng

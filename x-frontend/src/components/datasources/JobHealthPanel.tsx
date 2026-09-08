@@ -1,7 +1,18 @@
-import { useMemo } from 'react'
-import { AlertTriangle } from 'lucide-react'
+import { useState } from 'react'
+import { Info, RefreshCw } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { LoadingButton } from '@/components/patterns/LoadingButton'
+import { JobRunHistoryDialog } from '@/components/datasources/JobRunHistoryDialog'
+import { RunStatusStrip, RunVolumeStrip } from '@/components/datasources/RunRhythm'
 import { formatDateTime, formatRelativeTime } from '@/lib/datetime'
 import { cn } from '@/lib/utils'
 import type { ExternalSourceJob, ExternalSourceJobRun } from '@/types/externalSource'
@@ -13,15 +24,20 @@ function Stat({
   value,
   sub,
   tone,
+  action,
 }: {
   label: string
   value: string
   sub?: string
   tone?: 'ok' | 'warning' | 'critical'
+  action?: React.ReactNode
 }) {
   return (
     <div className="flex flex-col gap-0.5 rounded-md border border-border bg-muted/30 px-3 py-2.5">
-      <p className="text-[11.5px] text-muted-foreground">{label}</p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[11.5px] text-muted-foreground">{label}</p>
+        {action}
+      </div>
       <p
         className={cn(
           'tabular text-xl font-semibold tracking-tight',
@@ -32,128 +48,179 @@ function Stat({
       >
         {value}
       </p>
-      {sub && <p className="tabular truncate font-mono text-[11px] text-muted-foreground">{sub}</p>}
+      {sub && <p className="tabular truncate text-[11px] text-muted-foreground">{sub}</p>}
     </div>
   )
 }
 
-/** Khoảng cách từ mốc đọc được tới hiện tại — job báo SUCCESS đều mà cursor đứng yên nghĩa là
- *  nguồn bên kia đã ngừng ghi, thứ mà lastRunStatus không nói ra. */
-export function formatLag(cursor: string | null): {
-  text: string
-  tone: 'ok' | 'warning' | 'critical'
-} {
-  if (!cursor) return { text: 'chưa đọc', tone: 'warning' }
-  const minutes = Math.floor((Date.now() - new Date(cursor).getTime()) / 60_000)
-  if (Number.isNaN(minutes)) return { text: 'không rõ', tone: 'warning' }
-  if (minutes < 1) return { text: 'vài giây', tone: 'ok' }
-  if (minutes < 60) return { text: `${minutes} phút`, tone: minutes <= 15 ? 'ok' : 'warning' }
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return { text: `${hours} giờ`, tone: 'critical' }
-  return { text: `${Math.floor(hours / 24)} ngày`, tone: 'critical' }
+/** Nút chữ i mở hộp chi tiết — chỗ để thứ không nhét vừa một ô chỉ số. */
+function InfoButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      className="-mr-1 size-6 shrink-0 text-muted-foreground"
+      onClick={onClick}
+    >
+      <Info />
+      <span className="sr-only">{label}</span>
+    </Button>
+  )
 }
 
-/** Sức khỏe vận hành của MỘT job. Ở cấp nguồn con số gộp che mất job đang chết, nên chỉ số
- *  chi tiết nằm đúng chỗ job của nó. */
+/**
+ * Sức khỏe vận hành của MỘT truy vấn định kỳ.
+ *
+ * Bỏ chỉ số "độ trễ dữ liệu" cũ: nó trộn hai thứ khác nhau (chu kỳ cron và độ trễ của chính dữ
+ * liệu nguồn) nên con số đọc ra không nói được tốt hay xấu. Thay bằng mốc thật của dòng mới nhất
+ * đã đọc về, kèm nút kéo ngay một lượt.
+ */
 export function JobHealthPanel({
   job,
   runs,
   isLoading,
+  isRunPending,
+  onRunNow,
 }: {
   job: ExternalSourceJob
   runs: ExternalSourceJobRun[]
   isLoading: boolean
+  isRunPending: boolean
+  onRunNow: () => void
 }) {
-  const lag = formatLag(job.incrementalCursor)
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false)
+  const [isErrorOpen, setIsErrorOpen] = useState(false)
+
   const failed = runs.filter((run) => run.status === 'FAILED')
+  const lastFailed = failed[0]
   const rowsRead = runs.reduce((total, run) => total + run.rowCount, 0)
 
-  // Gom số dòng theo từng giờ — backend chỉ trả danh sách lần chạy, không trả sẵn chuỗi thời gian.
-  const buckets = useMemo(() => {
-    const now = new Date()
-    now.setMinutes(0, 0, 0)
-    const result = Array.from({ length: HOURS }, (_, index) => ({
-      hourStart: new Date(now.getTime() - (HOURS - 1 - index) * 3_600_000),
-      rows: 0,
-      failed: 0,
-    }))
-    runs.forEach((run) => {
-      const started = new Date(run.startedAt)
-      started.setMinutes(0, 0, 0)
-      const bucket = result.find((b) => b.hourStart.getTime() === started.getTime())
-      if (!bucket) return
-      bucket.rows += run.rowCount
-      if (run.status === 'FAILED') bucket.failed += 1
-    })
-    return result
-  }, [runs])
-
-  const maxRows = Math.max(1, ...buckets.map((b) => b.rows))
+  // Trạng thái HIỆN TẠI suy từ lượt gần nhất, không từ số gộp 12 giờ: một sự cố đã tự khỏi
+  // không được phép làm cả bảng trông như đang hỏng.
+  const lastRun = runs[0]
+  const isHealthyNow = !lastRun || lastRun.status !== 'FAILED'
 
   if (isLoading) return <Skeleton className="h-40 w-full rounded-xl" />
 
   return (
-    <div className="flex flex-col gap-4 rounded-lg border border-border bg-card p-4">
-      <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat
-          label="Độ trễ dữ liệu"
-          value={lag.text}
-          tone={lag.tone}
-          sub={job.incrementalCursor ? `đọc tới ${formatDateTime(job.incrementalCursor)}` : undefined}
-        />
-        <Stat
-          label={`Lần chạy · ${HOURS} giờ`}
-          value={String(runs.length)}
-          sub={`${failed.length} lỗi`}
-          tone={failed.length > 0 ? 'warning' : undefined}
-        />
-        <Stat
-          label={`Dòng đọc về · ${HOURS} giờ`}
-          value={rowsRead.toLocaleString('vi-VN')}
-          sub={`tổng cộng ${job.totalRowCount.toLocaleString('vi-VN')}`}
-        />
-        <Stat
-          label="Lỗi gần nhất"
-          value={failed[0] ? formatRelativeTime(failed[0].startedAt) : 'không có'}
-          tone={failed[0] ? 'critical' : 'ok'}
-        />
-      </div>
+    <>
+      <div className="flex flex-col gap-4 rounded-lg border border-border bg-card p-4">
+        <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+          <Stat
+            label="Dữ liệu mới nhất"
+            value={job.incrementalCursor ? formatRelativeTime(job.incrementalCursor) : 'chưa đọc'}
+            sub={
+              job.incrementalCursor ? `đọc tới ${formatDateTime(job.incrementalCursor)}` : undefined
+            }
+            action={
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <LoadingButton
+                    variant="ghost"
+                    size="icon"
+                    className="-mr-1 size-6 shrink-0 text-muted-foreground"
+                    isPending={isRunPending}
+                    onClick={onRunNow}
+                  >
+                    <RefreshCw />
+                    <span className="sr-only">Kéo dữ liệu mới nhất về ngay</span>
+                  </LoadingButton>
+                </TooltipTrigger>
+                <TooltipContent>Kéo dữ liệu mới nhất về ngay, không đợi lịch</TooltipContent>
+              </Tooltip>
+            }
+          />
 
-      <div className="flex flex-col gap-1.5">
-        <p className="text-[11px] tracking-wide text-muted-foreground uppercase">
-          Số dòng đọc về · {HOURS} giờ qua
-        </p>
-        <div className="flex h-16 items-end gap-1">
-          {buckets.map((bucket) => (
-            <Tooltip key={bucket.hourStart.toISOString()}>
-              <TooltipTrigger asChild>
-                <div className="flex h-full flex-1 items-end">
-                  <div
-                    className={cn(
-                      'w-full rounded-sm transition-[height] duration-[--motion-slow] ease-[--motion-ease]',
-                      bucket.failed > 0 ? 'bg-critical/60' : 'bg-primary/70'
-                    )}
-                    style={{ height: `${Math.max(3, (bucket.rows / maxRows) * 100)}%` }}
-                  />
-                </div>
-              </TooltipTrigger>
-              <TooltipContent>
-                {formatDateTime(bucket.hourStart.toISOString())} · {bucket.rows} dòng
-                {bucket.failed > 0 && ` · ${bucket.failed} lỗi`}
-              </TooltipContent>
-            </Tooltip>
-          ))}
+          <Stat
+            label={`Lượt chạy · ${HOURS} giờ`}
+            value={String(runs.length)}
+            sub={failed.length > 0 ? `${failed.length} lượt thất bại` : 'không có lượt nào lỗi'}
+            tone={failed.length > 0 ? 'warning' : undefined}
+            action={
+              runs.length > 0 ? (
+                <InfoButton label="Xem lịch sử chạy" onClick={() => setIsHistoryOpen(true)} />
+              ) : undefined
+            }
+          />
+
+          <Stat
+            label={`Dòng đọc về · ${HOURS} giờ`}
+            value={rowsRead.toLocaleString('vi-VN')}
+            sub={`tổng cộng ${job.totalRowCount.toLocaleString('vi-VN')}`}
+          />
+
+          <Stat
+            label="Lỗi gần nhất"
+            value={lastFailed ? formatRelativeTime(lastFailed.startedAt) : 'không có'}
+            // Mốc tuyệt đối của lượt pull hỏng: thiếu nó thì một sự cố đã khỏi từ lâu vẫn đọc
+            // ra như đang xảy ra.
+            sub={
+              lastFailed
+                ? `lúc ${formatDateTime(lastFailed.startedAt)}${isHealthyNow ? ' · đã phục hồi' : ''}`
+                : undefined
+            }
+            tone={lastFailed ? (isHealthyNow ? 'warning' : 'critical') : 'ok'}
+            action={
+              lastFailed?.error ? (
+                <InfoButton label="Xem nội dung lỗi" onClick={() => setIsErrorOpen(true)} />
+              ) : undefined
+            }
+          />
+        </div>
+
+        {/* Hai biến, hai dải, chung một trục thời gian — gộp vào một biểu đồ thì chiều cao
+            (khối lượng) át mất màu (kết quả), mà kết quả mới là thứ người ta vào đây để xem. */}
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-1.5">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <p className="text-[11px] tracking-wide text-muted-foreground uppercase">
+                Kết quả từng lượt · {HOURS} giờ qua
+              </p>
+              <span className="flex items-center gap-3 text-[11px] text-muted-foreground">
+                <span className="flex items-center gap-1.5">
+                  <span className="size-2 rounded-[1px] bg-ok" />
+                  thành công
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="size-2 rounded-[1px] bg-critical" />
+                  thất bại
+                </span>
+              </span>
+            </div>
+            <RunStatusStrip runs={runs} hours={HOURS} variant="full" />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <p className="text-[11px] tracking-wide text-muted-foreground uppercase">
+              Số dòng đọc về · {HOURS} giờ qua
+            </p>
+            <RunVolumeStrip runs={runs} hours={HOURS} />
+          </div>
         </div>
       </div>
 
-      {failed[0]?.error && (
-        <div className="flex items-start gap-2.5 rounded-md border border-critical/40 bg-critical/10 px-3 py-2.5">
-          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-critical" />
-          <p className="font-mono text-[11.5px] break-words text-muted-foreground">
-            {failed[0].error}
+      <JobRunHistoryDialog
+        runs={runs}
+        hours={HOURS}
+        open={isHistoryOpen}
+        onOpenChange={setIsHistoryOpen}
+      />
+
+      <Dialog open={isErrorOpen} onOpenChange={setIsErrorOpen}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Lỗi lượt chạy lúc {formatDateTime(lastFailed?.startedAt)}</DialogTitle>
+            <DialogDescription>
+              {isHealthyNow
+                ? 'Sự cố này đã qua — các lượt sau đó chạy bình thường.'
+                : 'Truy vấn vẫn đang hỏng ở lượt gần nhất.'}
+            </DialogDescription>
+          </DialogHeader>
+          <p className="rounded-md border border-critical/40 bg-critical/10 px-3 py-2.5 font-mono text-[12px] break-words text-muted-foreground">
+            {lastFailed?.error}
           </p>
-        </div>
-      )}
-    </div>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }

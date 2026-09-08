@@ -1,5 +1,6 @@
 package com.corp.iot.processing.telemetry;
 
+import com.corp.iot.processing.alert.AlertEvaluationService;
 import com.corp.iot.processing.dto.ExternalReadingEvent;
 import com.corp.iot.processing.entity.Datastream;
 import com.corp.iot.processing.entity.Metric;
@@ -32,6 +33,7 @@ class ExternalReadingProcessorTest {
     private MetricRepository metricRepository;
     private InfluxWriterService influxWriterService;
     private RealtimePublisher realtimePublisher;
+    private AlertEvaluationService alertEvaluationService;
     private ExternalReadingProcessor processor;
 
     @BeforeEach
@@ -41,8 +43,9 @@ class ExternalReadingProcessorTest {
         metricRepository = mock(MetricRepository.class);
         influxWriterService = mock(InfluxWriterService.class);
         realtimePublisher = mock(RealtimePublisher.class);
+        alertEvaluationService = mock(AlertEvaluationService.class);
         processor = new ExternalReadingProcessor(dedupService, datastreamRepository, metricRepository,
-                influxWriterService, realtimePublisher);
+                influxWriterService, realtimePublisher, alertEvaluationService);
 
         Datastream datastream = new Datastream();
         datastream.setId(99L);

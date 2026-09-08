@@ -1,5 +1,6 @@
 package com.corp.iot.processing.telemetry;
 
+import com.corp.iot.processing.alert.AlertEvaluationService;
 import com.corp.iot.processing.dto.ExternalReadingEvent;
 import com.corp.iot.processing.entity.Datastream;
 import com.corp.iot.processing.entity.Metric;
@@ -28,6 +29,7 @@ public class ExternalReadingProcessor {
     private final MetricRepository metricRepository;
     private final InfluxWriterService influxWriterService;
     private final RealtimePublisher realtimePublisher;
+    private final AlertEvaluationService alertEvaluationService;
 
     public void process(ExternalReadingEvent event) {
         // Message vá lịch sử cố ý phát lại messageId đã từng thấy — dedup sẽ chặn oan đúng
@@ -56,6 +58,14 @@ public class ExternalReadingProcessor {
                 metricCode, event.value(), event.measuredAt());
         realtimePublisher.publishExternalReading(
                 event.tenantId(), event.tenantNodeId(), datastream.get().getId(), metricCode, event.value(), event.measuredAt());
+
+        // Message vá lịch sử mang giá trị của tháng trước — đánh giá ngưỡng trên đó sẽ bắn cảnh báo
+        // cho sự cố đã qua từ lâu.
+        if (!event.backfill()) {
+            alertEvaluationService.evaluate(
+                    event.tenantId(), event.tenantNodeId(), datastream.get(), metricCode,
+                    event.value(), event.measuredAt());
+        }
     }
 
     private String resolveMetricCode(Long metricId) {

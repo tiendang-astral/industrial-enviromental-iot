@@ -12,31 +12,36 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { FormDialog } from '@/components/patterns/FormDialog'
 import { getApiErrorMessage } from '@/lib/apiError'
 import {
   createGatewayPinSchema,
-  DIRECTION_TYPES,
+  PIN_TYPE_DIRECTION,
   type CreateGatewayPinFormValues,
 } from '@/lib/gatewayPinSchema'
 import { useCreateGatewayPinMutation } from '@/queries/useCreateGatewayPinMutation'
 import { useMetricsQuery } from '@/queries/useMetricsQuery'
-import type { PinDirection } from '@/types/gatewayPin'
 
 const DEFAULTS: CreateGatewayPinFormValues = {
-  direction: 'INPUT',
   type: 'AI',
   name: '',
   metricId: '',
   pinNumber: '1',
 }
 
+/** Nhãn trong ô chọn nói luôn chiều tín hiệu, để người dùng không phải nhớ AI/DO nghĩa là gì. */
+const TYPE_OPTIONS = [
+  { value: 'AI', label: 'AI (đầu vào)' },
+  { value: 'DI', label: 'DI (đầu vào)' },
+  { value: 'DO', label: 'DO (đầu ra)' },
+  { value: 'AO', label: 'AO (đầu ra)' },
+] as const
+
 const TYPE_HINT: Record<string, string> = {
   AI: 'Analog In — đọc giá trị liên tục (nhiệt độ, độ ẩm)',
   DI: 'Digital In — đọc trạng thái bật/tắt (cảm biến cửa, báo mức)',
-  DO: 'Digital Out — điều khiển relay bật/tắt',
-  AO: 'Analog Out — xuất mức điều khiển liên tục',
+  DO: 'Digital Out — đóng/ngắt relay, chỉ có bật hoặc tắt (bơm, quạt, đèn)',
+  AO: 'Analog Out — điều khiển theo mức thay vì chỉ bật/tắt (tốc độ quạt, độ mở van)',
 }
 
 export function GatewayPinFormDialog({
@@ -56,14 +61,13 @@ export function GatewayPinFormDialog({
     reset,
     control,
     watch,
-    setValue,
     formState: { errors },
   } = useForm<CreateGatewayPinFormValues>({
     resolver: zodResolver(createGatewayPinSchema),
     defaultValues: DEFAULTS,
   })
-  const direction = watch('direction') as PinDirection
   const type = watch('type')
+  const direction = PIN_TYPE_DIRECTION[type]
 
   useEffect(() => {
     if (open) reset(DEFAULTS)
@@ -72,11 +76,14 @@ export function GatewayPinFormDialog({
   function onSubmit(values: CreateGatewayPinFormValues) {
     createMutation.mutate(
       {
-        direction: values.direction,
+        direction: PIN_TYPE_DIRECTION[values.type],
         type: values.type,
         name: values.name,
         // Chỉ pin INPUT mới gắn metric — pin OUTPUT là relay, không sinh datastream.
-        metricId: values.direction === 'INPUT' && values.metricId ? Number(values.metricId) : null,
+        metricId:
+          PIN_TYPE_DIRECTION[values.type] === 'INPUT' && values.metricId
+            ? Number(values.metricId)
+            : null,
         pinNumber: Number(values.pinNumber),
       },
       {
@@ -94,39 +101,19 @@ export function GatewayPinFormDialog({
       open={open}
       onOpenChange={onOpenChange}
       title="Thêm pin"
-      description="Pin INPUT đọc dữ liệu về và tự sinh datastream. Pin OUTPUT dùng để điều khiển relay."
       submitLabel="Tạo pin"
       isPending={createMutation.isPending}
       onSubmit={handleSubmit(onSubmit)}
     >
-      <Field>
-        <FieldLabel htmlFor="pin-direction" data-required>Chiều tín hiệu</FieldLabel>
-        <Controller
-          control={control}
-          name="direction"
-          render={({ field }) => (
-            <ToggleGroup
-              id="pin-direction"
-              type="single"
-              variant="outline"
-              className="w-full"
-              value={field.value}
-              onValueChange={(value) => {
-                if (!value) return
-                const next = value as PinDirection
-                field.onChange(next)
-                setValue('type', DIRECTION_TYPES[next][0])
-              }}
-            >
-              <ToggleGroupItem value="INPUT" className="flex-1">
-                INPUT (đọc)
-              </ToggleGroupItem>
-              <ToggleGroupItem value="OUTPUT" className="flex-1">
-                OUTPUT (điều khiển)
-              </ToggleGroupItem>
-            </ToggleGroup>
-          )}
+      <Field data-invalid={!!errors.name}>
+        <FieldLabel htmlFor="pin-name" data-required>Tên pin</FieldLabel>
+        <Input
+          id="pin-name"
+          placeholder="Nhiệt độ chuồng A"
+          aria-invalid={!!errors.name}
+          {...register('name')}
         />
+        <FieldError errors={[errors.name]} />
       </Field>
 
       <div className="grid gap-5 sm:grid-cols-2">
@@ -137,14 +124,19 @@ export function GatewayPinFormDialog({
             name="type"
             render={({ field }) => (
               <Select value={field.value} onValueChange={field.onChange}>
-                <SelectTrigger id="pin-type" aria-invalid={!!errors.type} className="w-full">
+                <SelectTrigger
+                  id="pin-type"
+                  aria-invalid={!!errors.type}
+                  aria-describedby="pin-type-hint"
+                  className="w-full"
+                >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
-                    {DIRECTION_TYPES[direction].map((option) => (
-                      <SelectItem key={option} value={option}>
-                        {option}
+                    {TYPE_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
                       </SelectItem>
                     ))}
                   </SelectGroup>
@@ -152,7 +144,6 @@ export function GatewayPinFormDialog({
               </Select>
             )}
           />
-          <FieldDescription>{TYPE_HINT[type]}</FieldDescription>
           <FieldError errors={[errors.type]} />
         </Field>
 
@@ -169,27 +160,22 @@ export function GatewayPinFormDialog({
         </Field>
       </div>
 
-      <Field data-invalid={!!errors.name}>
-        <FieldLabel htmlFor="pin-name" data-required>Tên pin</FieldLabel>
-        <Input
-          id="pin-name"
-          placeholder="Nhiệt độ chuồng A"
-          aria-invalid={!!errors.name}
-          {...register('name')}
-        />
-        <FieldError errors={[errors.name]} />
-      </Field>
+      {/* Chú thích trải hết bề ngang thay vì nằm trong ô nửa trái — câu giải thích dài, ép vào
+          nửa lưới thì xuống ba dòng. Ra ngoài Field nên phải tự nối lại `aria-describedby`. */}
+      <FieldDescription id="pin-type-hint" className="-mt-3">
+        {TYPE_HINT[type]}
+      </FieldDescription>
 
       {direction === 'INPUT' && (
         <Field data-invalid={!!errors.metricId}>
-          <FieldLabel htmlFor="pin-metric" data-required>Metric</FieldLabel>
+          <FieldLabel htmlFor="pin-metric" data-required>Đơn vị</FieldLabel>
           <Controller
             control={control}
             name="metricId"
             render={({ field }) => (
               <Select value={field.value ?? ''} onValueChange={field.onChange}>
                 <SelectTrigger id="pin-metric" aria-invalid={!!errors.metricId} className="w-full">
-                  <SelectValue placeholder="Chọn metric" />
+                  <SelectValue placeholder="Chọn đơn vị" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
@@ -203,9 +189,6 @@ export function GatewayPinFormDialog({
               </Select>
             )}
           />
-          <FieldDescription>
-            Metric quyết định đơn vị và ngưỡng cảnh báo của dữ liệu đọc từ chân này.
-          </FieldDescription>
           <FieldError errors={[errors.metricId]} />
         </Field>
       )}

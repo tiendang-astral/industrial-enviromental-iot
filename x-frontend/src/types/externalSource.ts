@@ -80,6 +80,12 @@ export interface ExternalSourceJobRun {
   finishedAt: string | null
 }
 
+/** Lịch sử chạy gói theo job — endpoint gộp của trang nguồn. */
+export interface JobRuns {
+  jobId: number
+  runs: ExternalSourceJobRun[]
+}
+
 export interface TestConnectionResult {
   ok: boolean
   serverVersion: string | null
@@ -152,11 +158,15 @@ export interface BackfillEstimate {
 export interface DatastreamTelemetry {
   datastreamId: number
   name: string
-  sourceField: string
+  /** NULL với kênh gateway — nó định danh bằng chân, không bằng cột kết quả. */
+  sourceField: string | null
   metricCode: string | null
   unit: string | null
   latestValue: number | null
   latestMeasuredAt: string | null
+  /** NULL với kênh gateway — chỉ nguồn ngoài mới có khái niệm đọc lại lịch sử. */
   oldestReadingAt: string | null
+  /** Bề rộng cửa sổ gộp mẫu của `history` — backend gộp trước khi trả, xem AggregationWindow. */
+  bucketSeconds: number | null
   history: { value: number; measuredAt: string }[]
 }

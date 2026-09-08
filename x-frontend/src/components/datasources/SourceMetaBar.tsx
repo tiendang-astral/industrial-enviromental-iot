@@ -1,11 +1,15 @@
-import { AlertTriangle, Lock, Pencil, Trash2 } from 'lucide-react'
+import { AlertTriangle, Lock, Pencil, RefreshCw, Trash2 } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { CopyButton } from '@/components/patterns/CopyButton'
+import { LoadingButton } from '@/components/patterns/LoadingButton'
 import { StatusBadge } from '@/components/patterns/StatusBadge'
+import { toast } from 'sonner'
 import { formatDateTime } from '@/lib/datetime'
 import { connectionString, isSslEnabled } from '@/lib/externalSource'
+import { getApiErrorMessage } from '@/lib/apiError'
+import { useTestSavedConnectionMutation } from '@/queries/useTestSavedConnectionMutation'
 import type { ExternalSource } from '@/types/externalSource'
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -34,6 +38,25 @@ export function SourceMetaBar({
   onDelete: () => void
 }) {
   const connection = connectionString(source)
+  const testMutation = useTestSavedConnectionMutation(source.id)
+
+  // Thử lại bằng credential đã lưu. Kết quả nói thẳng lý do (sai mật khẩu, không tới được máy
+  // chủ...) thay vì "thất bại" chung chung — errorMessage đã được backend dịch theo SQLState.
+  function handleTest() {
+    testMutation.mutate(undefined, {
+      onSuccess: (result) => {
+        if (result.ok) {
+          toast.success(
+            `Kết nối tốt · ${result.latencyMs}ms · ${result.tableCount ?? '?'} bảng` +
+              (result.writable ? ' · tài khoản có quyền ghi, nên dùng tài khoản chỉ đọc' : '')
+          )
+        } else {
+          toast.error(result.errorMessage ?? 'Không kết nối được tới database')
+        }
+      },
+      onError: (error) => toast.error(getApiErrorMessage(error, 'Không thử được kết nối')),
+    })
+  }
 
   return (
     <div className="flex flex-col gap-3 border-b border-border pb-4">
@@ -56,19 +79,23 @@ export function SourceMetaBar({
             <span className="truncate">{nodeName}</span>
           </Field>
 
-          <Field label="Đồng bộ gần nhất">
+          <Field label="Chạy gần nhất">
+            <span className="tabular">
+              {source.lastSyncAt ? formatDateTime(source.lastSyncAt) : 'chưa chạy lần nào'}
+            </span>
             {source.lastSyncStatus ? (
               <StatusBadge status={source.lastSyncStatus} />
             ) : (
-              <StatusBadge status="PENDING" label="Chưa đồng bộ" />
-            )}
-            {source.lastSyncAt && (
-              <span className="tabular text-muted-foreground">{formatDateTime(source.lastSyncAt)}</span>
+              <StatusBadge status="PENDING" label="Chưa chạy" />
             )}
           </Field>
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
+          <LoadingButton variant="outline" isPending={testMutation.isPending} onClick={handleTest}>
+            <RefreshCw data-icon="inline-start" />
+            Thử lại kết nối
+          </LoadingButton>
           <Button variant="outline" onClick={onEdit}>
             <Pencil data-icon="inline-start" />
             Sửa nguồn
@@ -87,7 +114,7 @@ export function SourceMetaBar({
       {source.lastError && (
         <Alert variant="destructive">
           <AlertTriangle />
-          <AlertTitle>Lỗi đồng bộ gần nhất</AlertTitle>
+          <AlertTitle>Lỗi lần chạy gần nhất</AlertTitle>
           <AlertDescription className="font-mono text-xs break-words">{source.lastError}</AlertDescription>
         </Alert>
       )}

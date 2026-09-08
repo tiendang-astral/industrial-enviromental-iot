@@ -16,8 +16,8 @@ export const DeviceListWidget = memo(function DeviceListWidget({
   const { data: devices, isLoading } = useDevicesQuery(tenantNodeId)
 
   return (
-    <Widget>
-      <Widget.Header title={widget.title} icon={Router} iconClassName="text-muted-foreground" />
+    <Widget accent="info">
+      <Widget.Header title={widget.title} />
       <Widget.Body className="justify-start gap-0 overflow-y-auto">
         {isLoading && (
           <div className="flex flex-col gap-2">

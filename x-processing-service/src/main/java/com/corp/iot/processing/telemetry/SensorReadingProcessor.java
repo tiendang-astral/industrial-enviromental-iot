@@ -1,10 +1,13 @@
 package com.corp.iot.processing.telemetry;
 
+import com.corp.iot.processing.alert.AlertEvaluationService;
 import com.corp.iot.processing.dto.SensorReadingEvent;
+import com.corp.iot.processing.entity.SourceType;
 import com.corp.iot.processing.entity.GatewayPin;
 import com.corp.iot.processing.entity.Metric;
 import com.corp.iot.processing.influx.InfluxWriterService;
 import com.corp.iot.processing.realtime.RealtimePublisher;
+import com.corp.iot.processing.repository.DatastreamRepository;
 import com.corp.iot.processing.repository.GatewayPinRepository;
 import com.corp.iot.processing.repository.GatewayRepository;
 import com.corp.iot.processing.repository.MetricRepository;
@@ -31,6 +34,8 @@ public class SensorReadingProcessor {
     private final GatewayRepository gatewayRepository;
     private final InfluxWriterService influxWriterService;
     private final RealtimePublisher realtimePublisher;
+    private final DatastreamRepository datastreamRepository;
+    private final AlertEvaluationService alertEvaluationService;
 
     public void process(SensorReadingEvent event) {
         if (!telemetryDedupService.markIfNew(event.tenantId(), event.messageId())) {
@@ -64,6 +69,12 @@ public class SensorReadingProcessor {
         realtimePublisher.publishSensorReading(
                 event.tenantId(), event.tenantNodeId(), event.gatewayId(), metricCode,
                 event.pinType(), event.pinNumber(), event.value(), event.measuredAt());
+
+        // Alert neo vào datastream chứ không vào pin — fingerprint phải giống nhau ở cả 2 nguồn.
+        datastreamRepository.findBySourceTypeAndSourceId(SourceType.GATEWAY_PIN, pin.get().getId())
+                .ifPresent(datastream -> alertEvaluationService.evaluate(
+                        event.tenantId(), event.tenantNodeId(), datastream, metricCode,
+                        event.value(), event.measuredAt()));
     }
 
     private String resolveMetricCode(Long metricId) {

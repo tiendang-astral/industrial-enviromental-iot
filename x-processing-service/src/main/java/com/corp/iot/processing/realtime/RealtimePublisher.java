@@ -71,4 +71,24 @@ public class RealtimePublisher {
 
     private record RealtimeCommandPayload(UUID commandId, String status, String powerReportedState, String error) {
     }
+
+    // Payload thứ tư trên cùng channel — FE phân biệt qua field alertId có mặt, khớp badge cảnh báo
+    // theo datastreamId đang hiển thị (xem ARCHITECTURE.md § Flow: Alert).
+    public void publishAlertStatus(
+            Long tenantId, Long tenantNodeId, Long alertId, Long ruleId, String ruleName, Long datastreamId,
+            String status, String severity, Double value, Instant measuredAt) {
+        String channel = "realtime:" + tenantId + ":" + tenantNodeId;
+        try {
+            String payload = objectMapper.writeValueAsString(new RealtimeAlertPayload(
+                    alertId, ruleId, ruleName, datastreamId, status, severity, value, measuredAt));
+            redisTemplate.convertAndSend(channel, payload);
+        } catch (Exception e) {
+            log.error("Failed to publish realtime alert event to channel={}", channel, e);
+        }
+    }
+
+    private record RealtimeAlertPayload(
+            Long alertId, Long ruleId, String ruleName, Long datastreamId, String status, String severity,
+            Double value, Instant measuredAt) {
+    }
 }

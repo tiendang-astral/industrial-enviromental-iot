@@ -1,5 +1,4 @@
 import { memo } from 'react'
-import { Power } from 'lucide-react'
 import { Widget } from '@/components/widgets/Widget'
 import { RelaySwitch } from '@/components/RelaySwitch'
 import { useGatewayPinsQuery } from '@/queries/useGatewayPinsQuery'
@@ -19,8 +18,10 @@ export const SwitchWidget = memo(function SwitchWidget({ widget, commandUpdates 
   const pin = pins?.find((p) => p.id === pinId)
 
   return (
-    <Widget>
-      <Widget.Header title={widget.title} icon={Power} iconClassName="text-muted-foreground" />
+    // tone="muted": widget DUY NHẤT gửi lệnh xuống thiết bị thật, phải khác tông với mọi widget
+    // chỉ đọc để không bấm nhầm khi lướt board.
+    <Widget tone="muted">
+      <Widget.Header title={widget.title} />
       <Widget.Body className="flex-row items-center justify-between">
         <p className="text-sm text-muted-foreground">
           {pin ? (pin.powerReportedState === 'ON' ? 'Đang bật' : 'Đang tắt') : 'Chưa có dữ liệu'}

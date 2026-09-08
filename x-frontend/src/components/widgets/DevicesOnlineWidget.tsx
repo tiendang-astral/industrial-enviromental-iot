@@ -1,5 +1,5 @@
 import { memo, useState } from 'react'
-import { Activity, Wifi, WifiOff } from 'lucide-react'
+import { Wifi, WifiOff } from 'lucide-react'
 import { Widget } from '@/components/widgets/Widget'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -21,8 +21,8 @@ export const DevicesOnlineWidget = memo(function DevicesOnlineWidget({
   const hasOffline = offlineDevices.length > 0
 
   return (
-    <Widget>
-      <Widget.Header title={widget.title} icon={Activity} iconClassName="text-ok" />
+    <Widget accent="info">
+      <Widget.Header title={widget.title} />
       <Widget.Body className="flex-row items-stretch gap-2">
         <div className="flex min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-lg bg-muted/40 py-2">
           <Wifi className="size-5 shrink-0 text-ok" />

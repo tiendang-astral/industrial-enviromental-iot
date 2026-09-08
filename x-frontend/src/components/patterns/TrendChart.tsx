@@ -32,12 +32,18 @@ export function TrendChart({
   unit,
   rangeMinutes,
   now,
+  zoomable = false,
   className,
   emptyLabel = 'Chưa đủ số đo để vẽ biểu đồ',
 }: {
   history: ReadingPoint[]
   /** `sparkline` = chỉ trục thời gian, dùng trong card. `axis` = đủ trục X/Y cho widget. */
   variant: 'sparkline' | 'axis'
+  /**
+   * Cuộn để phóng, kéo để trượt. Chỉ dùng ở khung xem lớn: phóng KHÔNG tải thêm chi tiết (backend
+   * đã gộp mẫu xuống ≤500 điểm/khoảng), nó chỉ giãn chuỗi đang có ra cho dễ đọc.
+   */
+  zoomable?: boolean
   unit?: string | null
   /** Bắt buộc với `sparkline`: trục X cố định theo khoảng đang xem, không co theo dữ liệu. */
   rangeMinutes?: number
@@ -62,10 +68,10 @@ export function TrendChart({
     const points = downsampleReadings(history, budget)
     return variant === 'sparkline'
       ? buildPinTrendOption(points, palette, rangeMinutes ?? 60, now ?? Date.now())
-      : buildAxisLineOption(points, unit, palette)
+      : buildAxisLineOption(points, unit, palette, zoomable)
     // `now` cố tình không nằm trong deps: nó đổi mỗi lần render và sẽ dựng lại option liên tục.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [history, palette, variant, unit, rangeMinutes, width])
+  }, [history, palette, variant, unit, rangeMinutes, width, zoomable])
 
   if (history.length <= 1) {
     return (

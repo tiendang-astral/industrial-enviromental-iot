@@ -5,6 +5,7 @@ import com.corp.iot.backend.externaldb.dto.ExternalDbDtos.PreviewResponse;
 import com.corp.iot.backend.externalsourcejob.dto.CreateExternalSourceJobRequest;
 import com.corp.iot.backend.externalsourcejob.dto.ExternalSourceJobResponse;
 import com.corp.iot.backend.externalsourcejob.dto.ExternalSourceJobRunResponse;
+import com.corp.iot.backend.externalsourcejob.dto.JobRunsResponse;
 import com.corp.iot.backend.externalsourcejob.dto.UpdateExternalSourceJobRequest;
 import com.corp.iot.backend.externalsourcejob.service.ExternalSourceJobService;
 import jakarta.validation.Valid;
@@ -44,6 +45,16 @@ public class ExternalSourceJobController {
     @PreAuthorize("hasAnyAuthority('TENANT_ADMIN','MANAGER','OPERATOR') and @nodeScope.canAccessJob(#id)")
     public ApiResponse<ExternalSourceJobResponse> runNow(@PathVariable Long id) {
         return ApiResponse.of(externalSourceJobService.runNow(id));
+    }
+
+    // Dải nhịp chạy cho MỌI job của nguồn trong một lần gọi — trang nguồn vẽ mọi khối job cùng
+    // lúc, gọi lẻ theo từng job sẽ thành N request cho một màn hình.
+    @GetMapping("/api/v1/external-sources/{sourceId}/job-runs")
+    @PreAuthorize("hasAnyAuthority('TENANT_ADMIN','MANAGER','OPERATOR','VIEWER') and @nodeScope.canAccessSource(#sourceId)")
+    public ApiResponse<List<JobRunsResponse>> runsBySource(
+            @PathVariable Long sourceId,
+            @RequestParam(defaultValue = "12") int sinceHours) {
+        return ApiResponse.of(externalSourceJobService.listRunsBySource(sourceId, sinceHours));
     }
 
     @GetMapping("/api/v1/external-source-jobs/{id}/runs")

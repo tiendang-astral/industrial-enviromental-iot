@@ -1,13 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { Database, Network, Sparkles } from 'lucide-react'
+import { Database, Network, Pencil } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
 import {
   Select,
   SelectContent,
@@ -18,10 +12,11 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { ConfirmDialog } from '@/components/patterns/ConfirmDialog'
 import { EmptyState } from '@/components/patterns/EmptyState'
+import { PageHeader } from '@/components/patterns/PageHeader'
 import { TenantNodePicker } from '@/components/patterns/TenantNodePicker'
 import { DashboardBoard } from '@/components/dashboard/DashboardBoard'
+import { OpenAlertsBanner } from '@/components/dashboard/OpenAlertsBanner'
 import { SourceDashboardPanel } from '@/components/datasources/SourceDashboardPanel'
 import { useCommandUpdates } from '@/hooks/useCommandUpdates'
 import { useRealtimeGatewaySocket } from '@/hooks/useRealtimeGatewaySocket'
@@ -34,8 +29,9 @@ import { useGatewaysQuery } from '@/queries/useGatewaysQuery'
 import { useMetricsQuery } from '@/queries/useMetricsQuery'
 import { useSaveDashboardLayoutMutation } from '@/queries/useSaveDashboardLayoutMutation'
 import { useTenantNodesQuery } from '@/queries/useTenantNodesQuery'
-import { orderNodesDepthFirst } from '@/lib/tenantNodeTree'
-import type { Datastream, DatastreamReading, DashboardTemplate } from '@/types/dashboard'
+import { useDashboardStore } from '@/stores/useDashboardStore'
+import { ancestorIdsOf, orderNodesDepthFirst } from '@/lib/tenantNodeTree'
+import type { Datastream, DatastreamReading } from '@/types/dashboard'
 import type { Metric } from '@/types/metric'
 
 type NodeView = 'board' | 'sources'
@@ -50,7 +46,6 @@ export default function DashboardPage() {
   // đứng được ở tab này.
   const [searchParams, setSearchParams] = useSearchParams()
   const view: NodeView = searchParams.has('source') ? 'sources' : 'board'
-  const [pendingTemplate, setPendingTemplate] = useState<DashboardTemplate | null>(null)
 
   const { data: nodes } = useTenantNodesQuery()
   const { data: dashboard, isLoading } = useDashboardQuery(tenantNodeId)
@@ -156,7 +151,7 @@ export default function DashboardPage() {
       value={selectedSource ? String(selectedSource.id) : ''}
       onValueChange={(value) => setSearchParams({ source: value })}
     >
-      <SelectTrigger id="dashboard-source" className="w-64 gap-1.5 sm:w-80">
+      <SelectTrigger id="dashboard-source" className="max-w-72 gap-1.5">
         <span className="shrink-0 text-muted-foreground">Nguồn dữ liệu</span>
         <SelectValue placeholder="Chọn nguồn dữ liệu" />
       </SelectTrigger>
@@ -175,40 +170,63 @@ export default function DashboardPage() {
     </Select>
   )
 
-  // Áp mẫu ở cấp trên quét cả subtree, nên một cú bấm ở gốc cây có thể sinh vài chục widget —
-  // đếm trước bằng đúng luật dedupe của backend (type + datastreamId).
-  const pendingWidgetCount = useMemo(() => {
-    if (!pendingTemplate) return 0
-    const existing = new Set(
-      (dashboard?.widgets ?? []).map((widget) => `${widget.type}:${widget.binding?.datastreamId ?? null}`)
-    )
-    let count = 0
-    for (const entry of pendingTemplate.layoutJson) {
-      for (const datastream of datastreams ?? []) {
-        if (datastream.metricCode !== entry.metric) continue
-        const key = `${entry.widgetType}:${datastream.id}`
-        if (existing.has(key)) continue
-        existing.add(key)
-        count++
-      }
-    }
-    return count
-  }, [pendingTemplate, dashboard, datastreams])
+  // Chuỗi tổ chức của đơn vị đang xem — thứ duy nhất ở đầu trang nói "đang đứng ở đâu" mà dải số
+  // bên dưới không lặp lại.
+  const nodePathLabel = useMemo(() => {
+    const byId = new Map((nodes ?? []).map((node) => [node.id, node]))
+    const current = byId.get(tenantNodeId)
+    if (!current) return undefined
+    return [...ancestorIdsOf(current, byId), current.id]
+      .map((id) => byId.get(id)?.name)
+      .filter(Boolean)
+      .join(' → ')
+  }, [nodes, tenantNodeId])
+
+  // Cảnh báo của kênh từ nguồn ngoài thuộc về board của chính nguồn đó (xem OpenAlertsBanner) —
+  // board đơn vị chỉ nhận phần gateway, nếu không một sự cố hiện hai chỗ.
+  const gatewayDatastreamIds = useMemo(
+    () => (datastreams ?? []).filter((ds) => ds.sourceType === 'GATEWAY_PIN').map((ds) => ds.id),
+    [datastreams]
+  )
+
+  const boardKey = view === 'board' ? `node:${tenantNodeId}` : `source:${selectedSource?.id ?? 0}`
+  const toggleEditMode = useDashboardStore((state) => state.toggleEditMode)
+  const isEditing = useDashboardStore((state) => state.editingBoardKey === boardKey)
 
   return (
-    <>
-      <Tabs
-        value={view}
-        onValueChange={(value) =>
-          setSearchParams(
-            value === 'sources' ? { source: String(selectedSource?.id ?? '') } : {}
-          )
+    <Tabs
+      value={view}
+      onValueChange={(value) =>
+        setSearchParams(value === 'sources' ? { source: String(selectedSource?.id ?? '') } : {})
+      }
+      className="flex flex-col gap-4"
+    >
+      <PageHeader
+        title="Tổng quan"
+        description={
+          <span className="uppercase tracking-wide">
+            {view === 'board' ? nodePathLabel : selectedSource?.name}
+          </span>
         }
-        className="flex flex-col gap-4"
-      >
-        {/* Ô chọn đứng ngay sát trái tab strip: hai thứ này cùng trả lời "đang xem cái gì", tách xa
-            hai đầu màn hình thì mắt phải nhảy qua lại. Một ô tại một thời điểm, cùng bề rộng. */}
-        <div className="flex flex-wrap items-center justify-end gap-2">
+      />
+
+      {/* Tab (đang xem loại gì) và ô chọn (đang xem cái nào) trả lời cùng một câu hỏi nên đứng
+          chung một hàng; nút sửa bố cục để hẳn ra ngoài, giấu trong menu thì không ai tìm ra. */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        {/* Icon lấy đúng bộ sidebar dùng cho hai khái niệm này (navConfig) — cùng một thứ thì cùng
+            một ký hiệu, người dùng không phải học lại. */}
+        <TabsList>
+          <TabsTrigger value="board">
+            <Network data-icon="inline-start" />
+            Tổ chức
+          </TabsTrigger>
+          <TabsTrigger value="sources">
+            <Database data-icon="inline-start" />
+            Nguồn dữ liệu
+          </TabsTrigger>
+        </TabsList>
+
+        <div className="flex flex-wrap items-center gap-2">
           {view === 'board' ? (
             <TenantNodePicker
               id="dashboard-node"
@@ -218,107 +236,59 @@ export default function DashboardPage() {
               onChange={(id) => navigate(`/dashboard/${id}`)}
               label="Tổ chức"
               placeholder="Chọn tổ chức"
-              className="w-64 sm:w-80"
+              // w-auto: bỏ bề rộng cố định cũ, nếu không `justify-between` bên trong sẽ để một
+              // khoảng trống to giữa tên và mũi tên khi tên ngắn.
+              className="w-auto max-w-72"
             />
           ) : (
             selectedSource && sourcePicker
           )}
-          {/* Icon lấy đúng bộ sidebar dùng cho hai khái niệm này (navConfig) — cùng một thứ thì cùng
-              một ký hiệu, người dùng không phải học lại. */}
-          <TabsList>
-            <TabsTrigger value="board">
-              <Network data-icon="inline-start" />
-              Tổ chức
-            </TabsTrigger>
-            <TabsTrigger value="sources">
-              <Database data-icon="inline-start" />
-              Nguồn dữ liệu
-            </TabsTrigger>
-          </TabsList>
-        </div>
-
-        <TabsContent value="sources">
-          {selectedSource ? (
-            // key — panel giữ readings trong state cục bộ, không remount thì đổi nguồn xong số đo
-            // của nguồn cũ còn nằm lại trên widget.
-            <SourceDashboardPanel
-              key={selectedSource.id}
-              externalSourceId={selectedSource.id}
-              leftHeader={<span />}
-            />
-          ) : (
-            <EmptyState
-              icon={Database}
-              title="Chưa có nguồn dữ liệu nào ở đây"
-              description="Phạm vi của bạn chưa có nguồn dữ liệu ngoài nào. Thêm nguồn ở trang Nguồn dữ liệu."
-            />
+          {!isEditing && (
+            <Button size="sm" variant="outline" onClick={() => toggleEditMode(boardKey)}>
+              <Pencil data-icon="inline-start" />
+              Chỉnh sửa bố cục
+            </Button>
           )}
-        </TabsContent>
+        </div>
+      </div>
 
-        <TabsContent value="board">
-          <DashboardBoard
-            boardKey={`node:${tenantNodeId}`}
-            leftHeader={<div />}
-            extraActions={
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button size="sm" variant="outline" disabled={!templates?.length}>
-                    <Sparkles data-icon="inline-start" />
-                    Áp dụng mẫu
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  {templates?.map((template) => (
-                    <DropdownMenuItem
-                      key={template.id}
-                      // Hoãn một nhịp: Radix đóng menu và trả focus ngay sau onSelect, mở Dialog
-                      // trong cùng nhịp đó thì Dialog bị đóng theo và bấm "Áp dụng mẫu" tưởng như
-                      // không có tác dụng gì.
-                      onSelect={() => setTimeout(() => setPendingTemplate(template), 0)}
-                    >
-                      {template.name}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            }
-            dashboard={dashboard}
-            isLoading={isLoading}
-            datastreams={datastreams ?? ([] as Datastream[])}
-            metricByCode={metricByCode}
-            tenantNodeId={tenantNodeId}
-            allowDeviceWidgets
-            readings={readings}
-            commandUpdates={commandUpdates}
-            onSave={save}
-            isSaving={isSaving}
+      <TabsContent value="sources">
+        {selectedSource ? (
+          // key — panel giữ readings trong state cục bộ, không remount thì đổi nguồn xong số đo
+          // của nguồn cũ còn nằm lại trên widget.
+          <SourceDashboardPanel key={selectedSource.id} externalSourceId={selectedSource.id} />
+        ) : (
+          <EmptyState
+            icon={Database}
+            title="Chưa có nguồn dữ liệu nào ở đây"
+            description="Phạm vi của bạn chưa có nguồn dữ liệu ngoài nào. Thêm nguồn ở trang Nguồn dữ liệu."
           />
-        </TabsContent>
-      </Tabs>
+        )}
+      </TabsContent>
 
-      <ConfirmDialog
-        open={!!pendingTemplate}
-        onOpenChange={(open) => !open && setPendingTemplate(null)}
-        title="Áp dụng mẫu này?"
-        question={
-          <>
-            Áp mẫu <span className="font-semibold">&ldquo;{pendingTemplate?.name}&rdquo;</span>?
-          </>
-        }
-        description={
-          pendingWidgetCount > 0
-            ? `Sẽ thêm ${pendingWidgetCount} widget cho mọi kênh khớp trong đơn vị này và các đơn vị bên dưới. Widget đang có được giữ nguyên.`
-            : 'Không có kênh nào khớp mẫu này trong phạm vi đơn vị đang xem — áp mẫu sẽ không thêm widget nào.'
-        }
-        confirmLabel="Áp dụng"
-        isPending={applyTemplateMutation.isPending}
-        onConfirm={() => {
-          if (!pendingTemplate) return
-          applyTemplateMutation.mutate(pendingTemplate.id, {
-            onSettled: () => setPendingTemplate(null),
-          })
-        }}
-      />
-    </>
+      <TabsContent value="board" className="flex flex-col gap-4">
+        <OpenAlertsBanner
+          tenantNodeId={tenantNodeId}
+          boardKey={boardKey}
+          datastreamIds={gatewayDatastreamIds}
+        />
+        <DashboardBoard
+          boardKey={`node:${tenantNodeId}`}
+          dashboard={dashboard}
+          isLoading={isLoading}
+          datastreams={datastreams ?? ([] as Datastream[])}
+          metricByCode={metricByCode}
+          tenantNodeId={tenantNodeId}
+          allowDeviceWidgets
+          readings={readings}
+          commandUpdates={commandUpdates}
+          onSave={save}
+          isSaving={isSaving}
+          templates={templates}
+          onApplyTemplate={applyTemplateMutation.mutateAsync}
+          isApplyingTemplate={applyTemplateMutation.isPending}
+        />
+      </TabsContent>
+    </Tabs>
   )
 }

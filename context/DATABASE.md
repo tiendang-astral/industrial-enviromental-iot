@@ -2,7 +2,7 @@
 
 > Nguồn schema duy nhất là **Flyway**; Hibernate chạy `ddl-auto: validate`.
 > Tenant isolation: **Hibernate multi-tenancy DISCRIMINATOR** (bỏ RLS).
-> Migration đã squash thành baseline (2026-06-30): `V1__baseline_schema.sql`; các thay đổi sau baseline theo từng version riêng (`V2__auth_seed.sql`, `V3__refresh_token_platform_user.sql`, `V4__phase2_metric_seed.sql`, `V5__dev_seed_credentials.sql`, `V6__backfill_datastream_from_gateway_pin.sql`, `V7__phase4_dashboard_template_seed.sql`, `V8__weather_and_gas_metric_seed.sql`, `V9__platform_user_soft_delete.sql`, `V10__tenant_node_enabled.sql`, `V11__external_source_polling.sql`, `V12__external_source_sql_query.sql`, `V13__external_source_backfill.sql`, `V14__dashboard_template_seed.sql`...).
+> Migration đã squash thành baseline (2026-06-30): `V1__baseline_schema.sql`; các thay đổi sau baseline theo từng version riêng (`V2__auth_seed.sql`, `V3__refresh_token_platform_user.sql`, `V4__phase2_metric_seed.sql`, `V5__dev_seed_credentials.sql`, `V6__backfill_datastream_from_gateway_pin.sql`, `V7__phase4_dashboard_template_seed.sql`, `V8__weather_and_gas_metric_seed.sql`, `V9__platform_user_soft_delete.sql`, `V10__tenant_node_enabled.sql`, `V11__external_source_polling.sql`, `V12__external_source_sql_query.sql`, `V13__external_source_backfill.sql`, `V14__dashboard_template_seed.sql`, `V15__alert_engine.sql`, `V16__alert_rule_group.sql`, `V17__alert_recent_index.sql`, `V18__alert_rule_source_type.sql`, `V19__alert_stale_status.sql`...).
 
 ## 1. ERD
 
@@ -27,7 +27,8 @@ Các thực thể trong hệ thống và mối quan hệ giữa chúng.
 | dashboard | Bảng điều khiển (widget JSONB) |
 | dashboard_template | Template dashboard (SYSTEM/CUSTOM) |
 | datastream | Kênh dữ liệu đã chuẩn hoá — neo vào `gateway_pin` hoặc `external_source_job` |
-| alert_rule | Rule cảnh báo (SENSOR/GATEWAY) |
+| alert_rule_group | Nhóm quy tắc — ý định của người dùng, trải phẳng thành nhiều `alert_rule` |
+| alert_rule | Rule cảnh báo (1 node + 1 metric) — dạng engine dùng |
 | alert_channel | Kênh nhận cảnh báo (EMAIL/TELEGRAM) |
 | alert | Instance cảnh báo đang mở/closed |
 | command | Lệnh điều khiển gateway |
@@ -437,6 +438,18 @@ Kênh gắn sau khi job đã chạy sẽ mất sạch dữ liệu trước `incr
 - `binding` theo `type` — **`VALUE`/`LINE`**: `{ datastreamId }`; **`SWITCH`** (Phase 7): `{ gatewayId, pinId }` — pin OUTPUT (`DO`/`AO`) không có `datastream` nên không dùng chung shape với VALUE/LINE; **`DEVICE_COUNT`/`DEVICES_ONLINE`**: `null` (tổng hợp theo subtree node, không bind 1 nguồn cụ thể).
 - Điều hướng FE: **mọi** node đều có board riêng, không riêng SITE — `uq_dashboard_user_node` vốn đã không ràng buộc `node_type`, giới hạn cũ chỉ nằm ở frontend. Đổi node bằng `TenantNodePicker` ngay trên trang (cây có thụt lề + rẽ nhánh + icon theo cấp), không còn sidebar cây tổ chức thường trực. Mỗi node có 2 tab: "Xem đơn vị" (board theo node, có ô chọn đơn vị) / "Xem theo nguồn" (dropdown chọn nguồn rồi hiện thẳng board riêng của nguồn đó tại chỗ — cùng một board với tab "Dashboard" ở trang chi tiết nguồn). Tab nguồn liệt kê **toàn bộ nguồn trong scope người dùng** (`GET /external-sources`), không lọc theo node đang chọn, nên ô chọn đơn vị **ẩn** ở tab này — để lại thì nó là ô điều khiển không điều khiển gì. Nguồn đang xem nằm ở query param `?source=<id>`; có param = đang ở tab nguồn, nên reload/chia sẻ link giữ đúng tab lẫn nguồn. Route cũ `/dashboard/source/:id` giữ lại làm redirect.
 - **Board ở node gộp bind được kênh của site con.** Widget vẫn `binding = { datastreamId }` như cũ, chỉ khác là danh sách kênh chọn được lấy theo subtree (`GET /tenant-nodes/{id}/datastreams?includeDescendants=true`). Widget nào bind kênh ngoài node của board thì tên mặc định kèm tên site (`Chuồng A · Nhiệt độ`) — không có nó thì board khu sản xuất là N ô cùng tên "Nhiệt độ".
+- **Kích thước widget có sàn và trần theo loại.** Trước đây mọi loại dùng chung `minW/minH = 2` và áp mẫu đặt cứng 4×3, nên biểu đồ ra đúng cỡ ô số còn ô số kéo to được hết board:
+
+| `type` | minW | maxW | minH | maxH | Mặc định |
+|--------|------|------|------|------|----------|
+| `VALUE` | 2 | 4 | 2 | 3 | 3×2 |
+| `LINE` | 4 | 12 | 3 | 8 | 6×4 |
+| `SWITCH` | 2 | 4 | 2 | 2 | 3×2 |
+| `DEVICES_ONLINE` | 2 | 4 | 2 | 3 | 3×2 |
+| `DEVICE_LIST` | 3 | 12 | 3 | 8 | 4×4 |
+
+  Bảng nằm ở **hai nơi phải khớp nhau**: `x-frontend/src/lib/dashboardLayout.ts` (sàn/trần lúc kéo-resize + kẹp layout cũ lúc nạp) và `x-backend` `WidgetSizeSpec` (cỡ mặc định lúc áp mẫu). Backend chỉ giữ cỡ mặc định — sàn/trần là ràng buộc tương tác, không phải ràng buộc dữ liệu, nên `layout_json` cũ vẫn hợp lệ và chỉ bị kẹp lúc hiển thị; bản kẹp ghi xuống DB khi người dùng bấm Lưu.
+- **Tiền tố tên đơn vị do `DashboardTemplateServiceImpl` sinh ra**, không phải quy ước suông: áp mẫu ở node gộp đặt `title = "{tên site} · {tên kênh}"` cho kênh của site con, kênh ngay tại node của board thì giữ tên trần.
 - Kênh của một site vẫn publish vào đúng channel `realtime:{tenantId}:{siteId}` của nó, nên FE subscribe **nhiều** STOMP topic cho một board — tập topic suy ra từ chính widget đang có (xem `ARCHITECTURE.md` § Contract STOMP/WebSocket). Board ở SITE thu về đúng 1 topic như trước.
 
 ### dashboard_template
@@ -512,9 +525,34 @@ Template layout = [
 | created_by | bigint | | |
 | updated_at | timestamptz | NOT NULL | |
 | updated_by | bigint | | |
+| deleted_at | timestamptz | | Soft delete — `V15`. Xoá cứng sẽ làm mọi dòng `alert` lịch sử trỏ tới `rule_id` không còn tồn tại, báo cáo sự cố mất luôn tên rule đã bắn |
 
 - Index `(tenant_id, tenant_node_id, metric_id, enabled)`.
-- Rule áp dụng cho TẤT CẢ datastream có metric_id tại node.
+- **Rule áp cho cả subtree** (`V15`, Phase 6a): reading về mang `tenant_node_id` của SITE, engine tra rule gắn ở chính site đó **hoặc bất kỳ node tổ tiên nào** (`ancestor.path @> self.path`, dùng GiST index có sẵn). Tạo 1 rule ở Khu sản xuất là phủ hết chuồng bên dưới — không có nó thì rule tạo ở cấp trên SITE không bao giờ chạy, vì `datastream` chỉ neo vào SITE.
+- Trong phạm vi 1 node, rule áp dụng cho TẤT CẢ datastream có `metric_id` đó.
+- **`conditions_json` là một NHÓM một tầng** (`V16`): `{"logic":"AND"|"OR","conditions":[{operator,threshold}]}`. Trước `V16` là mảng phẳng chỉ hiểu OR; `logic` thêm vào vì preset "Trong khoảng" (`>= a AND <= b`) không biểu diễn được bằng OR. Toán tử hợp lệ: `>`, `>=`, `<`, `<=` (`x-backend` chặn 400 `INVALID_CONDITION` lúc lưu).
+- Bốn preset UI dựng ra nhóm này, và suy ngược lại được khi mở form sửa nên **không cần lưu tên preset**: Lớn hơn → `OR [> x]`; Nhỏ hơn → `OR [< x]`; Ngoài khoảng → `OR [< a, > b]`; Trong khoảng → `AND [>= a, <= b]`.
+- `group_id` (`V16`) NULL = rule đứng một mình; engine không phân biệt, nó chỉ đọc `alert_rule`.
+- **`source_type` (`V18`), NULL = mọi loại nguồn.** Trước đó rule khớp theo đúng 2 thứ `(subtree node, metric)`, nên một node vừa có cảm biến nhiệt độ trong chuồng (gateway) vừa có nhiệt độ thời tiết từ database ngoài thì rule "chuồng quá nóng" bắn luôn cho feed thời tiết — cùng metric nhưng khác hẳn bản chất. Lọc chạy ở `AlertEvaluationService` **sau khi** resolve, không nhét vào SQL: đưa vào truy vấn thì key cache `alert-rules` phải kèm `source_type` → gấp đôi số key chỉ để tránh mang về vài dòng rồi bỏ.
+- `source_type` **không** tách được hai kênh cùng loại nguồn, cùng metric, cùng node — ca đó phải đặt rule xuống đúng node của từng khu.
+
+### alert_rule_group
+**Vì sao cần:** Người dùng nghĩ theo một việc — "theo dõi nhiệt độ và độ ẩm ở 3 chuồng này" — còn engine cần mỗi rule gắn đúng 1 node + 1 metric để resolve cho rẻ. Nhóm giữ ý định, `alert_rule` giữ dạng đã trải phẳng (`V16`).
+
+| Column | Type | Constraint | Mô tả |
+|--------|------|------------|-------|
+| id | bigint | PK auto increment | |
+| tenant_id | bigint | NOT NULL | |
+| name | varchar | NOT NULL | Tên hiển thị của nhóm; rule con dùng lại đúng tên này |
+| severity | varchar | NOT NULL, CHECK IN ('WARNING','CRITICAL') | Áp cho mọi rule con |
+| created_at/created_by/updated_at/updated_by | | | |
+| deleted_at | timestamptz | | Soft delete |
+
+- Unique `(tenant_id, id)`; FK từ `alert_rule (tenant_id, group_id)`.
+- **Tạo: N đơn vị × M chỉ số → N×M `alert_rule` trong MỘT transaction** — hỏng giữa chừng thì không tạo dòng nào.
+- **Chỉ đơn vị ở mức cao nhất mới sinh rule.** Ô chọn tổ chức tick cha là tick luôn mọi con nên danh sách gửi lên thường có cả cha lẫn con; rule vốn đã phủ toàn bộ subtree, nên node có tổ tiên cũng được chọn bị bỏ trước khi ghi. Không thu gọn thì reading của site con khớp **cả hai** rule → hai `alert`, hai email cho một lần vi phạm.
+- **Sửa: đối chiếu, không xoá-tạo-lại.** Cặp (đơn vị, chỉ số) còn được chọn thì giữ nguyên `alert_rule.id` và chỉ cập nhật ngưỡng; cặp bị bỏ chọn mới xoá mềm. Xoá rồi tạo lại sẽ làm alert đang mở của nó mồ côi và **không bao giờ chuyển được sang RECOVERED**.
+- Kênh nhận vẫn nằm ở `alert_channel` theo từng rule con (nhóm không có bảng kênh riêng) — mọi rule con của một nhóm mang bản sao giống hệt nhau.
 
 ### alert_channel
 **Vì sao cần:** Kênh nhận cảnh báo thuộc HẲN về rule. EMAIL hoặc TELEGRAM.
@@ -544,7 +582,7 @@ Template layout = [
 | tenant_node_id | bigint | NOT NULL, FK tenant_node | Node xảy ra alert |
 | datastream_id | bigint | NULLABLE, FK datastream | Datastream vi phạm (NULL nếu alert nhiều datastream) |
 | fingerprint | varchar | NOT NULL | ruleId:datastreamId hoặc ruleId:nodeId |
-| status | varchar | NOT NULL, CHECK IN ('PENDING','ACTIVE','RECOVERED') | |
+| status | varchar | NOT NULL, CHECK IN ('PENDING','ACTIVE','RECOVERED','STALE') | `STALE` thêm ở `V19` |
 | severity | varchar | NOT NULL | Snapshot từ rule |
 | started_at | timestamptz | NOT NULL | Bắt đầu vi phạm (PENDING) |
 | triggered_at | timestamptz | | Đủ duration → ACTIVE |
@@ -556,7 +594,15 @@ Template layout = [
 | updated_at | timestamptz | NOT NULL | |
 
 - Partial unique `uq_alert_open (tenant_id, fingerprint) WHERE status IN ('PENDING','ACTIVE')`.
+- Index `ix_alert_recent (tenant_id, status, started_at DESC)` — `V15`, cho trang Cảnh báo lọc theo trạng thái rồi sắp theo thời gian (`ix_alert_rule_metric` phục vụ chiều ngược lại: engine tra rule).
 - Stateful trong DB: breach đầu → PENDING; đủ duration → ACTIVE (gửi mail); hết breach → RECOVERED.
+- **`STALE` (`V19`) — kết thúc thứ hai, không phải "đã hết".** Tắt/xoá quy tắc khi sự cố còn mở thì engine không bao giờ chạm lại dòng đó nữa (truy vấn resolve có `enabled = true AND deleted_at IS NULL`), nên nó sẽ nằm mãi ở PENDING/ACTIVE: trang Cảnh báo hiện sự cố giả, widget đếm sai, và bật lại quy tắc thì reading bình thường đầu tiên gửi mail "đã hết" cho chuyện đã cũ hàng tuần. Không dùng `RECOVERED` cho ca này vì giá trị **chưa hề** về bình thường — báo cáo sự cố (Phase 8) cần tách "đã xử lý xong" khỏi "bỏ dở giữa chừng". Không gửi thông báo khi chuyển sang `STALE`.
+- `uq_alert_open` chỉ phủ `PENDING`/`ACTIVE` nên `STALE` tự nằm ngoài "đang mở": bật lại quy tắc mà vẫn vi phạm thì sinh alert **mới**, không hồi sinh dòng đã bỏ dở.
+- **Ngoại lệ duy nhất của bất biến "chỉ Processing ghi":** `x-backend` (`AlertClosingService`) ghi `STALE` khi người dùng tắt/xoá quy tắc. Đó là hệ quả trực tiếp và đồng bộ của thao tác vừa làm, không phải suy ra từ một dòng số đo; bất biến kia sinh ra để chặn hai nơi cùng chạy state machine, mà chuyển sang `STALE` là điểm kết thúc chứ không phải state machine.
+- **`x-processing-service` là nơi DUY NHẤT ghi**, `x-backend` chỉ đọc để hiển thị. `fingerprint = "{ruleId}:{datastreamId}"` — cả hai nguồn (gateway/external) đều quy về `datastream` nên fingerprint đồng nhất.
+- Mốc trạng thái (`started_at`/`triggered_at`/`recovered_at`) dùng giờ hệ thống chứ không dùng `measuredAt`: `duration_seconds` là "vi phạm liên tục bao lâu" theo thời gian thực. `measuredAt` chỉ vào `last_observed_at`.
+- **Thuần event-driven** (Phase 6a): chỉ đánh giá khi có reading mới. Nguồn ngừng gửi giữa lúc đang `PENDING`/`ACTIVE` thì alert kẹt nguyên trạng — cảnh báo mất kết nối để `alert_rule` loại `GATEWAY` làm sau.
+- Message backfill (`external-data-raw` có `backfill=true`) **không** đi qua đánh giá cảnh báo — giá trị của tháng trước sẽ bắn cảnh báo cho sự cố đã qua từ lâu.
 
 ### command
 **Vì sao cần:** Lệnh điều khiển gateway. Enum cố định TURN_ON/TURN_OFF.
@@ -623,6 +669,8 @@ Template layout = [
 | `uq_datastream_external_field` | datastream | `(tenant_id, source_type, source_id, source_field) WHERE source_type='EXTERNAL_SOURCE_JOB'` | Chặn map trùng 1 field vào 2 datastream — `V11` |
 | `uq_dashboard_user_node` | dashboard | `(tenant_id, user_id, tenant_node_id, COALESCE(external_source_id, 0))` | 1 board/user/node **hoặc** 1 board/user/nguồn — `V11` |
 | `uq_alert_open` | alert | `(tenant_id, fingerprint) WHERE status IN ('PENDING','ACTIVE')` | 1 alert đang mở/fingerprint |
+| `ix_alert_recent` | alert | `(tenant_id, status, started_at DESC)` | Truy vấn alert CÓ lọc trạng thái — `V15` |
+| `ix_alert_started` | alert | `(tenant_id, started_at DESC)` | Lấy N alert mới nhất khi không lọc trạng thái — `V17` |
 | `ix_alert_rule_node_metric` | alert_rule | `(tenant_id, tenant_node_id, metric_id, enabled)` | Alert rule theo node + metric |
 | `ix_command_pending` | command | `(status, timeout_at) WHERE status IN ('PENDING','DISPATCHED')` | Timeout worker |
 | `ix_outbox_dispatch` | outbox_event | `(status, next_attempt_at, occurred_at) WHERE status IN ('PENDING','FAILED')` | Publisher scan |
@@ -690,7 +738,12 @@ gw-resolve:{mac}                        — "gatewayId|tenantId|tenantNodeId", T
 scope-sites:{tenant}:{user}             — tập SITE in-scope, TTL 60s
 ws-site-auth:{tenant}:{site}            — WS site↔tenant, TTL 10'
 ws-scope-auth:{...}                     — WS site↔scope user, TTL 60s
-alert-rules:{tenantId}:{metric}         — rule đã resolve scope+recipient, TTL 60s
+alert-rules:{tenantId}:{tenantNodeId}:{metricCode}
+                                        — rule đã resolve (kèm subtree) cho 1 node báo về, TTL 60s.
+                                          Key gắn với node BÁO VỀ chứ không phải node của rule: rule ở node cha phủ
+                                          cả subtree nên tập rule của mỗi site là khác nhau dù cùng metric.
+                                          x-backend xoá key của mọi node hậu duệ khi rule đổi (AlertRuleCacheEvictor)
+                                          — không có bước đó thì rule mới phải đợi hết TTL mới có hiệu lực.
 ```
 
 Pub/sub channel (không có TTL, publish-only):

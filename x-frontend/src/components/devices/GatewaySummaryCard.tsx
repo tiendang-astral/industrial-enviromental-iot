@@ -3,16 +3,11 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { CopyButton } from '@/components/patterns/CopyButton'
 import { StatusBadge } from '@/components/patterns/StatusBadge'
 import { formatDateTime, formatRelativeTime } from '@/lib/datetime'
+import { isGatewayOnline } from '@/lib/gatewayStatus'
+import { summarizePins } from '@/lib/gatewayPinView'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import type { GatewayPinViews } from '@/lib/gatewayPinView'
 import type { Gateway } from '@/types/gateway'
-
-/** Khớp `app.device.online-threshold-minutes` mặc định ở backend (5'). */
-const ONLINE_THRESHOLD_MINUTES = 5
-
-function isOnline(lastSeenAt: string | null) {
-  if (!lastSeenAt) return false
-  return Date.now() - new Date(lastSeenAt).getTime() < ONLINE_THRESHOLD_MINUTES * 60000
-}
 
 function Stat({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -26,19 +21,27 @@ function Stat({ label, children }: { label: string; children: React.ReactNode })
 }
 
 /**
- * Dải thông tin định danh của gateway, đặt trên cùng trang chi tiết. Gom 4 thứ mà người vận hành
- * cần trước khi nhìn số liệu: đang là thiết bị nào, MAC để đối chiếu với cấu hình ngoài hiện
- * trường, còn sống không, và im lặng bao lâu rồi.
+ * Dải thông tin đầu trang chi tiết. Trả lời hai câu người trực ca hỏi trước khi nhìn số:
+ * thiết bị còn sống không, và có gì bất thường không.
+ *
+ * Số kênh ngoài ngưỡng đặt ở đây chứ không để người dùng tự quét từng ô — gateway 20 kênh thì
+ * quét bằng mắt là bỏ sót.
  */
-export function GatewaySummaryCard({ gateway }: { gateway: Gateway | undefined }) {
+export function GatewaySummaryCard({
+  gateway,
+  views,
+}: {
+  gateway: Gateway | undefined
+  views: GatewayPinViews
+}) {
   if (!gateway) {
     return (
       <Card>
-        <CardContent className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-          {Array.from({ length: 4 }).map((_, index) => (
+        <CardContent className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+          {Array.from({ length: 5 }).map((_, index) => (
             <div key={index} className="flex flex-col gap-2">
               <Skeleton className="h-3 w-20" />
-              <Skeleton className="h-5 w-32" />
+              <Skeleton className="h-5 w-28" />
             </div>
           ))}
         </CardContent>
@@ -46,11 +49,12 @@ export function GatewaySummaryCard({ gateway }: { gateway: Gateway | undefined }
     )
   }
 
-  const online = isOnline(gateway.lastSeenAt)
+  const online = isGatewayOnline(gateway.lastSeenAt)
+  const summary = summarizePins(views, online)
 
   return (
     <Card>
-      <CardContent className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+      <CardContent className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <Stat label="Tên thiết bị">
           <span className="truncate font-medium text-foreground">{gateway.name}</span>
         </Stat>
@@ -63,24 +67,55 @@ export function GatewaySummaryCard({ gateway }: { gateway: Gateway | undefined }
           />
         </Stat>
 
-        <Stat label="Trạng thái">
-          <StatusBadge status={online ? 'ONLINE' : 'OFFLINE'} />
+        {/* Một ô, đổi vai theo trạng thái: đang chạy thì "hoạt động lần cuối" chỉ lặp lại điều
+            badge đã nói; mất kết nối thì thứ cần biết là im lặng bao lâu rồi, chứ không phải
+            nhắc lại rằng nó đang mất kết nối. */}
+        {online ? (
+          <Stat label="Trạng thái">
+            <StatusBadge status="ONLINE" />
+          </Stat>
+        ) : (
+          <Stat label="Hoạt động lần cuối">
+            {gateway.lastSeenAt ? (
+              // Mốc tuyệt đối vẫn giữ trong tooltip để đối chiếu với log, chỉ bỏ gạch chân và
+              // con trỏ dấu hỏi.
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="tabular">{formatRelativeTime(gateway.lastSeenAt)}</span>
+                </TooltipTrigger>
+                <TooltipContent>{formatDateTime(gateway.lastSeenAt)}</TooltipContent>
+              </Tooltip>
+            ) : (
+              <span className="text-muted-foreground">Chưa từng kết nối</span>
+            )}
+          </Stat>
+        )}
+
+        {/* Mỗi chân đọc là một cảm biến, nên gọi đúng tên nó — "kênh dữ liệu" là từ của tầng
+            datastream, không phải thứ người vận hành nhìn thấy ở đây. */}
+        <Stat label="Cảm biến">
+          <span className="text-xl leading-none font-semibold tabular">
+            {summary.channelCount}
+          </span>
+          {summary.outOfRangeCount > 0 && (
+            <span className="ml-1 tabular text-critical">
+              · {summary.outOfRangeCount} ngoài ngưỡng
+            </span>
+          )}
         </Stat>
 
-        <Stat label="Hoạt động lần cuối">
-          {gateway.lastSeenAt ? (
-            // Khoảng cách tương đối dễ nắm hơn ("3 phút trước"), nhưng mốc tuyệt đối mới đối chiếu
-            // được với log — để mốc chính xác trong tooltip.
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="cursor-help tabular underline decoration-dotted underline-offset-4">
-                  {formatRelativeTime(gateway.lastSeenAt)}
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>{formatDateTime(gateway.lastSeenAt)}</TooltipContent>
-            </Tooltip>
+        <Stat label="Điều khiển">
+          {summary.relayCount === 0 ? (
+            <span className="text-muted-foreground">Không có</span>
           ) : (
-            <span className="text-muted-foreground">Chưa từng kết nối</span>
+            <>
+              <span className="text-xl leading-none font-semibold tabular">
+                {summary.relayCount}
+              </span>
+              <span className="ml-1 tabular text-muted-foreground">
+                · {summary.relayOnCount} đang bật
+              </span>
+            </>
           )}
         </Stat>
       </CardContent>

@@ -187,13 +187,30 @@ Kênh dữ liệu gắn **sau** khi job đã chạy thì mất phần lịch s�
 | Bước | Service | Xử lý gì |
 |------|---------|-----------|
 | 1 | Processing Service | Nhận trigger ngay sau khi ghi reading mới cho `metric` tại `tenant_node_id` (bước 7 flow sensor/external) |
-| 2 | Processing Service | Resolve `alert_rule` đang `enabled=true` theo `(tenant_id, tenant_node_id, metric)` (cache Redis `alert-rules`, TTL 60s) |
+| 2 | Processing Service | Resolve `alert_rule` đang `enabled=true` theo `(tenant_id, metric)` tại node báo về **và mọi node tổ tiên** (`ancestor.path @> self.path`, GiST index có sẵn) — rule ở Khu sản xuất phủ hết chuồng bên dưới. Cache Redis `alert-rules:{tenantId}:{tenantNodeId}:{metricCode}`, TTL 60s; `x-backend` xoá key của mọi node hậu duệ khi rule đổi để rule mới có hiệu lực ngay |
+| 2b | Processing Service | Bỏ rule có `source_type` không khớp loại nguồn của kênh vừa báo về (NULL = mọi nguồn). Lọc **sau** bước resolve để key cache không phải kèm thêm chiều này |
 | 3 | Processing Service | Đánh giá `conditions_json` (`>`, `<`, ...) so với giá trị mới; nếu vi phạm và chưa có alert mở (`uq_alert_open`) → tạo alert `PENDING`, `started_at = now()` |
 | 4 | Processing Service | Nếu đã `PENDING` và đủ `duration_seconds` vi phạm liên tục → chuyển `ACTIVE`, set `triggered_at` |
-| 5 | Processing Service | Đọc `alert_channel` của rule (EMAIL/TELEGRAM), gửi cảnh báo qua SMTP hoặc Telegram Bot API (token riêng theo channel) |
-| 6 | Processing Service | Nếu hết vi phạm → chuyển `RECOVERED`, set `recovered_at` |
+| 5 | Processing Service | Đọc `alert_channel` của rule (EMAIL/TELEGRAM), gửi cảnh báo qua SMTP (`JavaMailSender`) hoặc Telegram Bot API (`java.net.http.HttpClient` của JDK — service này không có `starter-web`, thêm cả servlet container chỉ để gọi 1 REST API là thừa). Gửi ở **thread pool riêng** (`@Async("alertNotifyExecutor")`): SMTP/Telegram treo không được phép chặn Kafka consumer. Lỗi gửi chỉ log |
+| 6 | Processing Service | Nếu hết vi phạm → chuyển `RECOVERED`, set `recovered_at`; chỉ báo "đã hết" nếu trước đó đã `ACTIVE` (alert còn `PENDING` chưa từng gửi cho ai) |
 | 7 | PostgreSQL | Lưu lịch sử alert (state machine `PENDING → ACTIVE → RECOVERED`) để phục vụ Report |
-| 8 | Processing Service → Backend | Publish trạng thái alert mới lên Redis pub/sub → push WebSocket để Dashboard hiển thị badge alert realtime |
+| 8 | Processing Service → Backend | Publish trạng thái alert mới lên Redis pub/sub channel `realtime:{tenantId}:{tenantNodeId}` → `RedisRealtimeBridge` forward nguyên văn vào STOMP (Backend không cần sửa, giống flow Command) |
+
+**Payload realtime Alert** (cùng channel `realtime:{tenantId}:{tenantNodeId}` như sensor/external/command — FE phân biệt qua field `alertId` có mặt, khớp badge theo `datastreamId` đang hiển thị):
+
+```json
+{
+  "alertId": 42, "ruleId": 7, "ruleName": "Nhiệt độ cao",
+  "datastreamId": 99, "status": "ACTIVE", "severity": "CRITICAL",
+  "value": 38.5, "measuredAt": "2026-09-08T09:41:00Z"
+}
+```
+
+**Ba ràng buộc của luồng đánh giá (Phase 6a):**
+
+1. **Thuần event-driven** — chỉ chạy khi có reading mới. Nguồn ngừng gửi giữa lúc alert đang `PENDING`/`ACTIVE` thì nó kẹt nguyên trạng; cảnh báo mất kết nối để `alert_rule` loại `GATEWAY` làm sau.
+2. **Bỏ qua message backfill** (`external-data-raw` có `backfill=true`) — giá trị của tháng trước sẽ bắn cảnh báo cho sự cố đã qua từ lâu.
+3. **Không làm hỏng luồng ghi** — toàn bộ bước đánh giá bọc try/catch, lỗi thì log + bỏ qua, đúng nguyên tắc "log + skip, không throw" của các bước resolve khác.
 
 ### Flow: Command / Relay control (bật-tắt OUTPUT pin)
 

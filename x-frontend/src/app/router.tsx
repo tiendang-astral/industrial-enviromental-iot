@@ -1,4 +1,4 @@
-import { Navigate, createBrowserRouter } from 'react-router-dom'
+import { Navigate, createBrowserRouter, useParams } from 'react-router-dom'
 import { RequireAuth } from '@/app/RequireAuth'
 import AppShell from '@/components/layout/AppShell'
 import AlertsPage from '@/pages/AlertsPage'
@@ -12,8 +12,13 @@ import LoginPage from '@/pages/LoginPage'
 import OrganizationPage from '@/pages/OrganizationPage'
 import ReportsPage from '@/pages/ReportsPage'
 import UsersPage from '@/pages/UsersPage'
-import JobDetailPage from '@/pages/JobDetailPage'
 import SourceDashboardPage from '@/pages/SourceDashboardPage'
+
+/** Mọi đường dẫn con cũ của một nguồn đều về đúng nguồn đó. */
+function RedirectToSource() {
+  const { sourceId } = useParams()
+  return <Navigate to={`/data-sources/${sourceId}`} replace />
+}
 
 export const router = createBrowserRouter([
   {
@@ -47,22 +52,15 @@ export const router = createBrowserRouter([
             element: <DataSourcesPage />,
           },
           {
-            // Tab nằm trong đường dẫn (không phải state cục bộ) để chia sẻ link và nút Back
-            // trỏ đúng tab. Không có tab → về "data", nơi công việc thực sự diễn ra.
             path: '/data-sources/:sourceId',
-            element: <Navigate to="config" replace />,
-          },
-          {
-            path: '/data-sources/:sourceId/:tab',
             element: <DataSourceDetailPage />,
           },
           {
-            path: '/data-sources/:sourceId/jobs/:jobId',
-            element: <Navigate to="config" replace />,
-          },
-          {
-            path: '/data-sources/:sourceId/jobs/:jobId/:tab',
-            element: <JobDetailPage />,
+            // Trang nguồn giờ là một view duy nhất: tab cũ (/config, /overview) và trang chi tiết
+            // job cũ (/jobs/:jobId/*) đều gộp vào đây, chi tiết mở bằng modal. Bookmark cũ vẫn
+            // phải tới được đúng nguồn thay vì rơi vào 404.
+            path: '/data-sources/:sourceId/*',
+            element: <RedirectToSource />,
           },
           {
             path: '/dashboard',

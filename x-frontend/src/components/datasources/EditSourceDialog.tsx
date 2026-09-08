@@ -7,7 +7,6 @@ import { Button } from '@/components/ui/button'
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -41,9 +40,8 @@ const CONNECTION_FIELDS = ['host', 'port', 'database', 'password'] as const
 const STEPS = [
   {
     title: 'Kết nối',
-    description: 'Sửa chỗ trỏ tới database. Đổi gì ở đây thì phải thử lại trước khi đi tiếp.',
   },
-  { title: 'Thông tin nguồn', description: 'Đặt lại tên hiển thị của nguồn.' },
+  { title: 'Thông tin nguồn' },
 ] as const
 
 export function EditSourceDialog({
@@ -189,7 +187,6 @@ export function EditSourceDialog({
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Sửa nguồn dữ liệu</DialogTitle>
-          <DialogDescription>{STEPS[step].description}</DialogDescription>
         </DialogHeader>
 
         <StepBar steps={STEPS} step={step} />

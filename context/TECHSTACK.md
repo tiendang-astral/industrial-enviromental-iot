@@ -56,6 +56,7 @@
 | MQTT Broker | EMQX (cloud-managed hoặc self-host trên cloud) | Chịu tải cao, hàng nghìn kết nối concurrent từ Gateway/Site |
 | Message Queue | Apache Kafka (cloud-managed: AWS MSK / Confluent Cloud / Aiven) | At-least-once delivery, partition theo device_id/site_id, decouple ingestion khỏi xử lý |
 | Cloud Platform | AWS / GCP / Azure | Tùy khách hàng — triển khai cloud-native, không on-premise |
+| SMTP (local dev) | MailHog (docker-compose) | SMTP giả cho Phase 6a — `x-processing-service` gửi mail cảnh báo vào cổng 1025, xem mail đã gửi ở `http://localhost:8025`. Production đổi qua env `MAIL_HOST`/`MAIL_PORT`/... Không có bản giả tương đương cho Telegram nên kênh đó dùng bot thật ngay từ local |
 
 ## 5. Third-party services
 

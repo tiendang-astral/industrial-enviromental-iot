@@ -21,4 +21,11 @@ public class Metric {
 
     @Column(nullable = false)
     private String code;
+
+    @Column(nullable = false)
+    private String name;
+
+    // Đơn vị đi kèm giá trị trong nội dung cảnh báo (Phase 6a).
+    @Column(nullable = false)
+    private String unit;
 }

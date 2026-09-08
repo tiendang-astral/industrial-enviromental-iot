@@ -90,7 +90,7 @@ public class DatastreamServiceImpl implements DatastreamService {
     @Transactional
     public DatastreamResponse createForJob(Long jobId, CreateDatastreamRequest request) {
         ExternalSourceJob job = externalSourceJobRepository.findById(jobId)
-                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "JOB_NOT_FOUND", "Không tìm thấy job"));
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "JOB_NOT_FOUND", "Không tìm thấy truy vấn định kỳ"));
         // Từ V12 không còn valueColumns khai sẵn — cột hợp lệ là cột thật trong kết quả truy vấn,
         // nên chạy thử rồi đối chiếu (xem ExternalSourceJobServiceImpl.requireBoundColumnsPresent).
         boolean fieldExists = externalSourceQueryService
@@ -100,7 +100,7 @@ public class DatastreamServiceImpl implements DatastreamService {
                 .anyMatch(name -> name.equalsIgnoreCase(request.sourceField()));
         if (!fieldExists) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "INVALID_SOURCE_FIELD",
-                    "Kết quả truy vấn của job không có cột \"" + request.sourceField() + "\"");
+                    "Kết quả truy vấn không có cột \"" + request.sourceField() + "\"");
         }
         if (datastreamRepository.existsBySourceTypeAndSourceIdAndSourceField(SourceType.EXTERNAL_SOURCE_JOB, jobId, request.sourceField())) {
             throw new BusinessException(HttpStatus.CONFLICT, "DATASTREAM_FIELD_TAKEN", "Field này đã được gắn vào 1 datastream khác");

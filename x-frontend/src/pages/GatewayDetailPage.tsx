@@ -2,64 +2,67 @@ import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { CircuitBoard, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Separator } from '@/components/ui/separator'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { EmptyState } from '@/components/patterns/EmptyState'
 import { PageHeader } from '@/components/patterns/PageHeader'
 import { GatewayPinFormDialog } from '@/components/devices/GatewayPinFormDialog'
-import { GatewayPinsTable } from '@/components/devices/GatewayPinsTable'
 import { GatewaySummaryCard } from '@/components/devices/GatewaySummaryCard'
-import { PinTelemetryCard, PinTelemetryCardSkeleton } from '@/components/devices/PinTelemetryCard'
-import { RelayPinCard } from '@/components/devices/RelayPinCard'
+import { GatewayPinBoard, GatewayPinBoardSkeleton } from '@/components/devices/GatewayPinBoard'
+import {
+  TelemetryChartGrid,
+  TelemetryChartGridSkeleton,
+} from '@/components/devices/TelemetryChartGrid'
+import { TelemetryRangePicker } from '@/components/devices/TelemetryRangePicker'
 import { useCommandUpdates } from '@/hooks/useCommandUpdates'
 import { useRealtimeGatewaySocket } from '@/hooks/useRealtimeGatewaySocket'
+import { buildPinViews } from '@/lib/gatewayPinView'
+import { isGatewayOnline } from '@/lib/gatewayStatus'
+import { DEFAULT_RANGE_MINUTES } from '@/lib/telemetryRanges'
 import { useAllGatewaysQuery } from '@/queries/useGatewaysQuery'
 import { useGatewayPinsQuery } from '@/queries/useGatewayPinsQuery'
 import { useGatewayTelemetryQuery } from '@/queries/useGatewayTelemetryQuery'
 import { useMetricsQuery } from '@/queries/useMetricsQuery'
-import type { Metric } from '@/types/metric'
 import type { PinTelemetry } from '@/types/telemetry'
 
-/** Biểu đồ trên card cảm biến hiển thị diễn biến trong ngày — 24h, nằm gọn trong bucket `raw`. */
-const TELEMETRY_RANGE_MINUTES = 24 * 60
-
-/** Nhãn phân vùng trong tab Dữ liệu — cùng kiểu chữ với hàng tiêu đề cột của bảng. */
-function SectionHeading({ title, count }: { title: string; count: number }) {
-  return (
-    <div className="flex items-center gap-2">
-      <h2 className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-        {title}
-      </h2>
-      {count > 0 && <span className="text-xs tabular text-muted-foreground">({count})</span>}
-    </div>
-  )
-}
-
+/**
+ * Trang chi tiết thiết bị, hai tab.
+ *
+ * Tab "Tổng quan" trả lời câu hỏi lướt: thiết bị còn sống không, chân nào đang bao nhiêu, có gì
+ * ngoài ngưỡng — mỗi chân một hàng, nhìn hết trong một màn hình. Tab "Biểu đồ" mới là chỗ đào sâu
+ * theo thời gian. Tách ra vì hai việc đó dùng chung một dữ liệu: gộp vào một trang thì cùng con
+ * số hiện hai lần, một lần dạng số một lần dạng sparkline.
+ */
 export default function GatewayDetailPage() {
   const { gatewayId } = useParams()
   const id = Number(gatewayId)
 
+  const [rangeMinutes, setRangeMinutes] = useState(DEFAULT_RANGE_MINUTES)
+  const [isAddPinOpen, setIsAddPinOpen] = useState(false)
+  // Tab điều khiển từ state vì bộ chọn khoảng nằm trên hàng tab: để nó hiện ở tab Tổng quan thì
+  // đó là một ô điều khiển không điều khiển gì trên màn hình đang xem.
+  const [tab, setTab] = useState('overview')
+
   const { data: gateways } = useAllGatewaysQuery()
   const gateway = gateways?.find((item) => item.id === id)
 
-  const { data: telemetry, isLoading } = useGatewayTelemetryQuery(id, TELEMETRY_RANGE_MINUTES)
-  const [pins, setPins] = useState<PinTelemetry[]>([])
+  const { data: telemetry, isLoading: isTelemetryLoading } = useGatewayTelemetryQuery(
+    id,
+    rangeMinutes
+  )
+  const [readings, setReadings] = useState<PinTelemetry[]>([])
 
-  const { data: gatewayPins } = useGatewayPinsQuery(id)
-  const [isAddPinOpen, setIsAddPinOpen] = useState(false)
-  const outputPins = gatewayPins?.filter((pin) => pin.direction === 'OUTPUT') ?? []
+  const { data: gatewayPins, isLoading: isPinsLoading } = useGatewayPinsQuery(id)
+  const { data: metrics } = useMetricsQuery()
   const { commandUpdates, handleCommandMessage } = useCommandUpdates()
 
-  const { data: metrics } = useMetricsQuery()
-  const metricByCode = useMemo(() => {
-    const map = new Map<string, Metric>()
-    metrics?.forEach((metric) => map.set(metric.code, metric))
-    return map
-  }, [metrics])
+  const views = useMemo(
+    () => buildPinViews(gatewayPins, readings, metrics),
+    [gatewayPins, readings, metrics]
+  )
 
   useEffect(() => {
     if (telemetry) {
-      setPins(telemetry)
+      setReadings(telemetry)
     }
   }, [telemetry])
 
@@ -68,7 +71,7 @@ export default function GatewayDetailPage() {
       handleCommandMessage(message)
       return
     }
-    setPins((prev) =>
+    setReadings((prev) =>
       prev.map((pin) =>
         pin.pinNumber === message.pinNumber && pin.type === message.pinType
           ? {
@@ -80,7 +83,7 @@ export default function GatewayDetailPage() {
                   ? [
                       ...pin.history,
                       { value: message.value, measuredAt: message.measuredAt },
-                    ].slice(-200)
+                    ].slice(-600)
                   : pin.history,
             }
           : pin
@@ -88,9 +91,9 @@ export default function GatewayDetailPage() {
     )
   })
 
-  const hasSensors = pins.length > 0
-  const hasRelays = outputPins.length > 0
-  const dataCount = pins.length + outputPins.length
+  const isLoading = isPinsLoading || isTelemetryLoading
+  const hasPins = views.inputs.length > 0 || views.outputs.length > 0
+  const gatewayOnline = isGatewayOnline(gateway?.lastSeenAt)
 
   return (
     <div className="flex flex-col gap-6">
@@ -100,85 +103,58 @@ export default function GatewayDetailPage() {
         backLabel="Thiết bị"
       />
 
-      <GatewaySummaryCard gateway={gateway} />
+      <GatewaySummaryCard gateway={gateway} views={views} />
 
-      <Tabs defaultValue="data" className="gap-6">
-        <TabsList>
-          <TabsTrigger value="data">
-            Dữ liệu &amp; Điều khiển
-            {dataCount > 0 && <span className="tabular text-muted-foreground">{dataCount}</span>}
-          </TabsTrigger>
-          <TabsTrigger value="pins">
-            Cấu hình pin
-            {(gatewayPins?.length ?? 0) > 0 && (
-              <span className="tabular text-muted-foreground">{gatewayPins?.length}</span>
+      {/* Tab luôn hiện kể cả khi chưa có pin: nút "Thêm pin" nằm trên hàng tab nên ẩn tab đi là
+          mất luôn đường tạo pin đầu tiên. Trạng thái rỗng vì vậy nằm trong tab. */}
+      <Tabs value={tab} onValueChange={setTab} className="gap-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <TabsList>
+            <TabsTrigger value="overview">Tổng quan</TabsTrigger>
+            <TabsTrigger value="charts">Biểu đồ</TabsTrigger>
+          </TabsList>
+          <div className="flex flex-wrap items-center gap-3">
+            {tab === 'charts' && views.inputs.length > 0 && (
+              <TelemetryRangePicker value={rangeMinutes} onChange={setRangeMinutes} />
             )}
-          </TabsTrigger>
-        </TabsList>
-
-        {/* Hai vùng đều full width, 4 card/hàng. Vùng nào không có pin thì ẩn cả tiêu đề —
-            một tiêu đề đứng trên khoảng trống chỉ tổ làm người đọc tưởng dữ liệu chưa tải xong. */}
-        <TabsContent value="data" className="flex flex-col gap-6">
-          {isLoading && (
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              {Array.from({ length: 4 }).map((_, index) => (
-                <PinTelemetryCardSkeleton key={index} />
-              ))}
-            </div>
-          )}
-
-          {!isLoading && hasSensors && (
-            <section className="flex flex-col gap-4">
-              <SectionHeading title="Cảm biến" count={pins.length} />
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                {pins.map((pin) => (
-                  <PinTelemetryCard
-                    key={pin.pinId}
-                    pin={pin}
-                    metric={pin.metricCode ? metricByCode.get(pin.metricCode) : undefined}
-                  />
-                ))}
-              </div>
-            </section>
-          )}
-
-          {!isLoading && hasSensors && hasRelays && <Separator />}
-
-          {!isLoading && hasRelays && (
-            <section className="flex flex-col gap-4">
-              <SectionHeading title="Điều khiển" count={outputPins.length} />
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                {outputPins.map((pin) => (
-                  <RelayPinCard
-                    key={pin.id}
-                    gatewayId={id}
-                    pin={pin}
-                    commandUpdates={commandUpdates}
-                  />
-                ))}
-              </div>
-            </section>
-          )}
-
-          {!isLoading && !hasSensors && !hasRelays && (
-            <EmptyState
-              icon={CircuitBoard}
-              title="Gateway chưa có pin nào"
-              description="Khai báo pin ở tab Cấu hình pin để gateway bắt đầu gửi số liệu về và điều khiển được relay."
-            />
-          )}
-        </TabsContent>
-
-        {/* Khai báo chân trước đây nằm ở trang Xưởng/Chuồng trại. Trang đó đã bỏ, mà chân là thuộc
-            tính của chính gateway chứ không phải của xưởng, nên chỗ đúng của nó là ở đây. */}
-        <TabsContent value="pins" className="flex flex-col gap-4">
-          <div className="flex justify-end">
             <Button variant="outline" onClick={() => setIsAddPinOpen(true)}>
               <Plus data-icon="inline-start" />
               Thêm pin
             </Button>
           </div>
-          <GatewayPinsTable gatewayId={id} />
+        </div>
+
+        <TabsContent value="overview">
+          {isLoading ? (
+            <GatewayPinBoardSkeleton />
+          ) : hasPins ? (
+            <GatewayPinBoard
+              gatewayId={id}
+              views={views}
+              gatewayOnline={gatewayOnline}
+              commandUpdates={commandUpdates}
+            />
+          ) : (
+            <EmptyState
+              icon={CircuitBoard}
+              title="Gateway chưa có pin nào"
+              description="Bấm «Thêm pin» để khai báo chân vật lý trên gateway — sau đó thiết bị mới gửi số liệu về và điều khiển được relay."
+            />
+          )}
+        </TabsContent>
+
+        <TabsContent value="charts">
+          {isLoading ? (
+            <TelemetryChartGridSkeleton />
+          ) : views.inputs.length > 0 ? (
+            <TelemetryChartGrid views={views.inputs} />
+          ) : (
+            <EmptyState
+              icon={CircuitBoard}
+              title="Chưa có chân đọc dữ liệu"
+              description="Chỉ chân đọc (AI/DI) mới sinh số đo để vẽ biểu đồ. Khai báo thêm chân đọc ở tab Tổng quan."
+            />
+          )}
         </TabsContent>
       </Tabs>
 

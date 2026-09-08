@@ -1,5 +1,6 @@
 package com.corp.iot.backend.common.scope;
 
+import com.corp.iot.backend.alertrule.repository.AlertRuleRepository;
 import com.corp.iot.backend.common.security.AppUserPrincipal;
 import com.corp.iot.backend.datastream.repository.DatastreamRepository;
 import com.corp.iot.backend.externalsource.repository.ExternalSourceRepository;
@@ -24,6 +25,7 @@ public class NodeScopeGuard {
     private final DatastreamRepository datastreamRepository;
     private final ExternalSourceRepository externalSourceRepository;
     private final ExternalSourceJobRepository externalSourceJobRepository;
+    private final AlertRuleRepository alertRuleRepository;
 
     public boolean canAccess(Long tenantNodeId) {
         if (tenantNodeId == null) {
@@ -57,6 +59,15 @@ public class NodeScopeGuard {
         }
         return externalSourceRepository.findById(externalSourceId)
                 .map(source -> canAccess(source.getTenantNodeId()))
+                .orElse(false);
+    }
+
+    public boolean canAccessAlertRule(Long alertRuleId) {
+        if (alertRuleId == null) {
+            return false;
+        }
+        return alertRuleRepository.findById(alertRuleId)
+                .map(rule -> canAccess(rule.getTenantNodeId()))
                 .orElse(false);
     }
 

@@ -2,7 +2,8 @@ import { cn } from '@/lib/utils'
 
 export interface WizardStep {
   title: string
-  description: string
+  /** Không bắt buộc: dialog nào tiêu đề đã đủ rõ thì bỏ hẳn dòng mô tả. */
+  description?: string
 }
 
 /** Chỉ báo bước cho form nhiều bước — dùng chung giữa dialog thêm và sửa nguồn. */

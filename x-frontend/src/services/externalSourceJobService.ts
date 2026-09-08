@@ -7,6 +7,7 @@ import type {
   CreateExternalSourceJobRequest,
   ExternalSourceJob,
   ExternalSourceJobRun,
+  JobRuns,
   PreviewResult,
   UpdateExternalSourceJobRequest,
 } from '@/types/externalSource'
@@ -76,4 +77,15 @@ export async function createBackfill(datastreamId: number, payload: BackfillRequ
 export async function getLatestBackfill(datastreamId: number): Promise<BackfillTask | null> {
   const { data } = await httpClient.get<ApiEnvelope<BackfillTask | null>>(`/datastreams/${datastreamId}/backfill`)
   return data.data ?? null
+}
+
+export async function listJobRunsBySource(
+  externalSourceId: number,
+  sinceHours = 12
+): Promise<JobRuns[]> {
+  const { data } = await httpClient.get<ApiEnvelope<JobRuns[]>>(
+    `/external-sources/${externalSourceId}/job-runs`,
+    { params: { sinceHours } }
+  )
+  return data.data!
 }

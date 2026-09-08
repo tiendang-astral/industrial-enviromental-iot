@@ -89,3 +89,17 @@ export function expandToDescendants(topMostIds: number[], nodes: TenantNode[]): 
   }
   return [...result]
 }
+
+/**
+ * Chỉ giữ node ở mức cao nhất trong tập đã chọn (bỏ node có tổ tiên cũng được chọn).
+ *
+ * Ô chọn tổ chức tick cha là tick luôn mọi con, mà quy tắc cảnh báo vốn đã phủ toàn bộ subtree —
+ * giữ cả cha lẫn con sẽ tạo quy tắc trùng và bắn hai cảnh báo cho một lần vi phạm. Backend cũng
+ * thu gọn y hệt; hàm này để phần đếm trên form nói đúng con số sẽ tạo ra.
+ */
+export function topMostNodeIds(selectedIds: number[], nodes: TenantNode[]): number[] {
+  const selected = nodes.filter((node) => selectedIds.includes(node.id))
+  return selected
+    .filter((node) => !selected.some((other) => other.id !== node.id && node.path.startsWith(`${other.path}.`)))
+    .map((node) => node.id)
+}

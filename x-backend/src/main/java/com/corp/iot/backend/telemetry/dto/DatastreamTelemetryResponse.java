@@ -15,6 +15,8 @@ public record DatastreamTelemetryResponse(
         Instant latestMeasuredAt,
         /** Mốc sớm nhất kênh có số đo liền mạch (V13) — FE hiện "Có số đo từ…". */
         Instant oldestReadingAt,
+        /** Bề rộng cửa sổ gộp mẫu của `history` — FE ghi rõ "mỗi điểm = trung bình N phút". */
+        Integer bucketSeconds,
         List<ReadingPointDto> history
 ) {
 }

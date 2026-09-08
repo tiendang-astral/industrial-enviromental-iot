@@ -31,8 +31,8 @@ const STATUS_MAP: Record<string, { label: string; variant: BadgeVariant }> = {
   // `outline` thì nó nằm im giữa bảng và người trực ca lướt qua không thấy.
   OFFLINE: { label: 'Mất kết nối', variant: 'destructive' },
   ENABLED: { label: 'Đang bật', variant: 'ok' },
-  // Tắt là chủ ý, nhưng hệ quả vẫn là không có dữ liệu về — cảnh báo nhẹ, không phải lỗi.
-  DISABLED: { label: 'Đã tắt', variant: 'warning' },
+  // Tắt là do người dùng chủ động, không phải sự cố — màu cảnh báo để dành cho thứ cần xử lý.
+  DISABLED: { label: 'Đã tắt', variant: 'secondary' },
 }
 
 interface StatusBadgeProps {

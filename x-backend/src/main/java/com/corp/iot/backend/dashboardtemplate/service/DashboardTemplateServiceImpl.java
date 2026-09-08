@@ -7,6 +7,7 @@ import com.corp.iot.backend.dashboard.dto.DashboardResponse;
 import com.corp.iot.backend.dashboard.dto.Widget;
 import com.corp.iot.backend.dashboard.dto.WidgetBinding;
 import com.corp.iot.backend.dashboard.dto.WidgetLayout;
+import com.corp.iot.backend.dashboard.dto.WidgetSizeSpec;
 import com.corp.iot.backend.dashboard.entity.Dashboard;
 import com.corp.iot.backend.dashboard.mapper.DashboardMapper;
 import com.corp.iot.backend.dashboard.repository.DashboardRepository;
@@ -38,10 +39,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class DashboardTemplateServiceImpl implements DashboardTemplateService {
 
-    private static final int DEFAULT_WIDGET_W = 4;
-    private static final int DEFAULT_WIDGET_H = 3;
     private static final int GRID_COLS = 12;
-    private static final int COLS_PER_ROW = GRID_COLS / DEFAULT_WIDGET_W;
 
     private final DashboardTemplateRepository dashboardTemplateRepository;
     private final DashboardTemplateMapper dashboardTemplateMapper;
@@ -72,10 +70,15 @@ public class DashboardTemplateServiceImpl implements DashboardTemplateService {
         // áp template ở node gộp sẽ không tạo được widget nào (bug đã gặp).
         List<Long> subtreeNodeIds = tenantNodeRepository.findDescendantIdsIncludingSelf(TenantContext.getTenantId(), node.getPath());
 
+        // Tên đơn vị để đặt tiền tố cho widget bind kênh của site con — board ở cấp trên gom nhiều
+        // site nên thiếu tiền tố là N widget cùng tên "Nhiệt độ" (xem DATABASE.md § dashboard).
+        Map<Long, String> nodeNames = tenantNodeRepository.findAllById(subtreeNodeIds).stream()
+                .collect(Collectors.toMap(TenantNode::getId, TenantNode::getName));
+
         List<Widget> widgets = new ArrayList<>(dashboard.getLayoutJson().widgets());
         Set<String> existingKeys = widgets.stream().map(this::widgetKey).collect(Collectors.toSet());
-        int startY = widgets.stream().mapToInt(w -> w.layout().y() + w.layout().h()).max().orElse(0);
-        int addedCount = 0;
+        GridCursor cursor = new GridCursor(
+                widgets.stream().mapToInt(w -> w.layout().y() + w.layout().h()).max().orElse(0));
 
         for (TemplateWidget templateWidget : template.getLayoutJson()) {
             Metric metric = metricRepository.findByCode(templateWidget.metric()).orElse(null);
@@ -88,17 +91,14 @@ public class DashboardTemplateServiceImpl implements DashboardTemplateService {
                 if (!existingKeys.add(key)) {
                     continue; // đã có widget này (type + datastreamId) — không ghi đè
                 }
-                int col = addedCount % COLS_PER_ROW;
-                int row = addedCount / COLS_PER_ROW;
                 widgets.add(new Widget(
                         UUID.randomUUID().toString(),
                         templateWidget.widgetType(),
-                        new WidgetLayout(col * DEFAULT_WIDGET_W, startY + row * DEFAULT_WIDGET_H, DEFAULT_WIDGET_W, DEFAULT_WIDGET_H),
-                        datastream.getName(),
+                        cursor.place(WidgetSizeSpec.of(templateWidget.widgetType())),
+                        widgetTitle(datastream, tenantNodeId, nodeNames),
                         new WidgetBinding(datastream.getId()),
                         templateWidget.config() != null ? templateWidget.config() : Map.of()
                 ));
-                addedCount++;
             }
         }
 
@@ -109,5 +109,40 @@ public class DashboardTemplateServiceImpl implements DashboardTemplateService {
 
     private String widgetKey(Widget widget) {
         return widget.type() + ":" + (widget.binding() != null ? widget.binding().datastreamId() : null);
+    }
+
+    /** Kênh của site con mới cần tiền tố đơn vị; kênh ngay tại node của board thì tên trần là đủ. */
+    private String widgetTitle(Datastream datastream, Long boardNodeId, Map<Long, String> nodeNames) {
+        if (datastream.getTenantNodeId().equals(boardNodeId)) {
+            return datastream.getName();
+        }
+        String nodeName = nodeNames.get(datastream.getTenantNodeId());
+        return nodeName == null ? datastream.getName() : nodeName + " · " + datastream.getName();
+    }
+
+    /**
+     * Xếp widget từ trái sang phải, tràn 12 cột thì xuống hàng mới. Chiều cao hàng lấy theo widget
+     * cao nhất trong hàng — các loại giờ có cỡ khác nhau nên chia đều theo số lượng sẽ chồng lên nhau.
+     */
+    private static final class GridCursor {
+        private int x = 0;
+        private int y;
+        private int rowHeight = 0;
+
+        GridCursor(int startY) {
+            this.y = startY;
+        }
+
+        WidgetLayout place(WidgetSizeSpec size) {
+            if (x + size.w() > GRID_COLS) {
+                y += rowHeight;
+                x = 0;
+                rowHeight = 0;
+            }
+            WidgetLayout layout = new WidgetLayout(x, y, size.w(), size.h());
+            x += size.w();
+            rowHeight = Math.max(rowHeight, size.h());
+            return layout;
+        }
     }
 }

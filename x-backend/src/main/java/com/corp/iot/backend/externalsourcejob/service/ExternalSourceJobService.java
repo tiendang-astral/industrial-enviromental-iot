@@ -4,6 +4,7 @@ import com.corp.iot.backend.externaldb.dto.ExternalDbDtos.PreviewResponse;
 import com.corp.iot.backend.externalsourcejob.dto.CreateExternalSourceJobRequest;
 import com.corp.iot.backend.externalsourcejob.dto.ExternalSourceJobResponse;
 import com.corp.iot.backend.externalsourcejob.dto.ExternalSourceJobRunResponse;
+import com.corp.iot.backend.externalsourcejob.dto.JobRunsResponse;
 import com.corp.iot.backend.externalsourcejob.dto.UpdateExternalSourceJobRequest;
 
 import java.util.List;
@@ -21,6 +22,9 @@ public interface ExternalSourceJobService {
     ExternalSourceJobResponse runNow(Long id);
 
     List<ExternalSourceJobRunResponse> listRuns(Long id, int sinceHours);
+
+    /** Lịch sử chạy của mọi job thuộc một nguồn — trang nguồn vẽ dải nhịp cho tất cả khối job. */
+    List<JobRunsResponse> listRunsBySource(Long externalSourceId, int sinceHours);
 
     /** Mẫu dòng MỚI NHẤT của job — để quan sát dữ liệu đang chảy về, không phải để soạn câu. */
     PreviewResponse sampleLatest(Long id, int limit);

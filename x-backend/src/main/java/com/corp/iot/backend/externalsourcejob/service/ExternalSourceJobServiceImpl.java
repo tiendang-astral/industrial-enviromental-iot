@@ -12,6 +12,7 @@ import com.corp.iot.backend.externalsourcejob.dto.CreateExternalSourceJobRequest
 import com.corp.iot.backend.externalsourcejob.dto.ExternalSourceJobResponse;
 import com.corp.iot.backend.externalsourcejob.dto.ExternalSourceJobRunResponse;
 import com.corp.iot.backend.externalsourcejob.dto.ExternalSourceQueryConfig;
+import com.corp.iot.backend.externalsourcejob.dto.JobRunsResponse;
 import com.corp.iot.backend.externalsourcejob.dto.StartFrom;
 import com.corp.iot.backend.externalsourcejob.dto.UpdateExternalSourceJobRequest;
 import com.corp.iot.backend.externalsourcejob.entity.ExternalSourceJob;
@@ -28,8 +29,10 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Collectors;
 import java.util.TreeSet;
 
 @Service
@@ -145,6 +148,26 @@ public class ExternalSourceJobServiceImpl implements ExternalSourceJobService {
                 .toList();
     }
 
+    @Override
+    public List<JobRunsResponse> listRunsBySource(Long externalSourceId, int sinceHours) {
+        List<ExternalSourceJob> jobs = externalSourceJobRepository.findByExternalSourceId(externalSourceId);
+        if (jobs.isEmpty()) return List.of();
+
+        Instant since = Instant.now().minus(sinceHours, ChronoUnit.HOURS);
+        List<Long> jobIds = jobs.stream().map(ExternalSourceJob::getId).toList();
+        Map<Long, List<ExternalSourceJobRunResponse>> runsByJob = externalSourceJobRunRepository
+                .findByExternalSourceJobIdInAndStartedAtAfterOrderByStartedAtDesc(jobIds, since).stream()
+                .collect(Collectors.groupingBy(
+                        run -> run.getExternalSourceJobId(),
+                        Collectors.mapping(externalSourceJobMapper::toRunResponse, Collectors.toList())));
+
+        // Job chưa chạy lần nào vẫn trả về với danh sách rỗng — FE phân biệt được "chưa chạy" với
+        // "chưa tải xong" mà không cần cờ riêng.
+        return jobIds.stream()
+                .map(jobId -> new JobRunsResponse(jobId, runsByJob.getOrDefault(jobId, List.of())))
+                .toList();
+    }
+
     // Kênh dữ liệu có id bền, được widget dashboard và luật cảnh báo neo vào. Sửa SQL làm mất cột
     // đang gán là cách âm thầm nhất để giết một widget — chặn tại đây vì lần chạy thử vừa rồi đã
     // trả về đủ danh sách cột, đối chiếu không tốn thêm gì.
@@ -181,6 +204,6 @@ public class ExternalSourceJobServiceImpl implements ExternalSourceJobService {
 
     private ExternalSourceJob getOrThrow(Long id) {
         return externalSourceJobRepository.findById(id)
-                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "JOB_NOT_FOUND", "Không tìm thấy job"));
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "JOB_NOT_FOUND", "Không tìm thấy truy vấn định kỳ"));
     }
 }

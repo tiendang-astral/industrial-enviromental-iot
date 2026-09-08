@@ -99,7 +99,7 @@ public class ExternalSourceServiceImpl implements ExternalSourceService {
     public void delete(Long id) {
         ExternalSource source = getOrThrow(id);
         if (externalSourceJobRepository.existsByExternalSourceId(id)) {
-            throw new BusinessException(HttpStatus.CONFLICT, "SOURCE_HAS_JOBS", "Nguồn còn job, không thể xóa");
+            throw new BusinessException(HttpStatus.CONFLICT, "SOURCE_HAS_JOBS", "Nguồn còn truy vấn định kỳ, không thể xóa");
         }
         source.setDeletedAt(Instant.now());
         externalSourceRepository.save(source);

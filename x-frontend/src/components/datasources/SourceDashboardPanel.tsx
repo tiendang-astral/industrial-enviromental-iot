@@ -1,5 +1,6 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useMemo, useState } from 'react'
 import { DashboardBoard } from '@/components/dashboard/DashboardBoard'
+import { OpenAlertsBanner } from '@/components/dashboard/OpenAlertsBanner'
 import { useRealtimeGatewaySocket } from '@/hooks/useRealtimeGatewaySocket'
 import { useDatastreamsByExternalSourceQuery } from '@/queries/useDatastreamsByExternalSourceQuery'
 import { useMetricsQuery } from '@/queries/useMetricsQuery'
@@ -10,19 +11,9 @@ import type { Metric } from '@/types/metric'
 
 /**
  * Board riêng theo 1 external_source (layout riêng, chỉ VALUE/LINE) — xem DATABASE.md § dashboard.
- *
- * Dùng chung cho hai đường vào: tab "Dashboard" ở trang chi tiết nguồn (luồng cấu hình) và route
- * /dashboard/source/:id vào từ card-grid của đơn vị (luồng xem số). Khác nhau đúng phần
- * `leftHeader`, nên phần query + realtime + board nằm ở đây thay vì chép hai bản.
+ * Gói phần query + realtime của một nguồn quanh `DashboardBoard` dùng chung.
  */
-export function SourceDashboardPanel({
-  externalSourceId,
-  leftHeader,
-}: {
-  externalSourceId: number
-  /** Vùng bên trái thanh công cụ của board — route riêng truyền nút back, tab truyền rỗng. */
-  leftHeader: ReactNode
-}) {
+export function SourceDashboardPanel({ externalSourceId }: { externalSourceId: number }) {
   const { data: dashboard, isLoading } = useSourceDashboardQuery(externalSourceId)
   const { data: datastreams } = useDatastreamsByExternalSourceQuery(externalSourceId)
   const { data: metrics } = useMetricsQuery()
@@ -52,18 +43,27 @@ export function SourceDashboardPanel({
   })
 
   return (
-    <DashboardBoard
-      boardKey={`source:${externalSourceId}`}
-      leftHeader={leftHeader}
-      dashboard={dashboard}
-      isLoading={isLoading}
-      datastreams={datastreamList}
-      metricByCode={metricByCode}
-      tenantNodeId={dashboard?.tenantNodeId ?? 0}
-      allowDeviceWidgets={false}
-      readings={readings}
-      onSave={save}
-      isSaving={isSaving}
-    />
+    <div className="flex flex-col gap-4">
+      {/* Nguồn gắn ở node nào thì cảnh báo của node đó liên quan tới người đang xem board này. */}
+      {dashboard?.tenantNodeId != null && (
+        <OpenAlertsBanner
+          tenantNodeId={dashboard.tenantNodeId}
+          boardKey={`source:${externalSourceId}`}
+          datastreamIds={datastreamList.map((datastream) => datastream.id)}
+        />
+      )}
+      <DashboardBoard
+        boardKey={`source:${externalSourceId}`}
+        dashboard={dashboard}
+        isLoading={isLoading}
+        datastreams={datastreamList}
+        metricByCode={metricByCode}
+        tenantNodeId={dashboard?.tenantNodeId ?? 0}
+        allowDeviceWidgets={false}
+        readings={readings}
+        onSave={save}
+        isSaving={isSaving}
+      />
+    </div>
   )
 }

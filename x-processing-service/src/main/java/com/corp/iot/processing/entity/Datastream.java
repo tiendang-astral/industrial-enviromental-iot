@@ -23,6 +23,13 @@ public class Datastream {
     @Id
     private Long id;
 
+    @Column(name = "tenant_node_id", nullable = false)
+    private Long tenantNodeId;
+
+    // Tên kênh đi vào nội dung email/telegram cảnh báo (Phase 6a).
+    @Column(nullable = false)
+    private String name;
+
     @Column(name = "metric_id", nullable = false)
     private Long metricId;
 

@@ -127,7 +127,12 @@ export function TenantNodePicker(props: TenantNodePickerProps) {
         </Button>
       </PopoverTrigger>
 
-      <PopoverContent align="start" className="w-(--radix-popover-trigger-width) p-1">
+      {/* Rộng theo nội dung, tối thiểu bằng ô chọn: buộc bằng đúng bề rộng trigger thì tên node
+          sâu trong cây (đã thụt lề) bị cắt mất, mà đó lại là thứ để phân biệt các node trùng tên. */}
+      <PopoverContent
+        align="start"
+        className="w-auto min-w-(--radix-popover-trigger-width) max-w-[min(92vw,32rem)] p-1"
+      >
         <div className="max-h-64 overflow-y-auto">
           {ordered.length === 0 && (
             <p className="px-2 py-3 text-sm text-muted-foreground">Tenant chưa có đơn vị nào.</p>

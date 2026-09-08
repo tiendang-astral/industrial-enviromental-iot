@@ -103,6 +103,8 @@
 - [x] `TenantServiceImpl.create()` tự tạo `TENANT_ROOT` node kèm tenant mới (gap từ Phase 1 phát hiện khi code Phase 2).
 - [x] x-frontend: trang "Tổ chức" — **bảng thụt lề theo `depth` + icon theo `node_type`** (không dùng tree-view kéo-thả riêng theo yêu cầu, giữ đơn giản/nhất quán với `Table` shadcn đã có), hành động (Thêm con/Đổi tên/Di chuyển/Xóa) hiện thẳng button icon trong cột thay vì gom vào dropdown menu (đổi lại theo yêu cầu, ban đầu làm dropdown); trang quản lý Gateway + danh sách Pin theo ngữ cảnh 1 Site (`SiteDetailPage`, `/organization/sites/:siteId`). **(cập nhật sau này)** `SiteDetailPage` đã bị bỏ — quản lý gateway/pin gom hết về trang "Thiết bị" (`/devices`) và trang chi tiết thiết bị (`/devices/:gatewayId`, `GatewayDetailPage`); trang "Tổ chức" chỉ còn quản lý cây node, không còn route con theo Site.
 - [x] (follow-up) Trang "Thiết bị" (`/devices`) — danh sách **toàn bộ** gateway trong scope user (không giới hạn theo 1 Site), kèm tên Site/lần cuối online, action Sửa/Xóa hiện thẳng button. `GET /gateways` sửa `tenantNodeId` thành optional — không truyền thì `GatewayServiceImpl` tự lọc theo `ScopeService.resolveAccessibleNodeIds()` (cùng pattern với `TenantNodeServiceImpl.list()`) thay vì query theo 1 node cụ thể.
+- [x] (đợt sau) Trang chi tiết thiết bị (`/devices/:gatewayId`) dựng lại thành **2 tab**, dải tổng quan nằm ngoài tab (thêm 3 số suy ra tại chỗ — số kênh, số kênh ngoài ngưỡng, số relay đang bật). **Tab "Tổng quan"** là một khối duy nhất liệt kê MỌI chân, mỗi chân một hàng: mã chân, tên, badge ngưỡng, số đo hiện tại, công tắc relay (chân OUTPUT) và menu `⋯` — gateway 11 chân nhìn hết trong một màn hình, không cuộn. **Tab "Biểu đồ"** vẽ mỗi kênh một biểu đồ riêng có trục (`TelemetryChartGrid`/`ChannelChartCard`, dùng lại `patterns/TrendChart` biến thể `axis`) kèm bộ chọn khoảng 1h/6h/24h/7 ngày, mặc định 24h; đơn vị các kênh khác nhau (°C, %, ppm, %LEL) nên không chồng chung trục Y, và biểu đồ dưới màn hình đầu lazy-mount bằng `IntersectionObserver` (`useInViewOnce`). **Vì sao tách tab thay vì một trang cuộn:** bản một-trang trước đó có lưới card "số đo hiện tại" mang sparkline nằm ngay trên khu biểu đồ, tức cùng một dữ liệu hiện hai lần. Bỏ lưới card (`PinTelemetryCard`/`RelayPinCard` xoá) và đưa tổng quan về dạng hàng là hết trùng. Tab luôn hiện kể cả khi chưa có pin vì nút "Thêm pin" nằm trên hàng tab. Tab "Cấu hình pin" cũ bỏ hẳn: đổi tên/tắt/xoá pin gom vào menu `⋯` (`PinActionsMenu`). Hàng relay chỉ có **một** công tắc, vẫn hỏi xác nhận trước khi gửi lệnh. *(Trước đó thử hai hướng vẽ sơ đồ phần cứng — sơ đồ đấu nối và khối cầu đấu dọc — đều bỏ: bản vẽ thiết bị không trả lời được câu nào trong bốn câu người trực ca hỏi. Dạng hàng của hướng cầu đấu được giữ lại làm tab Tổng quan.)*
+- [x] **Bịt lỗ hổng có sẵn ở tầng đọc InfluxDB.** `InfluxReadService.history`/`historyExternal` trước đó không có `aggregateWindow` lẫn `limit` nên trả về từng điểm thô: ở chu kỳ 5 giây, 24h × 9 kênh đã là ~155.000 điểm và 7 ngày là ~1,09 triệu điểm trong một response — trang cũ chưa sập chỉ vì gateway dev gần như không có dữ liệu. Thêm `AggregationWindow` (thang bậc cố định, trần 500 điểm/kênh) + `AggregateFn` (`MEAN`/`MAX`, là enum vì giá trị ghép thẳng vào câu Flux). Kênh có `metric.maxValue` gộp bằng `MAX` để biểu đồ không bao giờ giấu một lần vượt ngưỡng; `latestValue` vẫn đọc riêng bằng `last()` nên không bị gộp. `bucketSeconds` trả về trong DTO để giao diện nói đúng "mỗi điểm = trung bình N phút" thay vì lờ đi việc đã gộp. Test: `AggregationWindowTest` (quét mọi khoảng 1..10080 phút) + 2 ca mới trong `TelemetryServiceImplTest`. Không migration, không endpoint mới.
 
 **DoD:**
 - [x] Tạo được cây tổ chức 4 cấp, move node rebuild đúng `path`/`depth` cho cả subtree, xóa node cha còn con → 409 (verify qua curl: tạo `TENANT_ROOT→BRANCH→PRODUCTION_AREA→SITE`, move `SITE` sang nhánh khác, thử move `BRANCH` vào chính `SITE` con của nó → 400 `NODE_MOVE_CYCLE`).
@@ -170,6 +172,26 @@
 - [x] Bỏ `GET /tenant-nodes/{id}/overview` cùng DTO/service/query/type ở FE — mồ côi sau khi card grid bỏ và danh sách nguồn chuyển sang `GET /external-sources`.
 - [x] Chống nhầm khi gộp nhiều site: dropdown chọn kênh gom nhóm theo site (bỏ tiêu đề nhóm khi chỉ có 1 site); tên widget mặc định kèm tên site khi kênh nằm ngoài node của board (`Chuồng A · Nhiệt độ`). `applyToNode` vốn đã quét subtree từ trước — thêm hộp xác nhận nêu số widget sẽ tạo, vì một cú bấm ở gốc cây có thể sinh vài chục widget.
 
+**Đợt sau (dựng lại trang thành "Tổng quan"):**
+- [x] Đổi nhãn menu `Dashboard` → **Tổng quan** (`navConfig.ts`, breadcrumb ăn theo vì đọc chung nguồn). Giữ nguyên route `/dashboard` — đổi path chỉ làm chết link đã chia sẻ mà không đổi gì cho người dùng.
+- [x] Dựng lại bố cục: trước đó trang **không có `PageHeader`**, hai chỗ nhận nội dung bên trái đều bị truyền ô rỗng (`leftHeader={<div />}` / `<span />`), còn bên phải chồng hai hàng tới 5 điều khiển. Nay trái có tiêu đề + chuỗi tổ chức + tab; phải chỉ còn **một** ô chọn (đơn vị hoặc nguồn) và một menu `⋯`.
+- [x] `OverviewStats` — dải 4 số (thiết bị trực tuyến, cảnh báo đang mở, số kênh, kênh ngoài ngưỡng). **Không endpoint mới**: thiết bị/cảnh báo dùng `useDevicesQuery`/`useAlertsQuery` đã có, "ngoài ngưỡng" suy tại chỗ từ số đo realtime + `metric.minValue/maxValue`.
+- [x] `OpenAlertsBanner` — băng cảnh báo đang mở, CRITICAL trước rồi mới nhất trước; **không có cảnh báo thì không render gì** (băng "mọi thứ đều ổn" thường trực sẽ dạy mắt bỏ qua đúng vùng cần nhìn lúc có sự cố).
+- [x] Sửa **bug thật của nút "Áp dụng mẫu"**: nút nằm ở tầng trang trong khi bản nháp widget nằm ở tầng board, mà effect đồng bộ chỉ chạy khi `!editMode` — áp mẫu lúc đang sửa thì widget mới không hiện, bấm xong tưởng nút hỏng. Kéo hành động vào trong `DashboardBoard` và nhận thẳng kết quả về bản nháp. Nhân đó bỏ hack `setTimeout` mở dialog từ `DropdownMenuItem`, thay bằng `event.preventDefault()` + tự đóng menu.
+- [x] Tách nút gộp 3 nhãn (Chỉnh sửa / Lưu / Xong) thành: vào chế độ sửa từ menu `⋯`; trong chế độ sửa hiện `BoardEditToolbar` sticky với **Thêm widget · Áp dụng mẫu · Hủy · Lưu**. Trước đó không có đường "Hủy" nào ngoài việc rời trang rồi bấm xác nhận.
+- [x] **Sàn/trần kích thước theo loại widget** (xem bảng ở `DATABASE.md` § dashboard) thay cho `minW/minH = 2` dùng chung; `clampWidgets` kẹp layout cũ lúc nạp. Backend `WidgetSizeSpec` + `GridCursor` thay 2 hằng `DEFAULT_WIDGET_W/H` — trước đó áp mẫu cho ra biểu đồ đúng bằng cỡ ô số. Backend cũng bắt đầu **thật sự** đặt tiền tố tên đơn vị (`Chuồng A · Nhiệt độ`), thứ trước nay mới chỉ nằm trong tài liệu.
+- [x] Bỏ icon ở tiêu đề widget, phân biệt loại bằng nền/viền/bố cục + vạch trạng thái sát đáy `VALUE` (xem `CONVENTIONS.md` § Quy tắc styling). `ValueWidget` nói thẳng ngưỡng đang chạm (`38.5` / `ngưỡng 35 °C`) thay vì badge "gần ngưỡng" chung chung.
+- [x] Test: `DashboardTemplateServiceImplTest` (3 ca — cỡ theo loại, tiền tố đơn vị, không thêm trùng).
+
+**Đợt sau (biểu đồ có khoảng thời gian + khung xem lớn):**
+- [x] `GET /api/v1/datastreams/{id}/telemetry` — lịch sử của ĐÚNG một kênh, chung một DTO cho cả hai loại nguồn. Lý do phải thêm: widget biểu đồ chỉ cầm `datastreamId`, mà kênh external trên board đơn vị **không tra ngược ra được nguồn cha** (`datastream.source_id` là id của *job*), nên hai endpoint theo gateway/theo nguồn không phục vụ được nó. Dùng lại `InfluxReadService` + `AggregationWindow` sẵn có; `@nodeScope.canAccessDatastream` cũng đã có sẵn. Test: 3 ca trong `TelemetryServiceImplTest`.
+- [x] `LineWidget` **đổi nguồn vẽ**: trước đó chỉ tích luỹ điểm từ STOMP nên mở trang lên là biểu đồ trống, phải đứng chờ dữ liệu bắn về. Nay lấy lịch sử từ API rồi nối realtime ở đuôi (chỉ nối điểm mới hơn điểm cuối đã tải, tránh đếm hai lần).
+- [x] Ô chọn khoảng (`RangePicker`, dùng lại `TELEMETRY_RANGES` 1h/6h/24h/7 ngày) + nút phóng to trên header widget. **Không lưu** lựa chọn vào `layout_json`: ghi ở chế độ xem sẽ phá mô hình "bản nháp + bấm Lưu" của board.
+- [x] `WidgetChartDialog` — khung xem lớn có `dataZoom` (cuộn để phóng, kéo để trượt, kèm thanh trượt), dải min/max/trung bình/số điểm, và nói thẳng "mỗi điểm gộp N phút". **Giới hạn đã biết:** phóng to không làm dữ liệu mịn thêm vì backend đã gộp mẫu xuống ≤500 điểm/khoảng; muốn mịn theo mức phóng thì endpoint phải nhận `from`/`to`.
+- [x] `dragConfig.cancel = '.widget-no-drag'` — không có nó thì bấm vào ô chọn khoảng trong chế độ sửa bị RGL tính thành cú kéo, thả chuột ra là widget nhảy chỗ.
+- [x] `compactor={noCompactor}` — bỏ nén dọc mặc định của RGL: kéo widget xuống một chút là bị hút ngược về chỗ cũ, tức không đặt được widget chồng lên một phần vị trí cũ. Đổi lại xoá widget không còn tự dồn lên.
+- [x] Tinh chỉnh widget theo phản hồi: tiêu đề viết hoa dạng nhãn; `VALUE` căn giữa, trần bề rộng 3 cột, nêu **đủ hai đầu ngưỡng**; badge `Live` (chấm sáng) thay mốc thời gian khi kênh đang nhận số đo, hết live thì hiện mốc **kèm ngày**.
+
 **DoD:**
 - [x] Bind 1 widget LINE vào 1 datastream, publish data từ Phase 3 → chart cập nhật realtime không cần reload (verify bằng publish MQTT thật qua `mosquitto`/paho, thấy sparkline + giá trị cập nhật live không reload trang).
 - [x] Kéo-thả, resize widget, reload trang vẫn giữ layout đã lưu (verify qua Playwright: áp template → 2 widget xếp lưới 2 cột → reload → vẫn còn đúng 2 widget).
@@ -221,6 +243,21 @@
 
 ---
 
+### Phase 5b — External source: SQL là nguồn sự thật, vá lịch sử, view khối
+
+Nhánh mở rộng của Phase 5, làm sau khi Phase 7 xong (không theo thứ tự phase).
+
+- [x] `V12` — người dùng viết thẳng câu `SELECT`, bắt buộc `:cursor`, phiên `READ ONLY`; cột dữ liệu suy từ `ResultSetMetaData`.
+- [x] `V12` — bảng `external_source_job_run`, endpoint `GET /external-source-jobs/{id}/runs`.
+- [x] `V13` — vá lịch sử theo kênh (`external_source_job_backfill`, `ExternalBackfillSchedulerService`, đọc lùi theo lô).
+- [x] `ExternalDbController` — test kết nối, đọc `information_schema`, chạy thử truy vấn.
+- [x] Trang nguồn dựng lại thành **một view khối**: mỗi job là một khối kèm n khối kênh có số đo mới nhất; chi tiết job và chi tiết kênh mở bằng modal tại chỗ. Bỏ `JobDetailPage` và hai tab Cấu hình/Tổng quan — bốn đường dẫn cũ gộp còn `/data-sources/:sourceId`.
+- [x] `GET /external-sources/{sourceId}/job-runs` — dải nhịp chạy cho mọi job trong 1 request thay vì N.
+
+**Còn nợ:** gán kênh vẫn phải mở dialog theo từng cột; `startFrom` vẫn hỏi ở ba nơi (tạo job, tạo kênh, vá lịch sử).
+
+---
+
 ## Phase 6 — Alert engine (đa kênh)
 
 **Chức năng PRODUCT.md:** "Cảnh báo tức thời dựa trên dữ liệu realtime từ Gateway/Database, gửi qua Email, Telegram".
@@ -229,18 +266,46 @@
 
 **Bảng liên quan:** `alert_rule`, `alert_channel`, `alert`.
 
-**Nhiệm vụ chính:**
-- [ ] x-backend: CRUD `alert_rule` (`conditions_json`, `duration_seconds`, `severity`), CRUD `alert_channel` (EMAIL/TELEGRAM, replace toàn bộ khi sửa rule).
-- [ ] x-processing-service: sau mỗi lần ghi reading (Phase 3 & 5), resolve `alert_rule` đang `enabled=true` theo `(tenant_id, tenant_node_id, metric)` (cache Redis `alert-rules`, TTL 60s).
-- [ ] Đánh giá `conditions_json`, state machine `PENDING → ACTIVE → RECOVERED` (`uq_alert_open` chặn duplicate alert mở).
-- [ ] Gửi notify qua SMTP (Email) / Telegram Bot API khi chuyển `ACTIVE`.
-- [ ] Publish trạng thái alert lên Redis pub/sub → x-backend push WebSocket → x-frontend hiện badge.
-- [ ] x-frontend: form tạo alert_rule + channel, danh sách alert đang mở, badge realtime trên Dashboard.
+Chia 2 đợt: **6a** (backend CRUD + engine, verify bằng API/DB/mail thật) → **6b** (frontend).
 
-**DoD:**
-- [ ] Tạo rule threshold, đẩy data vi phạm liên tục đủ `duration_seconds` → alert chuyển `ACTIVE`, nhận được Email và Telegram message.
+### Phase 6a — CRUD rule + engine đánh giá + gửi cảnh báo
+
+- [x] `V15__alert_engine.sql` — 3 bảng đã có DDL từ `V1`, chỉ thêm `alert_rule.deleted_at` (bảng cấu hình nên soft delete, xoá cứng làm lịch sử `alert.rule_id` mồ côi) và `ix_alert_recent (tenant_id, status, started_at DESC)` cho trang danh sách.
+- [x] x-backend: CRUD `alert_rule` + `alert_channel` (replace toàn bộ khi sửa), `GET /alerts`. Validate `conditions` (4 toán tử), `TELEGRAM_TOKEN_REQUIRED`, dedupe kênh trùng `(loại, địa chỉ)`.
+- [x] x-backend: `AlertRuleCacheEvictor` xoá cache Redis của **mọi node hậu duệ** khi rule đổi — không có nó thì rule mới phải đợi hết TTL 60s mới chạy.
+- [x] x-processing-service: `AlertRuleResolver` resolve rule theo **subtree** (`ancestor.path @> self.path`, dùng GiST index có sẵn) — rule ở Khu sản xuất phủ hết chuồng bên dưới; cache `alert-rules:{tenantId}:{tenantNodeId}:{metricCode}` TTL 60s, cache cả kết quả rỗng (phần lớn reading rơi vào nhánh này).
+- [x] x-processing-service: `AlertConditionEvaluator` — nhiều điều kiện = quan hệ **HOẶC** ("ra ngoài khoảng"), VÀ trên cùng metric vô nghĩa.
+- [x] x-processing-service: `AlertStateMachineService` — `PENDING → ACTIVE → RECOVERED`, mốc trạng thái dùng giờ hệ thống (không dùng `measuredAt`), đụng `uq_alert_open` thì đọc lại bản kia thay vì ném lỗi.
+- [x] x-processing-service: gửi Email (`JavaMailSender`) + Telegram (JDK `HttpClient`, không thêm `starter-web`) ở thread pool riêng `@Async`; báo cả lúc `ACTIVE` lẫn lúc `RECOVERED`, nhưng alert còn `PENDING` thì đóng lặng lẽ (chưa từng báo cho ai).
+- [x] x-processing-service: `RealtimePublisher.publishAlertStatus` → Redis pub/sub; `RedisRealtimeBridge` ở Backend **không cần sửa** (forward nguyên văn, giống flow Command).
+- [x] Ghép vào cả 2 processor; **bỏ qua message backfill** (`backfill=true`) — giá trị tháng trước sẽ bắn cảnh báo cho sự cố đã qua từ lâu.
+- [x] MailHog vào `docker-compose.yml` (SMTP 1025, UI 8025) — không có bản giả tương đương cho Telegram nên kênh đó dùng bot thật.
+- [x] Test: `AlertConditionEvaluatorTest`, `AlertStateMachineServiceTest` (9 ca), `AlertRuleResolverTest`, `AlertRuleServiceImplTest` (7 ca).
+
+**Giới hạn đã chốt:** thuần event-driven — nguồn ngừng gửi giữa lúc alert đang `PENDING`/`ACTIVE` thì nó kẹt nguyên trạng. Cảnh báo mất kết nối để `alert_rule` loại `GATEWAY` làm sau.
+
+**DoD 6a:**
+- [x] Migration `V15` chạy sạch trên DB dev; `ddl-auto: validate` qua với 3 entity mới.
+- [x] Truy vấn resolve subtree verify trên cây tổ chức thật: rule ở PRODUCTION_AREA khớp reading của SITE con, rule ở nhánh khác không lọt.
+- [ ] Tạo rule threshold, đẩy data vi phạm liên tục đủ `duration_seconds` → alert chuyển `ACTIVE`, nhận được Email (MailHog) và Telegram message. **Cần token + chat_id của bot thật.**
 - [ ] Data về lại bình thường → alert chuyển `RECOVERED`.
 - [ ] Vi phạm lần 2 khi alert cũ đã `RECOVERED` → tạo alert mới (không đụng `uq_alert_open` của alert đã đóng).
+
+### Phase 6b — Frontend cảnh báo
+
+- [x] x-frontend: trang `/alerts` thay placeholder — 2 tab **Cảnh báo** (danh sách, lọc trạng thái + cửa sổ thời gian) và **Quy tắc** (bảng CRUD).
+- [x] x-frontend: `AlertRuleFormDialog` — điều kiện dạng danh sách động (nhiều dòng = HOẶC), thời lượng, kênh nhận EMAIL/TELEGRAM động. Đơn vị + loại đo khoá khi sửa (backend không cho đổi).
+- [x] x-frontend: `AlertStatusBadge` riêng — mã `ACTIVE` mang nghĩa NGƯỢC nhau giữa tenant/user ("đang hoạt động", tốt) và cảnh báo ("sự cố đang diễn ra", xấu), nhét chung một bảng map thì một trong hai chỗ chắc chắn sai màu.
+- [x] x-frontend: `useAlertRealtime` — subscribe STOMP mọi SITE trong scope, alert mới thì invalidate bảng + toast, khỏi F5.
+- [x] `RealtimeReadingMessage` mở rộng cho payload alert; `status` dùng chung với Command nên `useCommandUpdates` phải lọc bằng `isCommandStatus` thay vì chỉ kiểm tra "có giá trị" (cả hai đều có `PENDING`).
+- [x] `V16` — bảng `alert_rule_group` + `alert_rule.group_id`; `conditions_json` đổi từ mảng phẳng sang nhóm `{logic, conditions}` để biểu diễn được preset "Trong khoảng" (`AND`).
+- [x] x-backend: `POST/PUT/DELETE /alert-rule-groups` — trải phẳng N đơn vị × M chỉ số thành N×M rule trong **một** transaction; sửa theo kiểu **đối chiếu** nên alert đang mở của cặp còn được chọn không bị mồ côi.
+- [x] x-processing-service: `AlertConditionEvaluator` học `logic` (`AND`/`OR`), thiếu `logic` thì hiểu là `OR` (đúng ngữ nghĩa dữ liệu trước `V16`).
+- [x] x-frontend: wizard 2 bước — bước 1 chọn nhiều tổ chức (tick cha là tick hết con) + nhiều chỉ số, mỗi chỉ số một tab với preset ngưỡng và thời lượng chọn đơn vị giây/phút/giờ; bước 2 tick kênh Email/Telegram với ô nhập người nhận dạng chip có gợi ý từ danh bạ tenant.
+- [x] x-frontend: bảng Quy tắc hiện **nhóm** thay vì từng rule rời.
+- [x] `V18` — `alert_rule.source_type` (NULL = mọi nguồn) + ô "Áp cho nguồn" ở bước 1. Không có nó thì rule "chuồng quá nóng" bắn luôn cho kênh nhiệt độ thời tiết lấy từ database ngoài — cùng metric, khác bản chất. Verify trên dữ liệu thật của tenant 8 (3 kênh `temperature`, 2 external + 1 gateway).
+- [x] `V19` — trạng thái `STALE`: tắt/xoá quy tắc khi sự cố còn mở thì đóng alert sang "Ngừng theo dõi" thay vì để nó đứng im ở ACTIVE vĩnh viễn. Không dùng `RECOVERED` vì giá trị chưa hề về bình thường, và báo cáo sự cố cần tách "đã xử lý" khỏi "bỏ dở".
+- [ ] x-frontend: badge cảnh báo trên chính widget Dashboard đang bind kênh vi phạm (payload STOMP đã có `alertId`+`datastreamId`, chưa nối vào widget).
 
 ---
 

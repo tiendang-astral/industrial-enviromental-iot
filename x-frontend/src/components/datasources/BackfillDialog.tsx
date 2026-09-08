@@ -1,21 +1,30 @@
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { CalendarDays, TriangleAlert } from 'lucide-react'
+import { CalendarDays, Info } from 'lucide-react'
+import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field'
 import { Button } from '@/components/ui/button'
 import { Calendar } from '@/components/ui/calendar'
-import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { FormDialog } from '@/components/patterns/FormDialog'
 import { getApiErrorMessage } from '@/lib/apiError'
-import { formatDateTime } from '@/lib/datetime'
+import { formatDate, formatDateTime } from '@/lib/datetime'
 import { cn } from '@/lib/utils'
 import { useCreateBackfillMutation } from '@/queries/useCreateBackfillMutation'
 import { useEstimateBackfillMutation } from '@/queries/useEstimateBackfillMutation'
 import type { BackfillRequest, StartFrom } from '@/types/externalSource'
 import type { Datastream } from '@/types/dashboard'
 
-const START_FROM_OPTIONS: { value: Exclude<StartFrom, 'NEW_ONLY'>; label: string }[] = [
+type FromOption = Exclude<StartFrom, 'NEW_ONLY'>
+
+const START_FROM_OPTIONS: { value: FromOption; label: string }[] = [
   { value: 'ALL_HISTORY', label: 'toàn bộ lịch sử' },
   { value: 'FROM_DATE', label: 'từ ngày cụ thể' },
 ]
@@ -43,7 +52,7 @@ export function BackfillDialog({
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
-  const [startFrom, setStartFrom] = useState<Exclude<StartFrom, 'NEW_ONLY'>>('ALL_HISTORY')
+  const [startFrom, setStartFrom] = useState<FromOption>('ALL_HISTORY')
   const [startFromDate, setStartFromDate] = useState<Date | undefined>()
   const [error, setError] = useState<string | null>(null)
 
@@ -97,44 +106,55 @@ export function BackfillDialog({
       open={open}
       onOpenChange={onOpenChange}
       title={`Đọc lại lịch sử cho “${datastream.name}”`}
-      description="Hệ thống chạy lại đúng câu truy vấn của job trên khoảng thời gian còn thiếu, đọc từ mới về cũ."
+      description="Kênh đọc lại dữ liệu từ mốc thời gian trong quá khứ."
       submitLabel="Bắt đầu đọc lại"
       isPending={createMutation.isPending}
       submitDisabled={!ready}
       onSubmit={handleSubmit}
     >
       <Field>
-        <FieldLabel>Đọc lại từ</FieldLabel>
-        <div className="flex flex-wrap gap-2">
-          {START_FROM_OPTIONS.map((option) => (
-            <Button
-              key={option.value}
-              type="button"
-              size="sm"
-              variant={startFrom === option.value ? 'default' : 'outline'}
-              onClick={() => setStartFrom(option.value)}
-            >
-              {option.label}
-            </Button>
-          ))}
+        <FieldLabel htmlFor="backfill-from">Đọc lại từ</FieldLabel>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Select value={startFrom} onValueChange={(next) => setStartFrom(next as FromOption)}>
+            <SelectTrigger id="backfill-from" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {START_FROM_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {startFrom === 'FROM_DATE' && (
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  aria-label="Ngày bắt đầu đọc lại"
+                  className={cn(
+                    'w-full justify-start font-normal',
+                    !startFromDate && 'text-muted-foreground'
+                  )}
+                >
+                  <CalendarDays data-icon="inline-start" />
+                  {startFromDate ? formatDate(startFromDate.toISOString()) : 'Chọn ngày bắt đầu'}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  mode="single"
+                  selected={startFromDate}
+                  onSelect={setStartFromDate}
+                  disabled={{ after: new Date() }}
+                />
+              </PopoverContent>
+            </Popover>
+          )}
         </div>
-        {startFrom === 'FROM_DATE' && (
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button
-                type="button"
-                variant="outline"
-                className={cn('w-fit', !startFromDate && 'text-muted-foreground')}
-              >
-                <CalendarDays data-icon="inline-start" />
-                {startFromDate ? formatDateTime(startFromDate.toISOString()) : 'Chọn ngày bắt đầu'}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-auto p-0" align="start">
-              <Calendar mode="single" selected={startFromDate} onSelect={setStartFromDate} />
-            </PopoverContent>
-          </Popover>
-        )}
         <FieldDescription>
           {datastream.oldestReadingAt
             ? `Kênh đang có số đo từ ${formatDateTime(datastream.oldestReadingAt)} trở đi.`
@@ -165,11 +185,11 @@ export function BackfillDialog({
         <FieldError errors={error ? [{ message: error }] : undefined} />
       </Field>
 
-      <div className="flex items-start gap-2.5 rounded-md border border-warning/40 bg-warning/10 px-3 py-2.5">
-        <TriangleAlert className="mt-0.5 size-4 shrink-0 text-warning" />
+      <div className="flex items-start gap-2.5 rounded-md border border-border bg-muted/30 px-3 py-2.5">
+        <Info className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
         <p className="text-[12.5px] text-muted-foreground">
-          Dữ liệu cũ sẽ được tính theo <span className="font-medium text-foreground">câu truy vấn hiện tại</span> của
-          job. Nếu bạn đã sửa công thức trong SELECT kể từ đó, phần đọc lại sẽ theo công thức mới.
+          <span className="font-medium text-foreground">Dữ liệu đã có không bị ghi đè.</span> Lượt
+          đọc lại chỉ lấp phần lịch sử còn thiếu.
         </p>
       </div>
     </FormDialog>

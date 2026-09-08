@@ -47,9 +47,12 @@ public final class ExternalDbDtos {
     public record SchemaTable(String schema, String name, Long estimatedRows, List<SchemaColumn> columns) {
     }
 
+    // timestampColumn KHÔNG bắt buộc: lúc chạy thử lần đầu người dùng chưa biết truy vấn trả về
+    // cột nào để mà chọn — danh sách cột chính là thứ lần chạy này sinh ra. Bỏ trống thì chỉ chạy
+    // câu và trả cột về; có giá trị thì kiểm luôn cột đó có trong kết quả không.
     public record PreviewRequest(
             @NotBlank String sql,
-            @NotBlank String timestampColumn
+            String timestampColumn
     ) {
     }
 

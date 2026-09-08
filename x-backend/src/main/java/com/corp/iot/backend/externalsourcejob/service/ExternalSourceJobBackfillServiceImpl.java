@@ -124,7 +124,7 @@ public class ExternalSourceJobBackfillServiceImpl implements ExternalSourceJobBa
 
     private ExternalSourceJob jobOf(Datastream datastream) {
         return externalSourceJobRepository.findById(datastream.getSourceId())
-                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "JOB_NOT_FOUND", "Không tìm thấy job"));
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "JOB_NOT_FOUND", "Không tìm thấy truy vấn định kỳ"));
     }
 
     private Instant parseCursor(String cursor) {

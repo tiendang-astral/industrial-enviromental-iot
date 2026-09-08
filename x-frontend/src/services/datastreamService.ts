@@ -1,6 +1,7 @@
 import { httpClient } from '@/services/httpClient'
 import type { ApiEnvelope } from '@/types/api'
 import type { Datastream } from '@/types/dashboard'
+import type { DatastreamTelemetry } from '@/types/externalSource'
 import type { StartFrom } from '@/types/externalSource'
 
 export async function listDatastreams(
@@ -43,4 +44,16 @@ export async function createDatastreamForJob(
 
 export async function deleteDatastream(id: number): Promise<void> {
   await httpClient.delete(`/datastreams/${id}`)
+}
+
+/** Lịch sử của đúng 1 kênh — dùng chung cho kênh gateway lẫn kênh external (xem API.md). */
+export async function getDatastreamTelemetry(
+  datastreamId: number,
+  rangeMinutes: number
+): Promise<DatastreamTelemetry> {
+  const { data } = await httpClient.get<ApiEnvelope<DatastreamTelemetry>>(
+    `/datastreams/${datastreamId}/telemetry`,
+    { params: { rangeMinutes } }
+  )
+  return data.data!
 }

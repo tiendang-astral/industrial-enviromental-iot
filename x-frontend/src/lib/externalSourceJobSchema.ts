@@ -5,7 +5,7 @@ import { z } from 'zod'
 export const CURSOR_TOKEN = ':cursor'
 
 export const externalSourceJobSchema = z.object({
-  name: z.string().min(1, 'Vui lòng nhập tên job'),
+  name: z.string().min(1, 'Vui lòng nhập tên truy vấn'),
   sql: z
     .string()
     .min(1, 'Vui lòng nhập câu truy vấn')

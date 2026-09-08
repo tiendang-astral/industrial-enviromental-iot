@@ -10,7 +10,6 @@ import {
 } from '@/components/ui/breadcrumb'
 import { Separator } from '@/components/ui/separator'
 import { SidebarTrigger } from '@/components/ui/sidebar'
-import { ThemeToggle } from '@/components/layout/ThemeToggle'
 import { UserMenu } from '@/components/layout/UserMenu'
 
 export interface Crumb {
@@ -49,7 +48,6 @@ export function AppTopbar({ trail }: { trail: Crumb[] }) {
         </BreadcrumbList>
       </Breadcrumb>
 
-      <ThemeToggle />
       <UserMenu />
     </header>
   )

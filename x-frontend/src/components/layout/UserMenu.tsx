@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { ChevronDown, Eye, EyeOff, KeyRound, LogOut, UserRound } from 'lucide-react'
+import { ChevronDown, Eye, EyeOff, KeyRound, LogOut, Moon, Sun, UserRound } from 'lucide-react'
 import { useForm } from 'react-hook-form'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -8,12 +8,15 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Field, FieldError, FieldLabel } from '@/components/ui/field'
+import { Switch } from '@/components/ui/switch'
 import {
   InputGroup,
   InputGroupAddon,
@@ -33,17 +36,26 @@ import {
 import { updateProfileSchema, type UpdateProfileFormValues } from '@/lib/updateProfileSchema'
 import { useChangePasswordMutation } from '@/queries/useChangePasswordMutation'
 import { useLogoutMutation } from '@/queries/useLogoutMutation'
+import { useThemeStore } from '@/stores/useThemeStore'
 import { useMeQuery } from '@/queries/useMeQuery'
 import { useUpdateMeMutation } from '@/queries/useUpdateMeMutation'
 import type { MeResponse } from '@/types/auth'
 
 /** Menu tài khoản là menu bấm ít nhưng quan trọng — để mục cao hơn mặc định cho dễ trúng. */
 const MENU_ITEM = 'h-10 gap-2.5 px-3 text-sm'
+/**
+ * Vẫn là CheckboxItem để giữ `role=menuitemcheckbox` + `aria-checked` cho bàn phím và trình đọc
+ * màn hình; chỉ giấu dấu tích mặc định đi và thay bằng Switch cho đúng hình dạng một cái gạt.
+ */
+const MENU_TOGGLE =
+  'h-10 gap-2.5 px-3 text-sm [&_[data-slot=dropdown-menu-checkbox-item-indicator]]:hidden'
 
 export function UserMenu() {
   const navigate = useNavigate()
   const { data: me } = useMeQuery()
   const logoutMutation = useLogoutMutation()
+  const theme = useThemeStore((state) => state.theme)
+  const toggleTheme = useThemeStore((state) => state.toggleTheme)
 
   const [profileOpen, setProfileOpen] = useState(false)
   const [passwordOpen, setPasswordOpen] = useState(false)
@@ -100,6 +112,33 @@ export function UserMenu() {
               <KeyRound />
               Đổi mật khẩu
             </DropdownMenuItem>
+          </DropdownMenuGroup>
+
+          <DropdownMenuSeparator />
+
+          <DropdownMenuCheckboxItem
+            className={MENU_TOGGLE}
+            checked={theme === 'dark'}
+            // Giữ menu mở sau khi bấm: đổi sáng/tối là thứ người dùng lật qua lật lại để so, đóng
+            // menu mỗi lần là phải mở lại từ đầu mới lật ngược được.
+            onSelect={(event) => event.preventDefault()}
+            onCheckedChange={toggleTheme}
+          >
+            {theme === 'dark' ? <Moon /> : <Sun />}
+            Giao diện
+            {/* Switch chỉ là hình: chính menu item mới nhận bàn phím và mang aria-checked, lồng
+                thêm một control focus được vào trong menuitem là hỏng thứ tự tab. */}
+            <Switch
+              checked={theme === 'dark'}
+              tabIndex={-1}
+              aria-hidden
+              className="pointer-events-none ml-auto"
+            />
+          </DropdownMenuCheckboxItem>
+
+          <DropdownMenuSeparator />
+
+          <DropdownMenuGroup>
             <DropdownMenuItem className={MENU_ITEM} variant="destructive" onSelect={handleLogout}>
               <LogOut />
               Đăng xuất

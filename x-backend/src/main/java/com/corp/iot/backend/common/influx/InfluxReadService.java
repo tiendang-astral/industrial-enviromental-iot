@@ -52,25 +52,35 @@ public class InfluxReadService {
         return points.isEmpty() ? Optional.empty() : Optional.of(points.get(points.size() - 1));
     }
 
-    public List<ReadingPoint> historyExternal(Long tenantId, Long externalSourceJobId, String sourceField, int rangeMinutes) {
+    public List<ReadingPoint> historyExternal(Long tenantId, Long externalSourceJobId, String sourceField,
+                                              int rangeMinutes, AggregateFn fn) {
         String flux = """
                 from(bucket: "%s")
                   |> range(start: -%dm)
                   |> filter(fn: (r) => r._measurement == "external_reading" and r._field == "value_float"
                     and r.tenant_id == "%d" and r.external_source_job_id == "%d" and r.source_field == "%s")
+                  |> aggregateWindow(every: %s, fn: %s, createEmpty: false)
                   |> sort(columns: ["_time"])
-                """.formatted(bucket, rangeMinutes, tenantId, externalSourceJobId, sourceField);
+                """.formatted(bucket, rangeMinutes, tenantId, externalSourceJobId, sourceField,
+                AggregationWindow.fluxEvery(rangeMinutes), fn.flux());
         return execute(flux);
     }
 
-    public List<ReadingPoint> history(Long tenantId, Long gatewayId, String pinType, Integer pinNumber, int rangeMinutes) {
+    /**
+     * Lịch sử đã gộp mẫu. Gộp ở đây chứ không ở tầng trên vì mục đích là để dữ liệu KHÔNG rời
+     * database dưới dạng thô — thưa bớt sau khi đã tải về thì đã trả giá băng thông rồi.
+     */
+    public List<ReadingPoint> history(Long tenantId, Long gatewayId, String pinType, Integer pinNumber,
+                                      int rangeMinutes, AggregateFn fn) {
         String flux = """
                 from(bucket: "%s")
                   |> range(start: -%dm)
                   |> filter(fn: (r) => r._measurement == "sensor_reading" and r._field == "value_float"
                     and r.tenant_id == "%d" and r.gateway_id == "%d" and r.pin_type == "%s" and r.pin_number == "%d")
+                  |> aggregateWindow(every: %s, fn: %s, createEmpty: false)
                   |> sort(columns: ["_time"])
-                """.formatted(bucket, rangeMinutes, tenantId, gatewayId, pinType, pinNumber);
+                """.formatted(bucket, rangeMinutes, tenantId, gatewayId, pinType, pinNumber,
+                AggregationWindow.fluxEvery(rangeMinutes), fn.flux());
         return execute(flux);
     }
 

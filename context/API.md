@@ -158,15 +158,27 @@ Scope theo node như Tenant Node ở trên.
 |--------|------|--------------|--------------|-------|
 | GET | /api/v1/gateways/{id}/telemetry | Query `rangeMinutes` (optional, default 60) | `{ data: PinTelemetryResponse[] }` | Giá trị mới nhất + lịch sử mỗi pin INPUT của gateway (đọc InfluxDB `sensor_reading`, bucket `raw`) |
 
-`PinTelemetryResponse`: `{ pinId, pinNumber, type, name, metricCode, unit, latestValue, latestMeasuredAt, history: [{ value, measuredAt }] }`.
+`PinTelemetryResponse`: `{ pinId, pinNumber, type, name, metricCode, unit, latestValue, latestMeasuredAt, bucketSeconds, history: [{ value, measuredAt }] }`.
+
+**`history` luôn là dữ liệu đã gộp mẫu, không phải điểm thô.** Câu Flux chèn `aggregateWindow` với cửa sổ suy từ `rangeMinutes` (`AggregationWindow`, thang bậc cố định) để mỗi kênh luôn về ≤500 điểm — không có nó thì 7 ngày × 9 kênh ở chu kỳ 5 giây là hơn 1 triệu điểm trong một response. `bucketSeconds` là bề rộng cửa sổ đó (1h→10s, 6h→60s, 24h→180s, 7 ngày→1800s), để FE ghi rõ "mỗi điểm = trung bình N phút". Hàm gộp chọn theo metric: có `maxValue` → `max` (không giấu lần vượt ngưỡng), còn lại → `mean`. `latestValue` **không** bị gộp — nó đọc riêng bằng `last()`.
 
 | Method | Path | Body / Query | Response mẫu | Mô tả |
 |--------|------|--------------|--------------|-------|
 | GET | /api/v1/external-sources/{id}/telemetry | Query `rangeMinutes` (optional, default 720, trần 10080) | `{ data: DatastreamTelemetryResponse[] }` | **Mới.** Số đo **mọi kênh của 1 nguồn** trong một lần gọi — trang tổng quan nguồn vẽ sparkline cho từng kênh, gọi lẻ sẽ thành N request cho một màn hình. Đọc InfluxDB `external_reading`, scope `@nodeScope.canAccessSource` |
 
-`DatastreamTelemetryResponse`: `{ datastreamId, name, sourceField, metricCode, unit, latestValue, latestMeasuredAt, oldestReadingAt, history: [{ value, measuredAt }] }`.
+`DatastreamTelemetryResponse`: `{ datastreamId, name, sourceField, metricCode, unit, latestValue, latestMeasuredAt, oldestReadingAt, bucketSeconds, history: [{ value, measuredAt }] }` — `history`/`bucketSeconds` gộp mẫu theo cùng luật với `PinTelemetryResponse` ở trên.
 
 Lọc InfluxDB theo `(external_source_job_id, source_field)` chứ **không** theo `metric`: một job được phép có 2 kênh cùng metric ở 2 cột khác nhau, lọc theo metric sẽ trộn chúng làm một (xem `DATABASE.md` §4).
+
+| Method | Path | Body / Query | Response mẫu | Mô tả |
+|--------|------|--------------|--------------|-------|
+| GET | /api/v1/datastreams/{id}/telemetry | Query `rangeMinutes` (optional, default 1440, trần 10080) | `{ data: DatastreamTelemetryResponse }` | **Mới.** Số đo của **đúng một kênh**, dùng chung cho cả `GATEWAY_PIN` lẫn `EXTERNAL_SOURCE_JOB`. Scope `@nodeScope.canAccessDatastream` |
+
+Hai endpoint trên lấy theo lô (mọi chân của 1 gateway, mọi kênh của 1 nguồn) nên hợp với trang chi tiết. Widget biểu đồ trên dashboard thì ngược lại: nó chỉ cầm `datastreamId` và **không tra ngược ra được nguồn cha** — `datastream.sourceId` của kênh external là id của *job*, không phải của *external_source* — nên không gọi được endpoint theo nguồn. Đó là lý do endpoint theo kênh tồn tại chứ không phải để tiện.
+
+Trả về **cùng một `DatastreamTelemetryResponse`** cho cả hai loại nguồn, đúng vai trò "điểm gặp" của `datastream` (xem `DATABASE.md` § datastream): nơi gọi chỉ hỏi "kênh này có số đo gì", không cần biết phía sau là chân gateway hay câu SQL. Kênh `GATEWAY_PIN` trả `sourceField = null` và `oldestReadingAt = null`. Kênh không tồn tại → 404 `DATASTREAM_NOT_FOUND`; kênh gateway mà chân đã bị xoá → 404 `PIN_NOT_FOUND`.
+
+**`history` luôn đã gộp mẫu** theo cùng luật `AggregationWindow` với hai endpoint kia (≤500 điểm/kênh), nên phóng to ở giao diện **không** làm dữ liệu mịn thêm — muốn vậy phải cho endpoint nhận `from`/`to` thay vì `rangeMinutes`.
 
 ### WebSocket (STOMP)
 
@@ -256,11 +268,14 @@ Scope theo `external_source` cha (cùng node scope ở trên).
 | PUT | /api/v1/external-source-jobs/{id} | `{ name, queryConfig?, scheduleCron? }` | `{ data: ExternalSourceJobResponse }` | Sửa — chạy thử lại + đối chiếu cột đang gắn kênh; chỉ reset cursor về epoch khi đổi `timestampColumn` |
 | POST | /api/v1/external-source-jobs/{id}/run-now | — | `{ data: ExternalSourceJobResponse }` | **Mới.** Kéo `next_run_at` về hiện tại; `x-ingestion-service` nhặt trong ≤15s (sweep). Không gọi RPC giữa service — đúng ranh giới ở `ARCHITECTURE.md` |
 | GET | /api/v1/external-source-jobs/{id}/runs | Query `sinceHours` (mặc định 12) | `{ data: ExternalSourceJobRunResponse[] }` | **Mới.** Lịch sử chạy cho dải nhịp chạy; FE tự gom theo giờ cho biểu đồ số dòng |
+| GET | /api/v1/external-sources/{sourceId}/job-runs | Query `sinceHours` (mặc định 12) | `{ data: JobRunsResponse[] }` | **Mới.** Lịch sử chạy của **mọi job** thuộc nguồn trong 1 lần gọi — trang nguồn vẽ dải nhịp cho tất cả khối job cùng lúc, gọi lẻ theo từng job sẽ thành N request cho một màn hình. Scope `@nodeScope.canAccessSource` |
 | DELETE | /api/v1/external-source-jobs/{id} | — | 200, no body | Soft delete; 409 `JOB_HAS_DATASTREAMS` nếu còn datastream gắn vào |
 
 `ExternalSourceJobResponse`: `{ id, externalSourceId, name, queryConfig, scheduleCron, incrementalCursor, totalRowCount, lastRunStatus, lastRunAt, nextRunAt, lastError }`.
 
 `ExternalSourceJobRunResponse`: `{ id, status, rowCount, error, startedAt, finishedAt }`.
+
+`JobRunsResponse`: `{ jobId, runs: ExternalSourceJobRunResponse[] }` — job chưa chạy lần nào vẫn có mặt với `runs: []`, để FE phân biệt "chưa chạy" với "chưa tải xong" mà không cần cờ riêng.
 
 `startFrom` ∈ `NEW_ONLY` (cursor = now, chỉ theo dõi từ giờ) | `ALL_HISTORY` (cursor = epoch, kéo hết lịch sử) | `FROM_DATE` (cần `startFromDate`, thiếu → 400 `START_DATE_REQUIRED`).
 
@@ -274,6 +289,82 @@ Scope theo `external_source` cha (cùng node scope ở trên).
 | `TIMESTAMP_COLUMN_MISSING` | Kết quả không có cột `timestampColumn` |
 | `BOUND_COLUMN_MISSING` | Truy vấn mới mất cột mà một `datastream` đang gắn — chặn để widget dashboard không chết âm thầm |
 
+### Module: Alert Rule (`AlertRuleController`) — **Mới Phase 6a**
+
+Rule cảnh báo theo metric tại một node. Quyền write `TENANT_ADMIN/MANAGER/OPERATOR` (Kỹ thuật viên xử lý cảnh báo — `PRODUCT.md`), `VIEWER` chỉ đọc. Scope theo node như module Gateway.
+
+| Method | Path | Body / Query | Response mẫu | Mô tả |
+|--------|------|--------------|--------------|-------|
+| GET | /api/v1/alert-rules | Query `tenantNodeId` (optional), `includeDescendants` (optional, mặc định `false`) | `{ data: AlertRuleResponse[] }` | Không truyền `tenantNodeId` → toàn bộ rule trong scope user (giống `GET /gateways`); có truyền → đúng 1 node, `includeDescendants=true` lấy cả subtree |
+| POST | /api/v1/alert-rules | `{ tenantNodeId, name, metricId, severity, conditions[], durationSeconds, channels[] }` | `{ data: AlertRuleResponse }` | Tạo rule + kênh nhận. `tenantNodeId` là **bất kỳ cấp node** — rule ở cấp trên phủ toàn bộ SITE bên dưới |
+| PUT | /api/v1/alert-rules/{id} | `{ name, severity, conditions[], durationSeconds, channels[] }` | `{ data: AlertRuleResponse }` | Sửa + **REPLACE toàn bộ** `channels` (không merge, cùng quy ước `scopes[]` của tenant-user). Không cho đổi `tenantNodeId`/`metricId` — đổi thì là rule khác, tạo mới |
+| PUT | /api/v1/alert-rules/{id}/status | `{ enabled }` | `{ data: AlertRuleResponse }` | Bật/tắt rule |
+| DELETE | /api/v1/alert-rules/{id} | — | 200, no body | Soft delete (`deleted_at`, `V15`) + xoá `alert_channel`. Không xoá cứng để lịch sử `alert` không mồ côi `rule_id` |
+
+`AlertRuleResponse`: `{ id, tenantNodeId, name, metricId, metricCode, metricUnit, severity, conditions, durationSeconds, enabled, channels: AlertChannelResponse[], createdAt, updatedAt }`.
+
+`AlertChannelResponse`: `{ id, channelType, name, address, hasBotToken }` — **không** trả `telegramBotToken` dưới bất kỳ hình thức nào (bí mật, giống `credential` của `external_source`); `hasBotToken` để FE biết token đã có mà không lộ giá trị.
+
+`conditions`: `{ logic, conditions: [{ operator, threshold }] }` — một nhóm MỘT tầng, `logic` ∈ `AND`/`OR`, `operator` ∈ `>` `>=` `<` `<=`. Bốn preset của UI ánh xạ vào đây và suy ngược lại được nên **không lưu tên preset**: Lớn hơn → `OR [> x]`; Nhỏ hơn → `OR [< x]`; Ngoài khoảng → `OR [< a, > b]`; Trong khoảng → `AND [>= a, <= b]`.
+
+`channels[]` trong request: `[{ channelType, name?, address, telegramBotToken? }]` — `address` là email với `EMAIL`, `chat_id` với `TELEGRAM`. Bắt buộc `@NotEmpty`: rule không có kênh nào thì bắn xong chẳng ai biết, đúng loại "cấu hình chết" mà `scopes[]` cũng chặn. Service tự dedupe theo `(channelType, lower(address))` vì `uq_alert_channel` là `(alert_rule_id, channel_type, address)`.
+
+**Mã lỗi:**
+
+| Code | Khi nào |
+|------|---------|
+| `INVALID_CONDITION` | `operator` ngoài 4 giá trị cho phép, hoặc `threshold` null (400) |
+| `TELEGRAM_TOKEN_REQUIRED` | Kênh `TELEGRAM` không có `telegramBotToken` — khớp `ck_alert_channel_telegram_token` (400) |
+| `METRIC_NOT_FOUND` | `metricId` không tồn tại (400) |
+| `NODE_NOT_FOUND` | `tenantNodeId` không tồn tại (404) |
+| `ALERT_RULE_NOT_FOUND` | Rule không tồn tại hoặc đã xoá (404) |
+
+> Các endpoint rule đơn lẻ ở trên vẫn còn nhưng **UI không dùng tới** — nó tạo/sửa qua nhóm. Giữ lại vì `alert_rule` là đơn vị engine thật sự đọc, và `alert.ruleId` trỏ vào đây.
+>
+> **Rule mới có hiệu lực ngay.** `x-processing-service` cache rule đã resolve trong Redis (`alert-rules:{tenantId}:{tenantNodeId}:{metricCode}`, TTL 60s). Mỗi lần ghi/xoá/bật-tắt rule, `x-backend` xoá key của **mọi node hậu duệ** của `rule.tenantNodeId` — không có bước này thì rule mới phải đợi hết TTL. Redis hỏng chỉ làm chậm hiệu lực, không sai kết quả.
+
+### Module: Alert Rule Group (`AlertRuleGroupController`) — **Mới Phase 6b**
+
+**Đường ghi chính của UI.** Người dùng nghĩ theo một việc ("theo dõi nhiệt độ và độ ẩm ở 3 chuồng"), engine lại cần mỗi rule gắn đúng 1 node + 1 metric. Nhóm giữ ý định, backend trải phẳng thành N×M `alert_rule` trong **một transaction** — hỏng giữa chừng thì không tạo dòng nào, khác hẳn để FE bắn N×M request rồi tự dọn khi lỗi.
+
+Quyền write `TENANT_ADMIN/MANAGER/OPERATOR`, `VIEWER` chỉ đọc. Kiểm tra phạm vi **từng** đơn vị nằm trong service (một nhóm có nhiều đơn vị nên không dùng `@nodeScope` vốn nhận đúng một id).
+
+| Method | Path | Body / Query | Response mẫu | Mô tả |
+|--------|------|--------------|--------------|-------|
+| GET | /api/v1/alert-rule-groups | — | `{ data: AlertRuleGroupResponse[] }` | Nhóm trong scope user. Nhóm mà **mọi** đơn vị đều ngoài phạm vi thì không hiện |
+| POST | /api/v1/alert-rule-groups | `{ name, severity, sourceType?, tenantNodeIds[], metrics[], channels[] }` | `{ data: AlertRuleGroupResponse }` | Tạo nhóm + N×M rule con |
+| PUT | /api/v1/alert-rule-groups/{id} | như POST | `{ data: AlertRuleGroupResponse }` | Sửa **theo kiểu đối chiếu**, không xoá-tạo-lại (xem ghi chú dưới) |
+| PUT | /api/v1/alert-rule-groups/{id}/status | `{ enabled }` | `{ data: AlertRuleGroupResponse }` | Bật/tắt mọi rule con. **Tắt sẽ đóng luôn alert đang mở** của chúng sang `STALE` (không gửi thông báo) — engine không resolve rule đã tắt nên nếu không đóng, alert đứng im vĩnh viễn |
+| DELETE | /api/v1/alert-rule-groups/{id} | — | 200, no body | Soft delete nhóm + mọi rule con, và đóng alert đang mở sang `STALE`. **Lịch sử alert được giữ nguyên** — báo cáo sự cố (Phase 8) dựa vào nó |
+
+> **`tenantNodeIds[]` được thu gọn về mức cao nhất trước khi ghi.** Ô chọn tổ chức ở FE tick cha là tick luôn mọi con, mà rule vốn đã phủ toàn bộ subtree — giữ cả cha lẫn con sẽ tạo rule trùng và bắn hai cảnh báo cho một lần vi phạm. Vì vậy `ruleCount` và `tenantNodeIds` trong response có thể **ít hơn** số gửi lên. Phạm vi quyền vẫn kiểm tra trên **mọi** id gửi lên, kể cả id bị thu gọn.
+
+`metrics[]`: `[{ metricId, conditions, durationSeconds }]` — mỗi chỉ số có ngưỡng và thời lượng riêng (form là một tab). Khai trùng `metricId` → 400 `DUPLICATE_METRIC`.
+
+`AlertRuleGroupResponse`: `{ id, name, severity, sourceType, tenantNodeIds[], metricIds[], enabled, ruleCount, rules: GroupRuleResponse[], channels: AlertChannelResponse[], createdAt, updatedAt }`. `enabled` = mọi rule con đều bật. `GroupRuleResponse`: `{ id, tenantNodeId, metricId, metricCode, metricUnit, sourceType, conditions, durationSeconds, enabled }`.
+
+`sourceType` ∈ `GATEWAY_PIN` | `EXTERNAL_SOURCE_JOB` | `null` (**mặc định — mọi nguồn**). Giới hạn quy tắc theo loại nguồn của kênh dữ liệu: một đơn vị có thể vừa có cảm biến trong chuồng vừa có nhiệt độ thời tiết từ database ngoài, cùng metric `temperature` nhưng khác bản chất. Nhóm chép giá trị này xuống mọi rule con (giống `severity`); rule tạo trước `V18` mang NULL nên hành vi không đổi.
+
+> **Sửa nhóm không xoá rồi tạo lại.** Cặp (đơn vị, chỉ số) vẫn được chọn thì giữ nguyên `alert_rule.id`, chỉ cập nhật ngưỡng; cặp bị bỏ chọn mới xoá mềm. Xoá rồi tạo lại sẽ làm alert **đang mở** của rule đó mồ côi và không bao giờ chuyển được sang `RECOVERED`.
+
+**Mã lỗi:** `DUPLICATE_METRIC` (400), `NODE_OUT_OF_SCOPE` (403), `NODE_NOT_FOUND` (404), `METRIC_NOT_FOUND` (400), `INVALID_CONDITION` (400), `TELEGRAM_TOKEN_REQUIRED` (400), `ALERT_RULE_GROUP_NOT_FOUND` (404).
+
+### Module: Alert (`AlertController`) — **Mới Phase 6a**
+
+Chỉ đọc — mọi chuyển trạng thái do `x-processing-service` ghi (xem `ARCHITECTURE.md` § Flow: Alert).
+
+| Method | Path | Body / Query | Response mẫu | Mô tả |
+|--------|------|--------------|--------------|-------|
+| GET | /api/v1/alerts | Query `status` (optional), `tenantNodeId` (optional), `limit` (mặc định 500, trần 2000) | `{ data: AlertResponse[] }` | **N cảnh báo mới nhất** trong scope user, sắp `started_at` giảm dần. Không có bộ lọc khoảng thời gian: trang Cảnh báo sắp mới-nhất-trước rồi phân trang ở client, còn lọc trạng thái nằm ở ô lọc ngay trên cột. `status` giữ lại cho widget Dashboard chỉ cần alert đang mở — `OPEN` = `PENDING`+`ACTIVE` (khớp `uq_alert_open`), hoặc truyền thẳng `PENDING`/`ACTIVE`/`RECOVERED`. `tenantNodeId` lọc theo **subtree** node đó, giao với scope user |
+
+> Lọc theo node nằm **trong** truy vấn chứ không lọc sau khi lấy về: cắt trần N dòng mới nhất rồi mới bỏ dòng ngoài phạm vi thì user scope hẹp sẽ nhận về gần như rỗng. Index `ix_alert_started (tenant_id, started_at DESC)` (`V17`) phục vụ trường hợp không lọc trạng thái — `ix_alert_recent` chỉ dùng được khi có `status`.
+
+`AlertResponse`: `{ id, ruleId, ruleName, tenantNodeId, datastreamId, datastreamName, metricCode, metricUnit, status, severity, thresholdSnapshot (cùng shape `conditions`), lastObservedValue, lastObservedAt, startedAt, triggeredAt, recoveredAt }`. `status` ∈ `PENDING`/`ACTIVE`/`RECOVERED`/`STALE` (`STALE` = quy tắc bị tắt/xoá khi sự cố còn mở, xem `DATABASE.md` § alert). `thresholdSnapshot` là bản chụp `conditions` lúc alert mở — rule sửa sau đó không làm sai lịch sử. `ruleName` NULL nếu rule đã bị xoá mềm.
+
+| Code | Khi nào |
+|------|---------|
+| `INVALID_ALERT_STATUS` | `status` không thuộc `OPEN`/`PENDING`/`ACTIVE`/`RECOVERED` (400) |
+
 ### Module: Dashboard (`DashboardController`)
 
 Scope theo node như module Gateway ở trên. Mỗi user tối đa 1 board/node **hoặc** 1 board/nguồn (`uq_dashboard_user_node`, xem `DATABASE.md`).
@@ -281,7 +372,7 @@ Scope theo node như module Gateway ở trên. Mỗi user tối đa 1 board/node
 | Method | Path | Body / Query | Response mẫu | Mô tả |
 |--------|------|--------------|--------------|-------|
 | GET | /api/v1/tenant-nodes/{id}/dashboard | — | `{ data: DashboardResponse }` | Lấy board của user hiện tại tại node (`id` phải là node kiểu `SITE` từ Phase 5 — FE chỉ còn gọi endpoint này ở trang SITE) — tự tạo rỗng nếu chưa có |
-| PUT | /api/v1/tenant-nodes/{id}/dashboard | `{ layoutJson }` | `{ data: DashboardResponse }` | Ghi đè toàn bộ layout (FE gửi full state sau debounce khi kéo-thả/resize) |
+| PUT | /api/v1/tenant-nodes/{id}/dashboard | `{ layoutJson }` | `{ data: DashboardResponse }` | Ghi đè toàn bộ layout (FE gửi full state **một lần khi người dùng bấm Lưu** — chế độ sửa là bản nháp cục bộ, không debounce theo từng cú kéo; xem `CONVENTIONS.md` § Dashboard layout) |
 | GET | /api/v1/external-sources/{sourceId}/dashboard | — | `{ data: DashboardResponse }` | **Mới — Phase 5.** Board riêng theo nguồn — tự tạo rỗng nếu chưa có |
 | PUT | /api/v1/external-sources/{sourceId}/dashboard | `{ layoutJson }` | `{ data: DashboardResponse }` | **Mới — Phase 5.** Ghi đè layout board theo nguồn |
 

@@ -82,14 +82,14 @@ export function PreviewTable({
       </div>
 
       <div className="overflow-x-auto">
-        <table className="tabular w-full border-collapse font-mono text-xs">
+        <table className="tabular w-full border-collapse text-[13px]">
           <thead>
             <tr>
               {result.columns.map((column) => (
                 <th
                   key={column.name}
                   className={cn(
-                    'border-b border-border px-3 py-2 text-left font-medium whitespace-nowrap text-muted-foreground',
+                    'border-b border-border px-3 py-2 text-left font-mono text-xs font-medium whitespace-nowrap text-muted-foreground',
                     column.name.toLowerCase() === timestampColumn.toLowerCase() && 'text-primary'
                   )}
                 >
@@ -115,11 +115,6 @@ export function PreviewTable({
         </table>
       </div>
 
-      {result.rows.length > 5 && (
-        <p className="border-t border-border px-3 py-2 text-xs text-muted-foreground">
-          Hiện 5 / {result.rowCount} dòng lấy về.
-        </p>
-      )}
     </div>
   )
 }

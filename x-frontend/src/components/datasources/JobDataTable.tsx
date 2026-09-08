@@ -23,11 +23,13 @@ function ColumnHead({
   isTimestamp,
   datastream,
   onBind,
+  onOpenDatastream,
 }: {
   column: PreviewColumn
   isTimestamp: boolean
   datastream: Datastream | undefined
   onBind: (column: PreviewColumn) => void
+  onOpenDatastream: (datastream: Datastream) => void
 }) {
   return (
     <div className="flex flex-col items-start gap-1.5 py-1">
@@ -35,12 +37,18 @@ function ColumnHead({
       {isTimestamp ? (
         <Badge variant="outline" className="h-6 gap-1 font-normal">
           <Clock className="size-3" />
-          mốc thời gian
+          cột thời gian
         </Badge>
       ) : datastream ? (
-        <Badge variant="secondary" className="h-6 max-w-44 font-normal">
-          <span className="truncate">{datastream.name}</span>
-        </Badge>
+        <button
+          type="button"
+          onClick={() => onOpenDatastream(datastream)}
+          className="max-w-44 cursor-pointer rounded-md bg-secondary px-2 py-0.5 text-secondary-foreground transition-colors duration-[--motion-fast] ease-[--motion-ease] hover:bg-primary/10 hover:text-primary focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+        >
+          <span className="block truncate text-[12.5px] font-normal underline underline-offset-2">
+            {datastream.name}
+          </span>
+        </button>
       ) : (
         <Button
           variant="outline"
@@ -63,6 +71,7 @@ export function JobDataTable({
   timestampColumn,
   datastreams,
   onBind,
+  onOpenDatastream,
 }: {
   result: PreviewResult | null
   isLoading: boolean
@@ -70,6 +79,7 @@ export function JobDataTable({
   timestampColumn: string
   datastreams: Datastream[]
   onBind: (column: PreviewColumn) => void
+  onOpenDatastream: (datastream: Datastream) => void
 }) {
   if (error) {
     return (
@@ -86,7 +96,7 @@ export function JobDataTable({
     key: column.name,
     // Tên cột là định danh SQL nên giữ nguyên chữ thường; hàng tiêu đề mặc định viết hoa toàn bộ.
     headerClassName: 'h-auto py-2 align-bottom normal-case tracking-normal',
-    className: 'tabular font-mono text-[12.5px] whitespace-nowrap',
+    className: 'tabular text-[13px] whitespace-nowrap',
     header: (
       <ColumnHead
         column={column}
@@ -95,6 +105,7 @@ export function JobDataTable({
           (item) => item.sourceField?.toLowerCase() === column.name.toLowerCase()
         )}
         onBind={onBind}
+        onOpenDatastream={onOpenDatastream}
       />
     ),
     cell: (row) => renderPreviewCell(row.cells[columnIndex]),
@@ -109,8 +120,9 @@ export function JobDataTable({
       getRowId={(row) => row.index}
       isLoading={isLoading}
       showIndex={false}
-      pageSize={20}
-      pageSizeOptions={[20, 50, 100]}
+      // 0 = tắt phân trang: số dòng kéo về đã bằng đúng một trang, thêm thanh phân trang chỉ
+      // để lật giữa một trang duy nhất là thừa.
+      pageSize={0}
       empty={
         <EmptyState
           icon={Clock}

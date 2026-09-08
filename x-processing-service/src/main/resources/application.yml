@@ -29,6 +29,16 @@ spring:
       host: localhost
       port: 19380
 
+  # MailHog trong docker-compose (xem UI ở http://localhost:8025). Production đổi qua env.
+  mail:
+    host: ${MAIL_HOST:localhost}
+    port: ${MAIL_PORT:1025}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail.smtp.auth: ${MAIL_SMTP_AUTH:false}
+      mail.smtp.starttls.enable: ${MAIL_SMTP_STARTTLS:false}
+
 influx:
   url: http://localhost:8086
   org: iiot
@@ -48,6 +58,10 @@ app:
       gateway-commands: gateway-commands
   redis:
     telemetry-dedup-ttl-hours: 6
+  alert:
+    rule-cache-ttl-seconds: 60
+    notify-pool-size: 2
+    mail-from: alert@iiot.local
   command:
     outbox-poll-interval-ms: 3000
     timeout-worker-interval-ms: 5000
