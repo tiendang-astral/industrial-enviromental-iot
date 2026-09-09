@@ -20,9 +20,7 @@ import { OpenAlertsBanner } from '@/components/dashboard/OpenAlertsBanner'
 import { SourceDashboardPanel } from '@/components/datasources/SourceDashboardPanel'
 import { useCommandUpdates } from '@/hooks/useCommandUpdates'
 import { useRealtimeGatewaySocket } from '@/hooks/useRealtimeGatewaySocket'
-import { useApplyTemplateMutation } from '@/queries/useApplyTemplateMutation'
 import { useDashboardQuery } from '@/queries/useDashboardQuery'
-import { useDashboardTemplatesQuery } from '@/queries/useDashboardTemplatesQuery'
 import { useDatastreamsQuery } from '@/queries/useDatastreamsQuery'
 import { useExternalSourcesQuery } from '@/queries/useExternalSourcesQuery'
 import { useGatewaysQuery } from '@/queries/useGatewaysQuery'
@@ -30,6 +28,7 @@ import { useMetricsQuery } from '@/queries/useMetricsQuery'
 import { useSaveDashboardLayoutMutation } from '@/queries/useSaveDashboardLayoutMutation'
 import { useTenantNodesQuery } from '@/queries/useTenantNodesQuery'
 import { useDashboardStore } from '@/stores/useDashboardStore'
+import { resolveTemplates } from '@/lib/dashboardTemplates'
 import { widgetDatastreamIds } from '@/lib/widgetBinding'
 import { ancestorIdsOf, orderNodesDepthFirst } from '@/lib/tenantNodeTree'
 import type { Datastream, DatastreamReading } from '@/types/dashboard'
@@ -53,10 +52,8 @@ export default function DashboardPage() {
   // includeDescendants — board ở cấp gộp bind kênh của site con; ở SITE subtree thu về chính nó.
   const { data: datastreams } = useDatastreamsQuery(tenantNodeId, true)
   const { data: gateways } = useGatewaysQuery(tenantNodeId, true)
-  const { data: templates } = useDashboardTemplatesQuery()
   const { data: sources } = useExternalSourcesQuery()
   const { data: metrics } = useMetricsQuery()
-  const applyTemplateMutation = useApplyTemplateMutation(tenantNodeId)
   const { save, isSaving } = useSaveDashboardLayoutMutation(tenantNodeId)
 
   const metricByCode = useMemo(() => {
@@ -64,6 +61,20 @@ export default function DashboardPage() {
     metrics?.forEach((metric) => map.set(metric.code, metric))
     return map
   }, [metrics])
+
+  // Mẫu bố cục là hằng số phía FE — dựng thẳng ra widget cho đúng đơn vị đang xem, và chỉ giữ mẫu
+  // nào thật sự bind được kênh. Mẫu không có dữ liệu để dựng thì không gợi ý còn hơn gợi ý board rỗng.
+  const templates = useMemo(
+    () =>
+      resolveTemplates({
+        boardNodeId: tenantNodeId,
+        datastreams: datastreams ?? [],
+        nodeById: new Map((nodes ?? []).map((node) => [node.id, { name: node.name, path: node.path }])),
+        metricByCode,
+        allowDeviceWidgets: true,
+      }),
+    [tenantNodeId, datastreams, nodes, metricByCode]
+  )
 
   const datastreamIdByPin = useMemo(() => {
     const map = new Map<string, number>()
@@ -294,8 +305,6 @@ export default function DashboardPage() {
           onSave={save}
           isSaving={isSaving}
           templates={templates}
-          onApplyTemplate={applyTemplateMutation.mutateAsync}
-          isApplyingTemplate={applyTemplateMutation.isPending}
         />
       </TabsContent>
     </Tabs>

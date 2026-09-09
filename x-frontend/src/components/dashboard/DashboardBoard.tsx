@@ -1,5 +1,6 @@
 import { memo, useEffect, useMemo, useState } from 'react'
 import { useBlocker } from 'react-router-dom'
+import { toast } from 'sonner'
 import ReactGridLayout, { useContainerWidth } from 'react-grid-layout'
 import type { Compactor, Layout } from 'react-grid-layout'
 import { GridBackground } from 'react-grid-layout/extras'
@@ -19,13 +20,13 @@ import { LineWidget } from '@/components/widgets/LineWidget'
 import { SwitchWidget } from '@/components/widgets/SwitchWidget'
 import { ValueWidget } from '@/components/widgets/ValueWidget'
 import { clampWidgets, nextWidgetLayout, widgetSizeSpec } from '@/lib/dashboardLayout'
+import type { ResolvedTemplate } from '@/lib/dashboardTemplates'
 import { widgetDatastreamIds } from '@/lib/widgetBinding'
 import { cn } from '@/lib/utils'
 import { useDashboardStore } from '@/stores/useDashboardStore'
 import type { CommandUpdate } from '@/types/command'
 import type {
   Dashboard,
-  DashboardTemplate,
   Datastream,
   DatastreamReading,
   Widget as WidgetT,
@@ -36,6 +37,24 @@ import type { Metric } from '@/types/metric'
 const EMPTY_METRIC_BY_CODE = new Map<string, Metric>()
 /** Tham chiếu cố định — trả mảng rỗng mới mỗi lần cũng đủ phá `memo`. */
 const EMPTY_DATASTREAMS: Datastream[] = []
+
+/** Tên loại widget dạng danh từ thường — dùng để kể ra mẫu sắp dựng những gì. */
+const WIDGET_TYPE_NOUN: Record<WidgetType, string> = {
+  VALUE: 'ô số',
+  LINE: 'biểu đồ',
+  DEVICE_LIST: 'danh sách thiết bị',
+  DEVICES_ONLINE: 'ô thiết bị trực tuyến',
+  SWITCH: 'công tắc',
+}
+const WIDGET_TYPE_ORDER: WidgetType[] = ['VALUE', 'LINE', 'DEVICES_ONLINE', 'DEVICE_LIST', 'SWITCH']
+
+/** "3 ô số, 2 biểu đồ, 1 danh sách thiết bị" — kể ra mẫu gồm gì thay vì chỉ nêu tổng số. */
+function describeWidgets(widgets: WidgetT[]): string {
+  return WIDGET_TYPE_ORDER.map((type) => ({ type, count: widgets.filter((w) => w.type === type).length }))
+    .filter((item) => item.count > 0)
+    .map((item) => `${item.count} ${WIDGET_TYPE_NOUN[item.type]}`)
+    .join(', ')
+}
 
 const GRID_COLS = 12
 const ROW_HEIGHT = 60
@@ -76,10 +95,11 @@ interface DashboardBoardProps {
   /** Ghi bản nháp lên server — chỉ gọi khi người dùng bấm Lưu, không gọi theo từng cú kéo. */
   onSave: (widgets: WidgetT[]) => Promise<unknown>
   isSaving: boolean
-  /** Không truyền = board không áp được mẫu (board theo nguồn — mẫu đi từ metric ra datastream của node). */
-  templates?: DashboardTemplate[]
-  onApplyTemplate?: (templateId: number) => Promise<Dashboard>
-  isApplyingTemplate?: boolean
+  /**
+   * Mẫu đã dựng sẵn bố cục cho đúng đơn vị này (xem lib/dashboardTemplates). Không truyền = board
+   * không áp được mẫu.
+   */
+  templates?: ResolvedTemplate[]
 }
 
 /**
@@ -99,18 +119,15 @@ export function DashboardBoard({
   onSave,
   isSaving,
   templates,
-  onApplyTemplate,
-  isApplyingTemplate = false,
 }: DashboardBoardProps) {
   const editMode = useDashboardStore((state) => state.editingBoardKey === boardKey)
   const dirty = useDashboardStore((state) => state.dirty)
   const toggleEditMode = useDashboardStore((state) => state.toggleEditMode)
   const markDirty = useDashboardStore((state) => state.markDirty)
   const exitEdit = useDashboardStore((state) => state.exitEdit)
-  const clearDirty = useDashboardStore((state) => state.clearDirty)
   const [isAddWidgetOpen, setIsAddWidgetOpen] = useState(false)
   const [isCancelOpen, setIsCancelOpen] = useState(false)
-  const [pendingTemplate, setPendingTemplate] = useState<DashboardTemplate | null>(null)
+  const [pendingTemplate, setPendingTemplate] = useState<ResolvedTemplate | null>(null)
 
   // Đang sửa = bản nháp cục bộ. Chỉ đồng bộ lại từ server khi đã ra khỏi chế độ sửa, nếu không thì
   // mỗi lần cache đổi là đè mất thứ người dùng đang kéo dở. Đây cũng là đường bỏ nháp: `exitEdit()`
@@ -258,35 +275,29 @@ export function DashboardBoard({
     exitEdit()
   }
 
-  async function handleApplyTemplate() {
-    if (!pendingTemplate || !onApplyTemplate) return
-    try {
-      // Áp mẫu trả về TOÀN BỘ board theo trạng thái server, nên bản nháp chưa lưu sẽ bị nuốt mất.
-      // Ghi nó xuống trước rồi mới áp — người dùng không mất thứ vừa kéo, và số widget thêm vào
-      // khớp đúng con số đã hứa ở hộp xác nhận.
-      if (dirty) await onSave(widgets)
-      const updated = await onApplyTemplate(pendingTemplate.id)
-      // Effect đồng bộ chỉ chạy khi ĐÃ thoát chế độ sửa — không nhận kết quả về bản nháp ở đây thì
-      // widget mới không hiện, bấm xong tưởng nút hỏng.
-      setWidgets(clampWidgets(updated.widgets))
-      clearDirty()
-    } finally {
-      setPendingTemplate(null)
-    }
+  /**
+   * Mẫu được dựng ngay tại FE nên áp mẫu chỉ là thay bản nháp — chưa chạm tới server. Người dùng
+   * xem kết quả rồi mới bấm Lưu, hoặc bấm Hủy để lấy lại bố cục cũ.
+   */
+  function handleApplyTemplate() {
+    if (!pendingTemplate) return
+    setWidgets(clampWidgets(pendingTemplate.widgets))
+    markDirty()
+    setPendingTemplate(null)
   }
 
-  // Áp mẫu ở cấp trên quét cả subtree, một cú bấm ở gốc cây có thể sinh vài chục widget — đếm trước
-  // bằng đúng luật dedupe của backend (type + datastreamId), tính trên bản nháp đang hiện.
-  const pendingWidgetCount = useMemo(() => {
-    if (!pendingTemplate) return 0
-    // Một entry = một ô, bất kể khớp mấy kênh (chúng gộp vào cùng widget). Entry không khớp kênh
-    // nào thì backend bỏ hẳn, không dựng ô rỗng.
-    return pendingTemplate.layoutJson.filter((entry) =>
-      datastreams.some((datastream) => datastream.metricCode === entry.metric)
-    ).length
-  }, [pendingTemplate, datastreams])
+  /**
+   * Board theo nguồn chỉ dựng được widget bind kênh (VALUE/LINE), nên nguồn chưa có kênh nào thì hộp
+   * thêm widget mở ra cũng chỉ để đóng lại — nói thẳng lý do. Board theo đơn vị thì vẫn mở được:
+   * widget thiết bị (danh sách/trực tuyến) không cần kênh nào.
+   */
+  const canAddWidget = allowDeviceWidgets || datastreams.length > 0
 
   function startAddingWidget() {
+    if (!canAddWidget) {
+      toast.error('Chưa có thông tin để tạo widget')
+      return
+    }
     if (!editMode) toggleEditMode(boardKey)
     setIsAddWidgetOpen(true)
   }
@@ -307,9 +318,9 @@ export function DashboardBoard({
     <div className="flex flex-col gap-4">
       {editMode && (
         <BoardEditToolbar
-          onAddWidget={() => setIsAddWidgetOpen(true)}
+          onAddWidget={startAddingWidget}
           templates={templates}
-          onSelectTemplate={onApplyTemplate ? setPendingTemplate : undefined}
+          onSelectTemplate={setPendingTemplate}
           onCancel={handleCancel}
           onSave={handleSave}
           isSaving={isSaving}
@@ -317,7 +328,7 @@ export function DashboardBoard({
         />
       )}
 
-      {widgets.length === 0 && (
+      {widgets.length === 0 && !editMode && (
         <EmptyState
           icon={LayoutGrid}
           title="Bảng điều khiển đang trống"
@@ -330,10 +341,14 @@ export function DashboardBoard({
               </Button>
               {/* Board rỗng thì áp mẫu nhanh hơn thêm tay từng kênh — nhưng vẫn vào chế độ sửa để
                   người dùng xem kết quả rồi mới quyết định giữ hay bỏ. */}
-              {onApplyTemplate && !!templates?.length && (
+              {!!templates && (
                 <Button
                   variant="outline"
                   onClick={() => {
+                    if (!templates.length) {
+                      toast.error('Chưa có thông tin để tạo mẫu dashboard')
+                      return
+                    }
                     if (!editMode) toggleEditMode(boardKey)
                     setPendingTemplate(templates[0])
                   }}
@@ -360,7 +375,7 @@ export function DashboardBoard({
           className="relative w-full overflow-hidden"
           style={editMode ? { minHeight: gridPixelHeight } : undefined}
         >
-        {mounted && widgets.length > 0 && (
+        {mounted && (editMode || widgets.length > 0) && (
           <>
             {editMode && (
               <GridBackground
@@ -475,20 +490,8 @@ export function DashboardBoard({
       <ConfirmDialog
         open={!!pendingTemplate}
         onOpenChange={(open) => !open && setPendingTemplate(null)}
-        title="Thay toàn bộ bố cục?"
-        question={
-          <>
-            Áp mẫu <span className="font-semibold">&ldquo;{pendingTemplate?.name}&rdquo;</span>?
-          </>
-        }
-        description={
-          pendingWidgetCount > 0
-            ? `Board hiện có ${widgets.length} widget sẽ bị XOÁ và thay bằng ${pendingWidgetCount} widget của mẫu, kể cả widget bạn tự thêm (công tắc relay, danh sách thiết bị). Không hoàn tác được.`
-            : 'Không có kênh nào khớp mẫu này trong phạm vi đơn vị đang xem — áp mẫu sẽ xoá sạch board mà không dựng được widget nào.'
-        }
-        confirmLabel="Thay bố cục"
-        destructive
-        isPending={isApplyingTemplate}
+        title={`Sử dụng mẫu ${pendingTemplate?.template.name ?? ''}`}
+        description={`Xác nhận thay thế toàn bộ ${widgets.length} widget đang có trên bảng bằng ${pendingTemplate?.widgets.length ?? 0} widget của mẫu: ${describeWidgets(pendingTemplate?.widgets ?? [])}. Bố cục mới chưa ghi xuống server — bấm Hủy để lấy lại bố cục cũ.`}
         onConfirm={handleApplyTemplate}
       />
 

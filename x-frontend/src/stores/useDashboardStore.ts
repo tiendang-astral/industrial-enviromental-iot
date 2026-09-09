@@ -11,8 +11,6 @@ interface DashboardState {
   dirty: boolean
   toggleEditMode: (boardKey: string) => void
   markDirty: () => void
-  /** Đã ghi xong nhưng VẪN ở chế độ sửa (áp mẫu) — khác `exitEdit` là thoát hẳn. */
-  clearDirty: () => void
   /**
    * Băng cảnh báo đã tắt ở board nào, tính tới alert id nào. Lưu mốc id chứ không lưu cờ boolean:
    * tắt xong mà cảnh báo MỚI về thì băng phải hiện lại, nếu không người trực ca tắt một lần là mù
@@ -54,7 +52,6 @@ export const useDashboardStore = create<DashboardState>((set) => ({
       dirty: false,
     })),
   markDirty: () => set({ dirty: true }),
-  clearDirty: () => set({ dirty: false }),
   dismissedAlertBanner: {},
   dismissAlertBanner: (boardKey, latestAlertId) =>
     set((state) => ({

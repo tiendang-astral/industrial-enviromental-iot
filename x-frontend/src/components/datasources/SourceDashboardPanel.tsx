@@ -6,6 +6,8 @@ import { useDatastreamsByExternalSourceQuery } from '@/queries/useDatastreamsByE
 import { useMetricsQuery } from '@/queries/useMetricsQuery'
 import { useSaveSourceDashboardLayoutMutation } from '@/queries/useSaveSourceDashboardLayoutMutation'
 import { useSourceDashboardQuery } from '@/queries/useSourceDashboardQuery'
+import { useTenantNodesQuery } from '@/queries/useTenantNodesQuery'
+import { resolveTemplates } from '@/lib/dashboardTemplates'
 import type { DatastreamReading } from '@/types/dashboard'
 import type { Metric } from '@/types/metric'
 
@@ -17,6 +19,7 @@ export function SourceDashboardPanel({ externalSourceId }: { externalSourceId: n
   const { data: dashboard, isLoading } = useSourceDashboardQuery(externalSourceId)
   const { data: datastreams } = useDatastreamsByExternalSourceQuery(externalSourceId)
   const { data: metrics } = useMetricsQuery()
+  const { data: nodes } = useTenantNodesQuery()
   const { save, isSaving } = useSaveSourceDashboardLayoutMutation(externalSourceId)
 
   const datastreamList = useMemo(() => datastreams ?? [], [datastreams])
@@ -25,6 +28,21 @@ export function SourceDashboardPanel({ externalSourceId }: { externalSourceId: n
     metrics?.forEach((metric) => map.set(metric.code, metric))
     return map
   }, [metrics])
+
+  // Board theo nguồn áp được mẫu y như board đơn vị: mẫu đi từ chỉ số ra kênh, mà kênh của nguồn
+  // ngoài cũng có chỉ số. `allowDeviceWidgets: false` loại các ô thiết bị — board này không có khái
+  // niệm gateway/subtree — và hàng mất ô sẽ tự co lại.
+  const templates = useMemo(
+    () =>
+      resolveTemplates({
+        boardNodeId: dashboard?.tenantNodeId ?? 0,
+        datastreams: datastreamList,
+        nodeById: new Map((nodes ?? []).map((node) => [node.id, { name: node.name, path: node.path }])),
+        metricByCode,
+        allowDeviceWidgets: false,
+      }),
+    [dashboard?.tenantNodeId, datastreamList, nodes, metricByCode]
+  )
 
   const [readings, setReadings] = useState<Record<number, DatastreamReading>>({})
 
@@ -63,6 +81,7 @@ export function SourceDashboardPanel({ externalSourceId }: { externalSourceId: n
         readings={readings}
         onSave={save}
         isSaving={isSaving}
+        templates={templates}
       />
     </div>
   )

@@ -41,9 +41,9 @@ public class DashboardServiceImpl implements DashboardService {
         return dashboardMapper.toResponse(dashboard);
     }
 
-    @Override
-    @Transactional
-    public Dashboard getOrCreateEntity(Long tenantNodeId) {
+    // private, không @Transactional: hai chỗ gọi đều đã @Transactional, mà tự gọi trong cùng bean
+    // thì không đi qua proxy nên annotation ở đây vô nghĩa (giống getOrCreateEntityForSource).
+    private Dashboard getOrCreateEntity(Long tenantNodeId) {
         AppUserPrincipal principal = currentPrincipal();
         return dashboardRepository.findByUserIdAndTenantNodeIdAndExternalSourceIdIsNull(principal.userId(), tenantNodeId)
                 .orElseGet(() -> {

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { toast } from 'sonner'
 import { Grid2x2Check, Pencil, Plus } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -9,12 +10,13 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { LoadingButton } from '@/components/patterns/LoadingButton'
-import type { DashboardTemplate } from '@/types/dashboard'
+import type { ResolvedTemplate } from '@/lib/dashboardTemplates'
 
 interface BoardEditToolbarProps {
   onAddWidget: () => void
-  templates?: DashboardTemplate[]
-  onSelectTemplate?: (template: DashboardTemplate) => void
+  /** Mẫu đã dựng sẵn cho đúng đơn vị đang xem — số widget dưới đây là số thật, không phải ước lượng. */
+  templates?: ResolvedTemplate[]
+  onSelectTemplate?: (template: ResolvedTemplate) => void
   onCancel: () => void
   onSave: () => void
   isSaving: boolean
@@ -51,27 +53,42 @@ export function BoardEditToolbar({
         Thêm widget
       </Button>
 
-      {onSelectTemplate && (
+      {/* Đơn vị chưa có kênh nào thì mẫu không dựng được gì — nhưng nút vẫn bấm được và nói ra lý
+          do. Nút xám ngắt không giải thích được vì sao nó xám, người dùng chỉ biết là hỏng. */}
+      {onSelectTemplate && !templates?.length && (
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => toast.error('Chưa có thông tin để tạo mẫu dashboard')}
+        >
+          <Grid2x2Check data-icon="inline-start" />
+          Áp dụng mẫu
+        </Button>
+      )}
+
+      {onSelectTemplate && !!templates?.length && (
         <DropdownMenu open={isTemplateMenuOpen} onOpenChange={setIsTemplateMenuOpen}>
           <DropdownMenuTrigger asChild>
-            <Button size="sm" variant="outline" disabled={!templates?.length}>
+            <Button size="sm" variant="outline">
               <Grid2x2Check data-icon="inline-start" />
               Áp dụng mẫu
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start">
-            {templates?.map((template) => (
+          {/* min-w cố định: tên mẫu dài ngắn khác nhau, để menu tự co theo tên dài nhất thì mỗi lần
+              mở một bề rộng. */}
+          <DropdownMenuContent align="start" className="min-w-64">
+            {templates?.map((resolved) => (
               <DropdownMenuItem
-                key={template.id}
+                key={resolved.template.id}
                 // preventDefault: Radix trả focus về trigger ngay khi menu tự đóng, nhịp đó nuốt luôn
                 // hộp xác nhận vừa mở. Chặn hành vi mặc định rồi tự đóng menu.
                 onSelect={(event) => {
                   event.preventDefault()
                   setIsTemplateMenuOpen(false)
-                  onSelectTemplate(template)
+                  onSelectTemplate(resolved)
                 }}
               >
-                {template.name}
+                <span className="truncate">{resolved.template.name}</span>
               </DropdownMenuItem>
             ))}
           </DropdownMenuContent>

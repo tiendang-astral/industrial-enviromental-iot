@@ -61,19 +61,24 @@ export interface Datastream {
   oldestReadingAt: string | null
 }
 
-export interface DashboardTemplateWidget {
-  widgetType: WidgetType
-  metric: string
-  /** Vị trí cố định trên lưới 12 cột — áp mẫu lấy thẳng, không tự xếp nữa. */
-  layout: WidgetLayout
-  config: Record<string, unknown>
+/** Một ô trong mẫu bố cục. `w`/`h` là mong muốn — hàng thiếu ô sẽ giãn phần còn lại cho kín lưới. */
+export interface TemplateEntry {
+  type: WidgetType
+  /** Mã chỉ số cần gán (VALUE/LINE). Widget theo đơn vị (DEVICE_*) không có. */
+  metric?: string
+  w: number
+  h: number
 }
 
+/**
+ * Mẫu bố cục — hằng số phía FE (xem lib/dashboardTemplates.ts), KHÔNG còn là bản ghi trong DB.
+ * Khai theo hàng chứ không theo toạ độ tuyệt đối: bỏ một ô thì chỉ hàng đó co lại.
+ */
 export interface DashboardTemplate {
-  id: number
+  id: string
   name: string
-  description: string | null
-  layoutJson: DashboardTemplateWidget[]
+  description: string
+  rows: TemplateEntry[][]
 }
 
 export interface DeviceSummary {
