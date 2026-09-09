@@ -84,7 +84,7 @@ export function TreeTableContainer({ className, ...props }: React.ComponentProps
   return (
     <div
       className={cn(
-        'overflow-hidden rounded-lg border border-border bg-card shadow-[0_20px_50px_-20px_rgb(0_0_0_/_0.18)]',
+        'overflow-hidden rounded-lg border border-border bg-card shadow-panel',
         // Nới lề trái/phải của bảng: `TableHead`/`TableCell` mặc định chỉ px-2, cột đầu và cột
         // cuối vì thế dính sát viền hộp.
         '[&_td:first-child]:ps-4 [&_td:last-child]:pe-4 [&_th:first-child]:ps-4 [&_th:last-child]:pe-4',
@@ -101,7 +101,7 @@ export function TreeTableHeader({ className, ...props }: React.ComponentProps<ty
       className={cn(
         // Nền xám --muted, giống hàng tiêu đề của DataTable: cách nền bảng (--card) đúng một bậc
         // trong thang neutral, đủ tách bạch mà không thành thanh chắn.
-        '[&_tr]:border-b [&_tr]:border-border [&_tr]:bg-muted [&_tr]:hover:bg-muted',
+        '[&_tr]:border-b [&_tr]:border-border [&_tr]:bg-table-header [&_tr]:hover:bg-table-header',
         className
       )}
       {...props}
@@ -150,7 +150,10 @@ export interface TreeTableNameCellProps {
   hasChildren: boolean
   isExpanded: boolean
   onToggle: () => void
-  /** Icon theo loại node. Truyền cho MỌI hàng — thiếu ở một cấp là tên cấp đó lệch sang trái. */
+  /**
+   * Icon theo loại node. Bỏ trống ở cấp nào thì cấp đó không có icon — chấp nhận được vì các cấp
+   * nằm ở độ sâu khác nhau, tên trong cùng một cấp vẫn bắt đầu ở cùng một chỗ.
+   */
   icon?: LucideIcon
   childCount?: number
   isActive?: boolean
@@ -164,10 +167,10 @@ export interface TreeTableNameCellProps {
  * Nguyên tắc: **thứ bậc do THỤT LỀ và đường nối vẽ ra, không do kiểu chữ.** Bản trước dùng 4 bậc
  * đậm/nhạt khác nhau cho 4 cấp, cộng thêm một bậc nữa cho hàng đã tắt — 5 tổ hợp chữ trong cùng một
  * cột, mỗi cấp chỉ có vài dòng nên mắt đọc ra là lộn xộn chứ không ra hệ thống. Giờ chỉ còn đúng
- * hai bậc: gốc cây đậm hơn một nấc, mọi cấp còn lại giống hệt nhau.
+ * hai bậc: gốc cây đậm và sáng hơn, mọi cấp còn lại chữ thường màu xám, giống hệt nhau.
  */
 const ROOT_WEIGHT = 'font-semibold'
-const CHILD_WEIGHT = 'font-medium'
+const CHILD_WEIGHT = 'font-normal'
 
 /** Bậc thụt lề mỗi cấp (px). Giữ ở một chỗ để đường nối và lề luôn khớp nhau. */
 const INDENT_STEP = 24
@@ -211,20 +214,27 @@ export function TreeTableNameCell({
 
         {Icon && <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />}
 
+        {/* Ba mức chữ, mỗi mức nói một chuyện khác nhau: gốc cây đậm nhất, các cấp dưới dịu một
+            nấc (`foreground-subtle`), còn hàng đã tắt mờ hẳn (`muted-foreground`). Nhờ vậy "đã tắt"
+            vẫn phân biệt được với "là cấp con", thay vì cả hai cùng một màu mờ. */}
         <span
           className={cn(
             'truncate text-sm',
             weight,
-            isActive ? 'text-foreground' : 'text-muted-foreground'
+            !isActive
+              ? 'text-muted-foreground'
+              : depth === 0
+                ? 'text-foreground'
+                : 'text-foreground-subtle'
           )}
         >
           {children}
         </span>
 
-        {/* Số đơn vị con: cùng cỡ nhỏ, cùng độ đậm với tên của chính node đó, và cùng font chữ —
-            bản trước để font-mono nên trong một ô có hai kiểu chữ khác nhau. */}
+        {/* Số đơn vị con để trong ngoặc, chữ mờ và không đậm: vẫn tách khỏi tên mà không cần thêm
+            một khối nền nữa vào cột vốn đã có chevron, đường nối và icon. */}
         {hasChildren && (
-          <span className={cn('shrink-0 text-xs tabular text-muted-foreground', weight)}>
+          <span className="tabular shrink-0 text-sm font-normal text-muted-foreground">
             ({childCount})
           </span>
         )}

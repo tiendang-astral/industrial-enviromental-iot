@@ -18,6 +18,7 @@
 | Realtime | @stomp/stompjs | 7.x | STOMP-over-WebSocket, khớp `Spring WebSocket` ở Backend — không dùng socket.io vì Spring không có server socket.io chính thức (quyết định chốt khi làm trang Chi tiết Gateway, ban đầu doc ghi nhầm socket.io-client) |
 | Bundler | Vite | 8.x | |
 | Animation | tw-animate-css + biến `--motion-*` | 1.x | Không dùng thư viện animation JS (Motion/GSAP) — dashboard đọc số realtime cần animation kín đáo, xem `CONVENTIONS.md` § Quy tắc styling |
+| Xuất PDF (`x-frontend`) | html2canvas-pro + jsPDF | 2.x / 4.x | Nút "Tải PDF" ở trang Báo cáo tải thẳng file về máy, không mở hộp thoại in. Chụp DOM thành ảnh rồi cắt thành trang A4 — render lại bằng bộ vẽ PDF sẽ phải dựng lần hai toàn bộ bảng, biểu đồ ECharts và font tiếng Việt, và bản in trôi dần khỏi thứ người dùng vừa nhìn. Bắt buộc bản `-pro`: token màu của dự án khai bằng `oklch()`, `html2canvas` gốc không phân tích được và trả ảnh mất màu |
 | Testing | Vitest + React Testing Library | | |
 
 ## 2. Backend

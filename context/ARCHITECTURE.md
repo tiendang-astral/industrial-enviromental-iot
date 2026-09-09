@@ -273,17 +273,35 @@ Payload:
 ### Flow: Report generation
 
 ```text
-[Frontend] → [Backend] → [PostgreSQL: report request] → [Processing Service] → [PostgreSQL + InfluxDB] → [MinIO] → [Backend] → [Frontend]
+[Frontend] → [Backend] → [PostgreSQL: alert + metadata] + [InfluxDB: số đo] → [Frontend: bảng + biểu đồ] → [Trình duyệt in ra PDF]
 ```
+
+**Chốt ở Phase 8 — báo cáo chạy ĐỒNG BỘ, không qua hàng đợi.** Thiết kế trước đó (Backend ghi
+`report request status=PENDING` → Processing Service render file → MinIO → presigned URL) sinh ra từ
+giả định người dùng chỉ nhận về một file. Yêu cầu thật là **xem kết quả ngay trên màn hình rồi mới
+xuất PDF**, mà đã phải hiện ngay thì không có gì để xếp hàng: `x-backend` truy vấn và trả JSON, còn
+PDF do chính trình duyệt kết xuất từ trang đang hiển thị (print stylesheet).
+
+Nhờ vậy Phase 8 **không cần** bảng `report`, MinIO, worker ở `x-processing-service`, Kafka topic mới,
+hay presigned URL — và không có tầng render thứ hai để lệch khỏi thứ người dùng vừa nhìn thấy. Đổi
+lại: không lưu lịch sử file đã xuất và chưa đính kèm mail được. Khi nào cần hai thứ đó thì dựng lại
+nhánh bất đồng bộ, lúc ấy nội dung báo cáo đã chốt nên chỉ còn việc render lần hai.
 
 | Bước | Service | Xử lý gì |
 |------|---------|-----------|
-| 1 | Frontend | Người dùng chọn loại báo cáo (môi trường/vận hành/sự cố/năng suất), time range, multi-site/multi-sensor filter |
-| 2 | Backend | Validate request, ghi report request (`status=PENDING`) vào Postgres, trả `report_id` ngay |
-| 3 | Processing Service | Report worker nhận job, query đa chiều: metadata/tổ chức + lịch sử `alert` (nếu báo cáo sự cố) từ Postgres, sensor data từ InfluxDB (routing bucket theo time range) |
-| 4 | Processing Service | Render theo template engine tương ứng loại báo cáo (PDF/Excel) |
-| 5 | Processing Service | Upload file lên MinIO bucket `reports/{tenantId}/{yyyy}/{MM}/{reportId}.pdf`, lưu `object_key`/`checksum`/`file_size_bytes` + `status=READY` vào Postgres |
-| 6 | Backend | Khi Frontend poll/nhận notify report `status=READY`, cấp presigned GET URL (~5′) để download |
+| 1 | Frontend | Chọn loại báo cáo (môi trường / sự cố), khoảng thời gian, đơn vị (`TenantNodePicker`), chỉ số hoặc mức độ. Bấm "Tạo báo cáo" mới gọi API — không tự chạy lúc mở trang, mỗi lượt là một truy vấn trải nhiều kênh và nhiều ngày |
+| 2 | Backend | Validate khoảng (trần **366 ngày**), giao phạm vi đơn vị đã chọn với scope user (`ScopeService` ∩ subtree ltree), chặn nếu quá **50 kênh** |
+| 3 | Backend | **Môi trường:** 2 câu Flux `reduce` gộp min/max/trung bình/số điểm cho TẤT CẢ kênh (1 câu cho `sensor_reading`, 1 câu cho `external_reading`), cộng tối đa 4 câu `aggregateWindow` lấy lịch sử vẽ biểu đồ — không phải N câu theo từng kênh |
+| 4 | Backend | **Môi trường:** cột "số lần cảnh báo" đếm từ bảng `alert`, KHÔNG tính lại từ InfluxDB — tính lại vừa đắt vừa ra con số khác với cảnh báo đã thực sự bắn. Hệ quả: khoảng thời gian trước khi quy tắc được tạo hiện 0 |
+| 5 | Backend | **Sự cố:** đọc `alert` theo `started_at` trong khoảng (index `ix_alert_started`), làm giàu bằng `alert_rule`/`datastream`/`metric`/`tenant_node`, kèm thống kê tần suất theo đơn vị và theo chỉ số |
+| 6 | Frontend | **Một** báo cáo duy nhất (không tách tab môi trường/sự cố): gọi song song hai endpoint trên cùng một bộ lọc rồi ghép — bảng số đo theo kênh, bên dưới là từng nhóm gồm biểu đồ + thống kê cảnh báo. Gộp thành một endpoint cũng vẫn là hai lượt đọc vì số đo ở InfluxDB còn sự cố ở Postgres |
+| 6b | Frontend | Chiều gom nhóm = chiều đang lọc (nguồn / gateway / chỉ số), chưa chọn thì gom theo **đơn vị**. Sự cố quy về nhóm qua chính kênh của nó (`datastreamId` → kênh → nhãn nhóm) nên hai phần chắc chắn cùng một cách chia |
+| 7 | Frontend | Nút "Tải PDF" **tải thẳng file về máy** (`lib/reportPdf.ts`): tạm bỏ `.dark` để chụp trên nền sáng, `html2canvas-pro` chụp phần nội dung báo cáo, rồi cắt thành trang A4 **tại mép khối** (card/section/table) chứ không cắt cứng theo chiều cao — cắt cứng thì biểu đồ bị xẻ đôi qua ranh giới trang. Khối `@media print` trong `index.css` vẫn giữ cho ai bấm Ctrl+P |
+
+**Ràng buộc còn lại:** báo cáo môi trường đọc bucket `raw` cho mọi khoảng, vì `downsampled_1m/5m/1h/1d`
+và `external_history` trong `DATABASE.md` §4 **chưa tồn tại thật** — job downsample thuộc Phase 9.
+`InfluxReadService.bucketFor(from, to)` là chỗ duy nhất cần sửa khi các bucket đó có thật. Khi
+production áp đúng retention 7 ngày cho `raw`, báo cáo theo tháng/quý sẽ rỗng cho tới lúc đó.
 
 ### Flow: Auth / RBAC (đa cấp tenant)
 

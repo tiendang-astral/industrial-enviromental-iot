@@ -155,7 +155,7 @@ export function DataTable<T>({
   return (
     <div className="flex flex-col gap-4">
       {/* Lề trái/phải nới ra 4 để cột đầu và cột cuối không dính sát viền hộp. */}
-      <div className="overflow-x-auto rounded-lg border border-border bg-card [&_td:first-child]:ps-4 [&_td:last-child]:pe-4 [&_th:first-child]:ps-4 [&_th:last-child]:pe-4">
+      <div className="overflow-x-auto rounded-lg border border-border bg-card shadow-panel [&_td:first-child]:ps-4 [&_td:last-child]:pe-4 [&_th:first-child]:ps-4 [&_th:last-child]:pe-4">
         <Table>
           <TableHeader className="[&_tr]:border-border">
             {/* Chỉ hàng TIÊU ĐỀ mang nền xám. Hàng lọc bên dưới để cùng nền với hàng dữ liệu vì đó

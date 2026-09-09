@@ -38,7 +38,10 @@ export function AppSidebar() {
 
       <SidebarContent className="pt-2">
         {NAV_GROUPS.map((group, index) => (
-          <SidebarGroup key={group.label ?? `group-${index}`} className="px-2 py-1">
+          <SidebarGroup
+            key={group.label ?? `group-${index}`}
+            className="px-2 py-1 group-data-[collapsible=icon]:px-1"
+          >
             {group.label && (
               <SidebarGroupLabel className="h-6 px-3 text-[0.6875rem] font-semibold tracking-wider text-sidebar-foreground/45 uppercase">
                 {group.label}
@@ -57,6 +60,9 @@ export function AppSidebar() {
                         tooltip={item.label}
                         className={cn(
                           'relative h-10 gap-3 rounded-lg px-3 text-[0.9375rem] font-medium',
+                          // Base của shadcn ép size-8!/p-2! khi thu gọn — nút tụt từ 40px xuống 32px
+                          // và icon lệch khỏi tâm rail. Giữ đúng 40×40 (rail 48px - px-1 hai bên).
+                          'group-data-[collapsible=icon]:size-10! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:gap-0 group-data-[collapsible=icon]:p-0!',
                           'text-sidebar-foreground/85 transition-colors duration-[var(--motion-fast)]',
                           'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
                           'data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground',
@@ -74,7 +80,9 @@ export function AppSidebar() {
                             )}
                           />
                           <item.icon className={cn(isActive && 'text-sidebar-primary')} />
-                          <span>{item.label}</span>
+                          {/* Thu gọn thì ẩn hẳn nhãn: base shadcn chỉ trông vào overflow-hidden của
+                              nút 32px để cắt chữ, giữ nút 40px thì chữ thò ra và đẩy icon lệch tâm. */}
+                          <span className="group-data-[collapsible=icon]:hidden">{item.label}</span>
                         </NavLink>
                       </SidebarMenuButton>
                     </SidebarMenuItem>

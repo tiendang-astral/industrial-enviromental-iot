@@ -338,22 +338,67 @@ Chia 2 đợt: **6a** (backend CRUD + engine, verify bằng API/DB/mail thật) 
 
 **Chức năng PRODUCT.md:** "Reporting" (mục 4, bảng yêu cầu kỹ thuật).
 
-**Service:** x-backend, x-processing-service, x-frontend (theo `ARCHITECTURE.md` § Flow: Report generation).
+**Service:** x-backend, x-frontend. **Không** chạm `x-processing-service`.
 
-**Bảng/storage liên quan:** report request (bảng report — cần bổ sung vào `DATABASE.md` nếu chưa có cột cụ thể), MinIO bucket `reports`.
+**Phạm vi đã chốt:** 2 loại báo cáo có dữ liệu thật trong hệ thống — **Môi trường** (số đo InfluxDB)
+và **Sự cố** (lịch sử `alert`). "Vận hành" và "Năng suất" trong `PRODUCT.md` để lại: năng suất không
+có bảng sản lượng/đầu con nào để đọc, làm nó là thiết kế thêm schema nhập liệu, tức một phase riêng.
+
+**Quyết định kiến trúc — bỏ nhánh bất đồng bộ.** Thiết kế cũ (bảng `report` → worker ở
+`x-processing-service` → MinIO → presigned URL) giả định người dùng chỉ nhận về một file. Yêu cầu
+thật là **xem kết quả trên màn hình trước rồi mới xuất PDF**; đã phải hiện ngay thì không còn gì để
+xếp hàng. Nên: `x-backend` truy vấn đồng bộ trả JSON, `x-frontend` render, PDF do trình duyệt kết
+xuất từ chính trang đó. Không có tầng render thứ hai để lệch khỏi thứ người dùng vừa nhìn thấy.
+Đánh đổi: không lưu lịch sử file đã xuất, chưa đính kèm mail được. Xem `ARCHITECTURE.md` § Flow:
+Report generation.
+
+**Bảng/storage liên quan:** không migration mới. MinIO và bảng `report` **chưa cần** tới.
 
 **Nhiệm vụ chính:**
-- [ ] x-backend: API tạo report request (loại báo cáo, time range, multi-site/multi-sensor filter), ghi `status=PENDING`, trả `report_id` ngay (async).
-- [ ] x-processing-service: report worker nhận job, query đa chiều — metadata/tổ chức + lịch sử `alert` (báo cáo sự cố) từ Postgres, sensor data từ InfluxDB (routing bucket theo time range đã định nghĩa ở `DATABASE.md` § 4).
-- [ ] Render theo template engine tương ứng loại báo cáo (PDF/Excel).
-- [ ] Upload MinIO `reports/{tenantId}/{yyyy}/{MM}/{reportId}.pdf`, lưu `object_key`/`checksum`/`file_size_bytes`, `status=READY`.
-- [ ] x-backend: cấp presigned GET URL (~5′) khi x-frontend poll/nhận notify `READY`.
-- [ ] x-frontend: form chọn loại báo cáo + filter, polling trạng thái, nút download khi `READY`.
+- [x] `InfluxReadService`: khoảng **tuyệt đối** `from/to` (trước chỉ có `-Nm` tương đối) + gộp nhiều kênh trong MỘT câu Flux — `summarizeSensor`/`summarizeExternal` dùng `reduce` ra min/max/tổng/số điểm theo bộ tag, `historySensorRange`/`historyExternalRange` dùng `aggregateWindow`. Cả báo cáo tối đa 6 câu truy vấn, không phải N câu theo kênh.
+- [x] `InfluxReadService.bucketFor(from, to)`: chỗ duy nhất giữ luật routing bucket. Hiện luôn trả `raw` — các bucket `downsampled_*` chưa tồn tại thật (job downsample là Phase 9).
+- [x] `InfluxReadService.esc()`: thoát dấu nháy cho `source_field` (tên cột do người dùng đặt) trước khi ghép vào câu Flux.
+- [x] `AlertRepository`: `findInRange`/`findInRangeByNodes` lọc theo `started_at` + node + mức độ (index `ix_alert_started`), và `countByDatastreamInRange` cho cột "số lần cảnh báo".
+- [x] x-backend: `ReportController` + `ReportService`/`ReportServiceImpl`, `GET /reports/environment` và `GET /reports/incident`. Quyền gồm cả `VIEWER` (`PRODUCT.md`: Nhân viên xem báo cáo); phạm vi đơn vị giao với scope user trong service, không dùng `@nodeScope` (một báo cáo trải nhiều đơn vị).
+- [x] Trần bảo vệ truy vấn đồng bộ: **366 ngày** (`INVALID_RANGE`), **50 kênh** (`TOO_MANY_DATASTREAMS`), **5000 sự cố**.
+- [x] x-backend: lọc thêm theo `gatewayIds`/`externalSourceIds`/`metricIds`. API nhận được cả ba cùng lúc và ghép theo `(gateway ∪ nguồn) ∩ chỉ số`; UI hiện chỉ gửi **một** chiều mỗi lần. Với báo cáo sự cố, đưa tập `datastream_id` vào trong truy vấn qua cờ `filterDatastreams` thay vì lọc sau khi lấy về.
+- [x] x-frontend: `ReportsPage` thật (thay placeholder) — **một** báo cáo gộp môi trường + sự cố, không tab: `ReportFilterBar`, `ReportView` (bảng số đo → từng nhóm gồm biểu đồ + thống kê cảnh báo), `ReportPrintHeader`. Gọi song song hai endpoint trên cùng bộ lọc rồi ghép ở FE.
+- [x] x-frontend: `DateRangePicker` (lịch 2 tháng + cột phím tắt, chọn theo NGÀY rồi tự quy ra 00:00 → 23:59:59.999) và `MultiSelect` chung, cả hai đặt ở `components/patterns/` để dùng lại được.
+- [x] x-frontend: thanh lọc là `Card` **một hàng duy nhất** ở desktop — `lg:flex-nowrap` + `flex-1` trên từng ô để chúng tự co lại khi thêm ô lọc, thay vì đủ rộng thì đẩy hai nút rớt xuống hàng dưới; hai nút `shrink-0` + `ms-auto` nên luôn dính mép phải. Không helper text.
+- [x] x-frontend: chiều thu hẹp là **một** `Select` mặc định rỗng (placeholder "Chọn"): Nguồn dữ liệu / Gateway / Chỉ số. Chọn chiều nào thì hiện đúng một `MultiSelect` của chiều đó; đổi chiều thì xoá lựa chọn cũ (id gateway vô nghĩa trong danh sách chỉ số).
+- [x] x-frontend: **không** lọc theo mức độ sự cố — báo cáo luôn tính cả `WARNING` lẫn `CRITICAL`, phần thống kê từng nhóm đã tách sẵn hai con số. API vẫn giữ tham số `severity` (là khả năng thật của endpoint, chỉ không có ô nào trên UI dùng tới).
+- [x] x-frontend: `EmptyState` nhận thêm `size="lg"` (icon 64px, tiêu đề 18px) — cỡ mặc định hợp với ô rỗng trong bảng, đặt giữa vùng cao 700px thì nhỏ như hạt bụi. Mọi chỗ dùng cũ giữ nguyên vì `default` là mặc định.
+- [x] x-backend: `EnvironmentChannelResponse` trả thêm `sourceType`/`gatewayId`/`gatewayName`/`externalSourceId`/`externalSourceName` — không có chúng thì FE không gom nhóm theo gateway/nguồn được. Tra theo lô, không tra trong vòng lặp dựng response.
+- [x] x-frontend: `ReportPlaceholder` — lấp đầy chiều cao vùng nội dung, nền xám trung tính, khối icon + tiêu đề + ba thẻ liệt kê các phần báo cáo sẽ dựng ra (bảng số đo / biểu đồ theo nhóm / thống kê sự cố). **Cố tình không** mô phỏng bố cục báo cáo bằng khối xám: bản thử đầu tiên làm vậy thì nhìn ra y hệt `ReportSkeleton`, người dùng sẽ tưởng trang đang tải.
+- [x] x-frontend: `ReportSkeleton` (dựng đúng hình dạng kết quả: bảng + các nhóm biểu đồ).
+- [x] x-frontend: nút **Tải PDF** nằm cạnh "Tạo báo cáo" (bỏ nút ở `PageHeader`), disable tới khi có kết quả. Tải **file thật** về máy qua `lib/reportPdf.ts` (html2canvas-pro + jsPDF), không mở hộp thoại in: tạm bỏ `.dark` để chụp trên nền sáng rồi trả lại theme cũ, và cắt trang A4 **tại mép khối** (card/section/table) chứ không cắt cứng theo chiều cao — cắt cứng thì biểu đồ bị xẻ đôi qua ranh giới trang. Khối `@media print` trong `index.css` vẫn giữ cho ai bấm Ctrl+P.
+- [x] x-frontend: nguồn gốc tách thành cột riêng **"Nguồn"** ở CẢ hai bảng (tổng quan và chi tiết sự cố), đứng trước cột "Kênh" — cột "Kênh" nay in chỉ số. Tiền tố loại dùng ở mọi nơi còn lại: đầu mục nhóm, tiêu đề card biểu đồ, và dòng thống kê theo kênh — `Thiết bị <tên>` / `Nguồn <tên>` / `Chỉ số <tên>` / `Đơn vị <tên>`. Ô "Lọc theo" cũng đổi `Gateway` → `Thiết bị` cho khớp mục điều hướng. Chỉ mỗi cái tên thì không đủ: "abcde" có thể là tên gateway lẫn tên một nguồn database ngoài, mà hai thứ khác hẳn bản chất khi đọc báo cáo. Thấy rõ nhất khi gom theo chỉ số — nhóm "Chỉ số Nhiệt độ" có cả kênh của `Nguồn localhost` lẫn của `Thiết bị abcde`.
+- [x] x-frontend: mỗi nhóm có card **"Thống kê sự cố"** gồm 3 phần — 3 chip tổng/nguy hiểm/cảnh báo, phân bố theo từng kênh kèm vạch tỉ lệ, và **bảng chi tiết từng sự cố** (bắt đầu / kết thúc / kéo dài / kênh / quy tắc / ngưỡng / giá trị đo / mức độ / trạng thái, `pageSize={0}`). Con số nói CÓ BAO NHIÊU, bảng nói CHUYỆN GÌ đã xảy ra — thiếu nó thì người đọc thấy "4 sự cố" mà không biết lúc nào, ngưỡng nào, kéo dài bao lâu, có phục hồi không.
+- [x] x-frontend: bản xuất ra ép biểu đồ về **một cột full width** và cao thêm (`data-report-charts`/`data-report-chart`) — trên A4 hai biểu đồ cạnh nhau thì mỗi cái chỉ còn ~9cm, mốc thời gian dính vào nhau đọc không ra. Chờ 600ms sau khi đổi lưới để `ResizeObserver` của `ResizableChart` kịp bảo ECharts vẽ lại, nếu không ảnh chụp dính canvas cũ theo bề ngang hai cột.
+- [x] **Sửa lỗi tự phát hiện:** tiêu đề báo cáo (`ReportPrintHeader`) khai `hidden print:block` nên **rơi khỏi file PDF** — html2canvas chụp theo screen media, biến thể `print:` không kích hoạt. File gửi đi mất luôn tên báo cáo và kỳ báo cáo. Chuyển sang `data-report-header` + khai style cho cả `@media print` lẫn `[data-exporting]`.
+- [x] **Sửa lỗi tự phát hiện (lần 2 của cùng một loại):** quy tắc thu nhỏ bảng khi xuất (`overflow-x-auto` → `visible`, `font-size: 10px`) chỉ khai dưới `@media print` nên bảng chi tiết sự cố **bị cắt mất cột "Trạng thái"** trong file PDF. Đã tách ra khai cho cả `[data-exporting]`. Đây đúng là cái bẫy vừa ghi vào `CONVENTIONS.md` một bước trước đó.
+- [x] **Sửa lỗi tự phát hiện:** `MultiSelect` lồng `<button>` của Radix `Checkbox` trong `<button>` của cả dòng — HTML không hợp lệ, React cảnh báo và trình duyệt tự gỡ lồng làm hỏng vùng bấm. Thay ô tick bằng `<span>` tự vẽ, thêm `role="listbox"`/`role="option"`.
+- [x] x-frontend: **mọi ô lọc đều bắt buộc** — `data-required` trên `FieldLabel` (dấu `*` do `index.css` vẽ). Nút "Tạo báo cáo" **khoá** cho tới khi đủ điều kiện thay vì cho bấm rồi báo lỗi: mọi ô đã có dấu `*` nên một dòng chữ đỏ chỉ nhắc lại thứ người dùng vừa thấy. Nút "Tải PDF" **chỉ hiện sau khi có báo cáo** — một nút xám ngay từ lúc mở trang bắt người dùng tự đoán phải làm gì để nó sống dậy. Ô rộng vừa nội dung (`lg:w-fit` + sàn/trần trên control). Thông báo lỗi gom về một dòng dưới hàng thay vì đặt dưới từng ô: cả hàng canh theo đáy nên một ô cao thêm sẽ đẩy lệch mọi ô còn lại và hai cái nút.
+- [x] x-frontend: khối `@media print` trong `index.css` + nút "In / Lưu PDF" gọi `window.print()`.
 
 **DoD:**
-- [ ] Tạo report môi trường trong khoảng 7 ngày → nhận file PDF/Excel đúng dữ liệu, download qua presigned URL còn hiệu lực.
-- [ ] Report sự cố có kèm danh sách alert đúng thời gian filter.
-- [ ] Report request lỗi (VD source rỗng) → `status` phản ánh lỗi, không crash worker.
+- [x] Báo cáo môi trường 8 ngày trên dữ liệu thật tenant 8 → **14 kênh**, min/max/trung bình/số điểm khớp với truy vấn Flux chạy tay trên InfluxDB (VD gateway pin AI1: min 12.8, max 39.3), lịch sử vẽ được biểu đồ, cột "lần cảnh báo" khớp bảng `alert`. Trả về trong ~0.96s.
+- [x] Báo cáo sự cố → **4 sự cố** đúng lịch sử `alert`, kèm tần suất theo đơn vị và theo chỉ số; sự cố `RECOVERED` có `durationSeconds=2820`, sự cố còn mở/`STALE` để null (không bịa "đã kết thúc").
+- [x] Lỗi biên: khoảng > 366 ngày → 400 `INVALID_RANGE`; `to <= from` → 400; `severity` sai → 400 `INVALID_SEVERITY`; node không tồn tại → 404; không token → 403.
+- [x] Lọc theo đơn vị: chọn "test xưởng" → 9/14 kênh, đúng subtree.
+- [x] Lọc theo nguồn/gateway (dữ liệu thật): gateway `abcde` → 9 kênh, nguồn `localhost` → 5 kênh, gửi **cả hai** → 14 kênh = đúng phép hợp (không phải giao); gateway chưa có kênh nào → 0. Báo cáo sự cố: 4 sự cố đều thuộc gateway `abcde` nên lọc theo nguồn ngoài trả 0.
+- [x] Lọc theo chỉ số (dữ liệu thật): sự cố theo `temperature` → 2, `o2` → 1, cả hai → 3 (khớp đúng thống kê `byMetric`); `gateway=abcde` GIAO `temperature` → 2, gateway khác GIAO `temperature` → 0.
+- [x] UI (Playwright): mọi ô nhập **và cả hai nút** đo được là cùng một hàng ở 1440px lẫn 1280px, nút cách mép phải 20px; đổi chiều lọc thì ô thứ hai đổi đúng danh sách (gateway 4 mục / nguồn 4 mục / chỉ số 34 mục) và không hiện khi chưa chọn chiều; lịch mở được, preset "30 ngày qua" điền đúng nhãn.
+- [x] UI (Playwright): gom nhóm đúng theo chiều lọc — theo gateway ra `abcde (9 kênh)` + `Không thuộc gateway nào (5 kênh)`, theo chỉ số ra 11 nhóm, mặc định theo đơn vị ra `Demo Farm 123 (5 kênh, không có sự cố)` + `test xưởng (9 kênh, 4 sự cố, 4 nguy hiểm)` — khớp đúng 4 sự cố kiểm qua API. Cột "Lần cảnh báo" không còn badge; khối trống cao 705px lấp kín vùng nội dung.
+- [x] UI (Playwright): empty state hiện lúc chưa tạo và mỗi tab có state riêng; 48 khối skeleton lúc đang chạy rồi biến hết khi dữ liệu về; query gửi lên đúng `gatewayIds=3` (hai chiều kia rỗng); "Tải PDF" disable lúc đầu → enable khi có báo cáo → disable lại khi đổi tab; không còn nút "In / Lưu PDF" ở header; 0 lỗi JS.
+- [x] Tải PDF (kiểm bằng Playwright, bắt sự kiện `download`): file `bao-cao-2026-09-08.pdf` **1.24MB, header `%PDF-`, 3 trang**; trích ảnh từng trang ra xem thì có đủ **tiêu đề "Báo cáo môi trường và sự cố" + kỳ báo cáo + thời điểm kết xuất**, nền trắng, dấu tiếng Việt đủ, bảng 8 cột, card "Thống kê sự cố" in ra đúng `4 tổng / 4 nguy hiểm / 0 cảnh báo` kèm phân bố 3 kênh, bảng số đo có cột **"Nguồn gốc"** phân biệt `Nguồn localhost` với `Thiết bị abcde`, đầu mục nhóm là `Chỉ số Nhiệt độ`, bảng **chi tiết sự cố đủ 10 cột** (kể cả "Trạng thái": `Ngừng theo dõi` / `Đã phục hồi`), biểu đồ **một cột full width** đọc rõ từng mốc 30 phút và không cái nào bị cắt đôi qua ranh giới trang; theme tối của app được trả lại sau khi xuất; 0 lỗi JS.
+- [x] Ô lọc bắt buộc (Playwright): các nhãn có `data-required` và dấu `*`; "Tạo báo cáo" `disabled` ở cả 3 bước thiếu (mới mở trang → chọn đơn vị → chọn chiều lọc) và chỉ mở khi chọn xong giá trị cuối; nút "Tải PDF" không tồn tại trong DOM cho tới khi báo cáo chạy xong; không còn dòng báo lỗi nào. Ô rộng vừa nội dung (183/160/160/160px), vẫn cùng một hàng, nút cách mép phải 20px.
+- [x] In ra PDF (kiểm bằng Playwright ở `media: print`): sidebar và thanh lọc biến mất, nền trắng dù app đang ở theme tối, tiêu đề kỳ báo cáo hiện ra, bảng **không mất cột nào** (đã sửa `overflow-x-auto` vốn cắt mất cột cuối trên giấy), card không bị cắt đôi giữa hai trang.
+- [ ] Xuất Excel / lưu lịch sử file / đính kèm mail — chưa làm, cần thì dựng lại nhánh async (bảng `report` + worker + MinIO) khi nội dung báo cáo đã ổn định.
+
+**Ràng buộc còn treo:** báo cáo môi trường đọc bucket `raw` cho mọi khoảng. Khi production áp đúng
+retention 7 ngày như `DATABASE.md` §4, báo cáo theo tháng/quý sẽ rỗng cho tới khi Phase 9 làm job
+downsample. Sửa đúng `bucketFor()` là xong.
 
 ---
 

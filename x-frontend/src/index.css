@@ -22,10 +22,10 @@
    Ràng buộc còn lại: chroma primary (0.12–0.135) **không được vượt** critical
    (0.175) — cảnh báo vẫn phải là thứ nổi nhất màn hình.
 
-   Phân lớp chiều sâu ở chế độ tối: TOÀN BỘ dải sidebar (L 0.142–0.196) nằm hẳn
-   dưới mức sáng của body (L 0.242). Bản trước sidebar chạy 0.166–0.300 cắt ngang
-   qua body 0.218 nên nửa trên sidebar sáng hơn body, nửa dưới tối hơn, hai mảng
-   hoà vào nhau. Vệt sáng của body cũng đẩy sang góc PHẢI để không giáp sidebar.
+   Phân lớp chiều sâu ở chế độ tối: TOÀN BỘ dải sidebar (L 0.134–0.180) nằm hẳn
+   dưới dải body (L 0.196–0.212), và body cách card (0.252) ít nhất 0.040 ở mọi
+   điểm. Ràng buộc thứ hai là thứ bản trước thiếu: gradient body cũ chạy tới 0.232
+   nên ở đáy trang thẻ chỉ nổi hơn nền 0.018 L, bảng đặt ở nửa dưới trang chìm hẳn.
 
    3 lớp gradient (`--gradient-sidebar`, `--gradient-chrome`, `--gradient-body`)
    tạo chiều sâu, và CẢ BA đều đổi theo theme. Quan hệ giữ nguyên ở cả 2 chế độ:
@@ -52,6 +52,7 @@
     --color-secondary-foreground: var(--secondary-foreground);
     --color-muted: var(--muted);
     --color-muted-foreground: var(--muted-foreground);
+    --color-foreground-subtle: var(--foreground-subtle);
     --color-accent: var(--accent);
     --color-accent-foreground: var(--accent-foreground);
     --color-destructive: var(--destructive);
@@ -60,6 +61,16 @@
     --color-input: var(--input);
     --color-field: var(--field);
     --color-ring: var(--ring);
+
+    /* Bảng dữ liệu có nền riêng: dải tiêu đề nằm giữa card và popover, kẻ giữa
+       hàng nhạt hơn viền ngoài. Dùng chung 1 token cho cả hai khiến 12 hàng
+       trông như 12 cái thẻ xếp chồng. */
+    --color-table-header: var(--table-header);
+    --color-hairline: var(--hairline);
+
+    /* Bóng của khối dữ liệu (bảng, panel). Ở chế độ tối viền một mình không đủ
+       tách bảng khỏi nền — bóng làm việc đó. */
+    --shadow-panel: var(--panel-shadow);
 
     /* Trạng thái ngữ nghĩa — dùng qua Badge/StatusBadge, chấm trạng thái, ngưỡng
        metric. Cấm dùng màu Tailwind thô (bg-green-500) ở bất kỳ đâu. */
@@ -135,6 +146,10 @@
 
     --background: var(--n-1);
     --foreground: var(--n-11);
+    /* Chữ xám cho nội dung đọc bình thường nhưng không phải mức nhấn cao nhất — VD các cấp dưới
+       trong cây tổ chức. Cố ý dừng ở n-9 chứ không xuống n-8: n-8 là --muted-foreground, đang dành
+       cho hàng đã tắt, dùng chung thì "đang hoạt động" và "đã tắt" ra cùng một màu chữ. */
+    --foreground-subtle: var(--n-9);
     --surface: var(--n-0);
     --surface-raised: var(--n-0);
     --card: var(--n-0);
@@ -156,6 +171,11 @@
 
     --border: var(--n-4);
     --input: var(--n-4);
+    --table-header: var(--n-2);
+    --hairline: var(--n-3);
+    --panel-shadow:
+        0 1px 2px oklch(0.30 0.03 254 / 7%),
+        0 14px 30px -16px oklch(0.30 0.03 254 / 20%);
     /* Nền ô nhập tách khỏi --input (--input là màu VIỀN). Sáng: trắng, nổi lên trên mọi mặt nền
        xám nhạt. Tối: lõm hẳn xuống dưới mặt nền chứa nó. */
     --field: oklch(1 0 0);
@@ -211,22 +231,29 @@
 }
 
 .dark {
-    --n-0: oklch(0.142 0.036 254);
-    --n-1: oklch(0.214 0.022 254);
-    --n-2: oklch(0.250 0.022 254);
-    --n-3: oklch(0.288 0.022 254);
-    --n-4: oklch(0.330 0.022 254);
-    --n-5: oklch(0.390 0.020 254);
-    --n-6: oklch(0.480 0.018 254);
-    --n-7: oklch(0.595 0.015 254);
-    --n-8: oklch(0.735 0.012 254);
-    --n-9: oklch(0.818 0.009 254);
-    --n-10: oklch(0.892 0.006 254);
-    --n-11: oklch(0.968 0.004 254);
-    --n-12: oklch(0.142 0.036 254);
+    /* Chroma THUÔN DẦN khi độ sáng tăng (0.042 → 0.005): nền tối gánh được nhiều
+       màu mà không bị ám, còn chữ sáng phải gần trung tính mới không ngả xanh.
+       Bản trước để cả dải nội dung ở 0.022 nên khung app ra navy còn thẻ/bảng ra
+       xám lạnh — hai nửa giao diện không nối được với nhau.
+       Bậc nền cũng nới từ 0.036 lên 0.047-0.050: dưới nền tối và gần như không có
+       bóng, mắt cần khoảng 0.045 L mới tách được hai mặt phẳng. */
+    --n-0: oklch(0.155 0.042 258);
+    --n-1: oklch(0.205 0.038 257);
+    --n-2: oklch(0.252 0.034 256);
+    --n-3: oklch(0.300 0.031 256);
+    --n-4: oklch(0.352 0.028 256);
+    --n-5: oklch(0.418 0.025 256);
+    --n-6: oklch(0.505 0.021 256);
+    --n-7: oklch(0.615 0.017 256);
+    --n-8: oklch(0.742 0.013 256);
+    --n-9: oklch(0.828 0.010 256);
+    --n-10: oklch(0.898 0.007 256);
+    --n-11: oklch(0.972 0.005 256);
+    --n-12: oklch(0.155 0.042 258);
 
     --background: var(--n-1);
     --foreground: var(--n-11);
+    --foreground-subtle: var(--n-9);
     --surface: var(--n-2);
     --surface-raised: var(--n-3);
     --card: var(--n-2);
@@ -236,35 +263,47 @@
     --popover: var(--n-3);
     --popover-foreground: var(--n-11);
 
-    --primary: oklch(0.76 0.120 218);
+    --primary: oklch(0.77 0.125 218);
     --primary-foreground: oklch(0.17 0.030 225);
     --secondary: var(--n-3);
     --secondary-foreground: var(--n-11);
     --muted: var(--n-3);
     --muted-foreground: var(--n-8);
 
-    --accent: oklch(0.320 0.048 234);
-    --accent-foreground: oklch(0.92 0.055 220);
+    /* Hover hàng bảng và mục menu — sáng thêm một bậc so với bản cũ để phân biệt
+       được với dải tiêu đề bảng vừa thêm bên dưới. */
+    --accent: oklch(0.345 0.055 232);
+    --accent-foreground: oklch(0.93 0.060 220);
 
     --border: var(--n-4);
     /* Viền đậm hơn n-4 một bậc: ở chế độ tối viền là thứ duy nhất vẽ ra hình ô nhập. */
-    --input: oklch(0.385 0.022 254);
-    --field: oklch(0.222 0.020 254);
-    --ring: oklch(0.76 0.120 218);
+    --input: oklch(0.400 0.030 256);
+    --field: oklch(0.212 0.032 257);
+    --ring: oklch(0.77 0.125 218);
 
-    --ok: oklch(0.76 0.16 145);
-    --warning: oklch(0.80 0.15 75);
-    --critical: oklch(0.72 0.155 25);
-    --info: oklch(0.76 0.11 255);
+    /* Dải tiêu đề bảng: thấp hơn popover nửa bậc, cao hơn card 0.040 — bảng có mép
+       trên để mắt bám. Kẻ giữa hàng nhạt hơn hẳn viền ngoài (0.278 so với 0.352). */
+    --table-header: oklch(0.292 0.030 256);
+    --hairline: oklch(0.278 0.028 256);
+    --panel-shadow:
+        0 2px 4px oklch(0 0 0 / 28%),
+        0 20px 44px -22px oklch(0 0 0 / 70%);
+
+    /* Nâng nhẹ độ sáng so với bản cũ: nền thẻ navy đậm hơn nên 4 màu này phải
+       sáng thêm mới giữ nguyên sức nặng thị giác. */
+    --ok: oklch(0.78 0.155 152);
+    --warning: oklch(0.82 0.145 78);
+    --critical: oklch(0.71 0.165 24);
+    --info: oklch(0.76 0.115 250);
     --destructive: var(--critical);
     --destructive-foreground: oklch(0.17 0.03 254);
 
     --gradient-sidebar: linear-gradient(178deg,
-            oklch(0.176 0.046 264) 0%,
-            oklch(0.128 0.036 254) 100%);
+            oklch(0.180 0.050 264) 0%,
+            oklch(0.134 0.042 256) 100%);
     --gradient-chrome: linear-gradient(101deg,
-            oklch(0.172 0.042 262) 0%,
-            oklch(0.142 0.036 252) 100%);
+            oklch(0.176 0.046 262) 0%,
+            oklch(0.146 0.042 254) 100%);
 
     --surface-deep: var(--n-0);
     --surface-deep-foreground: oklch(0.97 0.005 254);
@@ -275,23 +314,28 @@
 
     --sidebar: var(--surface-deep);
     --sidebar-foreground: var(--surface-deep-foreground);
-    --sidebar-primary: oklch(0.76 0.120 218);
+    --sidebar-primary: oklch(0.77 0.125 218);
     --sidebar-primary-foreground: oklch(0.17 0.030 225);
     --sidebar-accent: oklch(1 0 0 / 11%);
     --sidebar-accent-foreground: oklch(0.99 0.004 254);
     --sidebar-border: var(--surface-deep-border);
-    --sidebar-ring: oklch(0.76 0.120 218);
+    --sidebar-ring: oklch(0.77 0.125 218);
 
+    /* Gradient body làm PHẲNG lại (biên độ 0.036 → 0.016). Bản trước đáy trang lên
+       tới 0.232 trong khi card là 0.250 — chỉ cách 0.018 L, nên bảng đặt ở nửa dưới
+       trang chìm hẳn vào nền. Giờ chỗ hẹp nhất vẫn còn 0.040 so với card.
+       Toàn bộ dải này (0.196-0.212) vẫn nằm trên dải sidebar (0.134-0.180), giữ đúng
+       quan hệ "khung tối hơn body" ở cả 2 chế độ. */
     --gradient-body: linear-gradient(180deg,
-            oklch(0.196 0.024 256) 0%,
-            oklch(0.232 0.020 252) 100%);
+            oklch(0.196 0.038 258) 0%,
+            oklch(0.212 0.034 255) 100%);
 
-    --chart-1: oklch(0.72 0.12 218);
-    --chart-2: oklch(0.72 0.12 278);
-    --chart-3: oklch(0.72 0.13 338);
-    --chart-4: oklch(0.72 0.13 38);
-    --chart-5: oklch(0.72 0.13 98);
-    --chart-6: oklch(0.72 0.13 158);
+    --chart-1: oklch(0.745 0.135 218);
+    --chart-2: oklch(0.745 0.135 278);
+    --chart-3: oklch(0.745 0.135 338);
+    --chart-4: oklch(0.745 0.135 38);
+    --chart-5: oklch(0.745 0.135 98);
+    --chart-6: oklch(0.745 0.135 158);
 }
 
 @layer base {
@@ -380,6 +424,18 @@
    trông như dán đè lên giao diện còn đọc được nguyên vẹn phía sau. Tối hẳn thì mắt biết ngay
    phần dưới đã bị khoá tương tác. Bỏ luôn backdrop-blur: làm mờ chữ phía sau không khiến hộp
    thoại nổi hơn, chỉ khiến toàn màn hình trông như lỗi render. */
+/* Bảng dữ liệu. Ba thứ tách bảng khỏi mặt nền chứa nó, theo thứ tự quan trọng:
+   dải tiêu đề có nền riêng (mép trên để mắt bám), kẻ giữa hàng nhạt hơn viền ngoài,
+   và bóng đổ. Làm ở CSS thay vì sửa `ui/table.tsx` (file shadcn generated) — cùng
+   cách đã dùng cho input/field-label/dialog-overlay bên dưới. */
+[data-slot="table-header"] {
+    background-color: var(--table-header);
+}
+
+[data-slot="table-body"] [data-slot="table-row"] {
+    border-color: var(--hairline);
+}
+
 [data-slot="dialog-overlay"],
 [data-slot="alert-dialog-overlay"] {
     background-color: oklch(0 0 0 / 62%);
@@ -396,4 +452,147 @@
         transition-duration: 0.01ms !important;
         scroll-behavior: auto !important;
     }
+}
+
+/* ---------------------------------------------------------------------------------------------
+   Bản in (Phase 8 - Báo cáo). PDF được kết xuất bằng chính trình duyệt từ cái đang hiện trên màn
+   hình, nên không có tầng render thứ hai để lệch. Phần khung ứng dụng tự ẩn bằng `print:hidden`
+   ngay tại component (AppSidebar/AppTopbar/PageHeader/thanh lọc); khối này chỉ lo những thứ
+   không diễn đạt được bằng utility class.
+   --------------------------------------------------------------------------------------------- */
+/* Tiêu đề chỉ dành cho bản xuất ra. Hai ngữ cảnh, một khai báo: lệnh in của trình duyệt
+   (`@media print`) và nút "Tải PDF" (chụp DOM theo screen media, đánh dấu bằng `data-exporting`
+   trên <html> trong lúc chụp — xem lib/reportPdf.ts). */
+[data-report-header] {
+    display: none;
+}
+
+@media print {
+    [data-report-header] {
+        display: block;
+        margin-bottom: 1rem;
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 0.75rem;
+    }
+}
+
+[data-exporting] [data-report-header] {
+    display: block;
+    margin-bottom: 1rem;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.75rem;
+}
+
+/* Biểu đồ trong bản xuất ra: MỘT cột, tràn hết bề ngang. Hai cột cạnh nhau trên A4 thì mỗi biểu đồ
+   chỉ còn khoảng 9cm, mốc thời gian ở trục X dính vào nhau đọc không ra. Cao thêm một chút để tỉ lệ
+   không thành một vệt dẹt. */
+@media print {
+
+    [data-report-charts] {
+        grid-template-columns: 1fr;
+    }
+
+    [data-report-chart] {
+        height: 17rem;
+    }
+}
+
+[data-exporting] [data-report-charts] {
+    grid-template-columns: 1fr;
+}
+
+[data-exporting] [data-report-chart] {
+    height: 17rem;
+}
+
+@media print {
+
+    /* Sidebar không thuộc về tờ báo cáo. Phải nhắm thẳng `[data-slot="sidebar"]`: className truyền
+       vào <Sidebar> rơi vào lớp trong, còn phần tử ngoài cùng vẫn giữ chỗ 256px và in ra thành
+       một dải lề trắng thừa ở MỌI trang giấy. */
+    [data-slot="sidebar"] {
+        display: none !important;
+    }
+
+    /* Giấy trắng mực đen bất kể người dùng đang xem theme nào - in nền tối vừa tốn mực vừa làm
+       chữ xám trên xám. Ghi đè token nên mọi component đổi theo, không phải sửa từng chỗ. */
+    :root,
+    .dark {
+        --background: #ffffff;
+        --foreground: #111111;
+        --card: #ffffff;
+        --card-foreground: #111111;
+        --popover: #ffffff;
+        --muted: #f4f4f5;
+        --muted-foreground: #52525b;
+        --border: #d4d4d8;
+        /* .bg-app/.bg-app-chrome phủ thêm một lớp gradient lên trên màu nền; để nguyên thì
+           nền in ra vẫn có vệt màu dù --background đã là trắng. */
+        --gradient-body: none;
+        --gradient-chrome: none;
+    }
+
+    body {
+        background: #ffffff;
+    }
+
+    /* Vùng cuộn của app: trên giấy không có "màn hình" để cuộn, nội dung phải trải hết ra. */
+    main {
+        overflow: visible !important;
+        height: auto !important;
+    }
+
+    /* Bảng và card không bị cắt đôi giữa hai trang giấy. */
+    .break-inside-avoid,
+    [data-slot="card"],
+    tr {
+        break-inside: avoid;
+    }
+
+    /* Bảng dài qua nhiều trang vẫn có hàng tiêu đề ở đầu mỗi trang. */
+    thead {
+        display: table-header-group;
+    }
+
+    @page {
+        margin: 14mm;
+    }
+}
+
+/* Bảng rộng cuộn ngang được trên màn hình, nhưng bản xuất ra thì không cuộn: để nguyên
+   `overflow-x-auto` là mấy cột cuối biến mất mà không ai biết (đã dính đúng lỗi này hai lần —
+   bảng số đo lúc in, rồi bảng chi tiết sự cố lúc tải PDF). Cho tràn ra rồi thu nhỏ chữ và cho
+   phép xuống dòng để cả bảng lọt vào bề ngang trang.
+
+   Khai cho CẢ HAI lối xuất: `@media print` (lệnh in) và `[data-exporting]` (nút Tải PDF, chụp DOM
+   theo screen media) — xem CONVENTIONS.md § Quy tắc styling. */
+@media print {
+
+    .overflow-x-auto {
+        overflow: visible !important;
+    }
+
+    table {
+        font-size: 10px;
+    }
+
+    th,
+    td {
+        padding-block: 4px;
+        white-space: normal;
+    }
+}
+
+[data-exporting] .overflow-x-auto {
+    overflow: visible !important;
+}
+
+[data-exporting] table {
+    font-size: 10px;
+}
+
+[data-exporting] th,
+[data-exporting] td {
+    padding-block: 4px;
+    white-space: normal;
 }

@@ -42,7 +42,7 @@ export default function AppShell() {
         <AppSidebar />
         <SidebarInset className="bg-app flex min-h-svh min-w-0 flex-col">
           <AppTopbar trail={trail} />
-          <main className="min-w-0 flex-1 p-6">
+          <main className="min-w-0 flex-1 p-6 print:p-0">
             <Outlet />
           </main>
         </SidebarInset>

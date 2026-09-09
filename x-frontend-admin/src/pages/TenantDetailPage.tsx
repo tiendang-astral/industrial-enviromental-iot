@@ -257,9 +257,18 @@ export default function TenantDetailPage() {
                             />
                           ) : null}
                         </span>
-                        <Icon className="size-4 shrink-0 text-muted-foreground" />
+                        {/* Chỉ cấp SITE mới đeo icon — ba cấp trên chỉ là vỏ tổ chức, còn SITE là
+                            nơi thật sự gắn gateway. Khớp bảng Tổ chức bên x-frontend. */}
+                        {node.nodeType === 'SITE' && (
+                          <Icon className="size-4 shrink-0 text-muted-foreground" />
+                        )}
                         <span
-                          className={cn('truncate text-sm', depth === 0 ? 'font-semibold' : 'font-medium')}
+                          className={cn(
+                            'truncate text-sm',
+                            depth === 0
+                              ? 'font-semibold text-foreground'
+                              : 'font-normal text-foreground-subtle'
+                          )}
                         >
                           {node.name}
                         </span>

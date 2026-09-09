@@ -210,13 +210,13 @@ export function DataTable<T>({
         </div>
       )}
 
-      <div className="overflow-x-auto rounded-lg border bg-muted/20 [&_[data-slot=table-container]]:overflow-x-visible">
+      <div className="overflow-x-auto rounded-lg border bg-muted/20 shadow-panel [&_[data-slot=table-container]]:overflow-x-visible">
         <Table>
           {/* Hàng TIÊU ĐỀ tách biệt màu với hàng dữ liệu (bg-muted đặc, giống bảng Dashboard) —
               hàng LỌC bên dưới thì dùng chung nền với hàng dữ liệu vì đó là chỗ gõ/chọn vào,
               không phải khung bảng. */}
           <TableHeader>
-            <TableRow className="bg-muted hover:bg-muted">
+            <TableRow className="bg-table-header hover:bg-table-header">
               {showIndex && (
                 <TableHead className="w-12 px-4 text-center text-xs font-semibold tracking-wide text-muted-foreground uppercase">
                   STT

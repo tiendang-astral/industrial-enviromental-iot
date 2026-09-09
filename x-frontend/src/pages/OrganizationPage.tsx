@@ -164,7 +164,9 @@ export default function OrganizationPage() {
                     hasChildren={hasChildren}
                     isExpanded={isExpanded}
                     onToggle={toggle}
-                    icon={NODE_ICON[node.nodeType]}
+                    // Chỉ cấp SITE mới đeo icon — ba cấp trên chỉ là vỏ tổ chức, còn SITE là
+                    // nơi thật sự gắn gateway và kênh dữ liệu.
+                    icon={node.nodeType === 'SITE' ? NODE_ICON.SITE : undefined}
                     childCount={childCount}
                     isActive={node.enabled}
                   >

@@ -503,7 +503,7 @@ Template layout = [
 - Composite FK `(tenant_id, tenant_node_id) → tenant_node`.
 - Unique `(tenant_id, tenant_node_id, lower(name))` = `uq_datastream_name`.
 - **Tự động tạo 1-1** khi tạo `gateway_pin` INPUT (`GatewayPinServiceImpl.create()`, cùng transaction) — không có endpoint tạo/xóa datastream riêng, khớp nguyên tắc "1 gateway_pin → 1 datastream" ở bảng `gateway_pin`. Backfill 1 lần cho pin có trước tính năng Dashboard qua `V6__backfill_datastream_from_gateway_pin.sql`.
-- **`EXTERNAL_SOURCE_JOB` — tạo/xóa thủ công** (`V11`, khác gateway_pin): `POST /external-source-jobs/{jobId}/datastreams` (chọn `metricId` + `sourceField` khớp `query_config.valueColumns` của job), `DELETE /datastreams/{id}` chỉ cho phép khi `sourceType=EXTERNAL_SOURCE_JOB` (400 nếu là `GATEWAY_PIN`, giữ nguyên invariant lifecycle gateway_pin sở hữu ở trên).
+- **`EXTERNAL_SOURCE_JOB` — tạo/xóa thủ công** (`V11`, khác gateway_pin): `POST /external-source-jobs/{jobId}/datastreams` (chọn `metricId` + `sourceField` là **cột thật trong kết quả truy vấn** của job — backend chạy thử để đối chiếu; `valueColumns` đã bị bỏ ở `V12`, xem ghi chú `source_field` phía trên), `DELETE /datastreams/{id}` chỉ cho phép khi `sourceType=EXTERNAL_SOURCE_JOB` (400 nếu là `GATEWAY_PIN`, giữ nguyên invariant lifecycle gateway_pin sở hữu ở trên).
 - **Gắn kênh muộn để lại lỗ hổng** (`V13`): job đã chạy thì phần trước `incremental_cursor` đã bị Processing Service vứt (không có datastream để resolve). Lúc tạo kênh, API nhận thêm `startFrom` để xếp luôn một tác vụ vá; kênh cũ vá sau qua `POST /datastreams/{id}/backfill`. Xem § external_source_job_backfill.
 - **KHÔNG bị xóa khi pin bị tắt** (`gateway_pin.enabled=false`) — `id` phải ổn định để widget Dashboard đang bind không mất liên kết khi user bật lại pin; lúc pin tắt chỉ dừng nhận data (Processing Service đã skip từ Phase 3), Backend expose thêm `sourceEnabled` (API.md) để FE hiện badge "Pin đã tắt" thay vì hiển thị âm thầm dữ liệu cũ.
 
@@ -708,6 +708,13 @@ Fields: value_float (double), quality (string)
 > - Dữ liệu ghi trước thay đổi này mang nhãn cũ nên không khớp truy vấn mới; bucket `raw` retention 7 ngày nên tự đồng nhất sau một tuần.
 
 ### Bucket và retention
+
+> **Mới chỉ có `raw` tồn tại thật.** Bảng dưới đây là thiết kế đích; `downsampled_*` và
+> `external_history` sinh ra từ job downsample của **Phase 9** nên hiện chưa được tạo, và ở dev
+> `raw` đang để retention vô hạn thay vì 7 ngày. Vì vậy bảng "Query routing" ngay bên dưới cũng
+> chưa có hiệu lực: `InfluxReadService.bucketFor(from, to)` trả `raw` cho mọi khoảng và là chỗ duy
+> nhất cần sửa khi các bucket kia có thật. Hệ quả cần nhớ: khi production áp đúng retention 7 ngày,
+> **báo cáo môi trường theo tháng/quý (Phase 8) sẽ rỗng** cho tới khi Phase 9 xong.
 
 | Bucket | Resolution | Retention |
 |--------|------------|-----------|

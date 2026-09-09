@@ -41,4 +41,13 @@ public interface DatastreamRepository extends JpaRepository<Datastream, Long> {
               AND j.externalSourceId = :externalSourceId
             """)
     List<Datastream> findByExternalSourceId(@Param("externalSourceId") Long externalSourceId);
+
+    /** Như trên nhưng cho nhiều nguồn — bộ lọc "theo nguồn" của báo cáo (Phase 8). */
+    @Query("""
+            SELECT d FROM Datastream d, ExternalSourceJob j
+            WHERE d.sourceType = com.corp.iot.backend.datastream.entity.SourceType.EXTERNAL_SOURCE_JOB
+              AND d.sourceId = j.id
+              AND j.externalSourceId IN :externalSourceIds
+            """)
+    List<Datastream> findByExternalSourceIdIn(@Param("externalSourceIds") Collection<Long> externalSourceIds);
 }

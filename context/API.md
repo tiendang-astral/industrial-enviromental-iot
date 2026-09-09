@@ -168,6 +168,10 @@ Scope theo node như Tenant Node ở trên.
 
 `DatastreamTelemetryResponse`: `{ datastreamId, name, sourceField, metricCode, unit, latestValue, latestMeasuredAt, oldestReadingAt, bucketSeconds, history: [{ value, measuredAt }] }` — `history`/`bucketSeconds` gộp mẫu theo cùng luật với `PinTelemetryResponse` ở trên.
 
+| Method | Path | Body / Query | Response mẫu | Mô tả |
+|--------|------|--------------|--------------|-------|
+| GET | /api/v1/datastreams/{id}/telemetry | Query `rangeMinutes` (optional, default 1440, trần 10080) | `{ data: DatastreamTelemetryResponse }` | Số đo của **đúng một kênh**, không cần biết phía sau là chân gateway hay câu SQL. Widget biểu đồ trên dashboard chỉ cầm `datastreamId`: kênh external nằm trên board đơn vị không tra ngược ra `external_source_id` (`datastream.source_id` là id của *job*), nên hai endpoint theo gateway/theo nguồn ở trên không phục vụ được nó. Scope `@nodeScope.canAccessDatastream` |
+
 Lọc InfluxDB theo `(external_source_job_id, source_field)` chứ **không** theo `metric`: một job được phép có 2 kênh cùng metric ở 2 cột khác nhau, lọc theo metric sẽ trộn chúng làm một (xem `DATABASE.md` §4).
 
 | Method | Path | Body / Query | Response mẫu | Mô tả |
@@ -405,6 +409,68 @@ Scope theo gateway như module Gateway ở trên (`@nodeScope.canAccessGateway`)
 
 `CommandResponse`: `{ id, gatewayId, pinId, commandType, status, requestedAt, timeoutAt, error }`. `status` ∈ `PENDING`/`DISPATCHED`/`ACKNOWLEDGED`/`FAILED`/`TIMED_OUT` — cập nhật tiếp theo qua WebSocket, xem `ARCHITECTURE.md` § Flow Command.
 
+### Module: Report (`ReportController`) — **Mới Phase 8**
+
+Hai báo cáo chạy **đồng bộ**: trả JSON để `x-frontend` render bảng + biểu đồ ngay trên màn hình, PDF
+do trình duyệt tự kết xuất từ trang đó. Không có bảng hàng đợi, không worker, không MinIO, không
+presigned URL — xem `ARCHITECTURE.md` § Flow: Report generation.
+
+Quyền `TENANT_ADMIN/MANAGER/OPERATOR/**VIEWER**` — `PRODUCT.md` xếp "xem báo cáo" vào quyền Nhân
+viên. Phạm vi đơn vị giao với scope user trong service (một báo cáo trải trên nhiều đơn vị nên không
+dùng `@nodeScope` vốn nhận đúng một id), cùng cách `AlertController` làm.
+
+| Method | Path | Body / Query | Response mẫu | Mô tả |
+|--------|------|--------------|--------------|-------|
+| GET | /api/v1/reports/environment | Query `from`, `to` (ISO-8601, bắt buộc), `tenantNodeIds`, `metricIds`, `gatewayIds`, `externalSourceIds` (optional, ngăn bằng dấu phẩy) | `{ data: EnvironmentReportResponse }` | Thống kê số đo theo từng kênh trong khoảng: min/max/trung bình/số điểm + lịch sử vẽ biểu đồ + số lần cảnh báo |
+| GET | /api/v1/reports/incident | Query `from`, `to` (bắt buộc), `tenantNodeIds`, `gatewayIds`, `externalSourceIds`, `metricIds` (optional), `severity` (optional, `WARNING`\|`CRITICAL`) | `{ data: IncidentReportResponse }` | Danh sách sự cố bắt đầu trong khoảng + thống kê tần suất theo đơn vị và theo chỉ số |
+
+Mọi danh sách lọc bỏ trống = **không lọc** chiều đó (toàn bộ trong phạm vi user) — vẫn là hành vi của API, dù form ở `x-frontend` bắt buộc người dùng chọn đơn vị và một chiều thu hẹp trước khi gửi. `severity` là khả năng của endpoint nhưng `x-frontend` không dùng: báo cáo luôn tính cả hai mức độ rồi tách con số ở phần thống kê từng nhóm. Mỗi `tenantNodeId`
+lấy cả **subtree** rồi giao với scope, giống `GET /alerts`.
+
+**Ba chiều thu hẹp ghép theo hai phép khác nhau: `(gatewayIds ∪ externalSourceIds) ∩ metricIds`.**
+API nhận được cả ba cùng lúc, còn `x-frontend` hiện chỉ gửi **một** chiều mỗi lần (ô "Lọc theo" là
+`Select` đơn) — giữ khả năng kết hợp ở API vì đây là ràng buộc dữ liệu, không phải ràng buộc UI.
+`metricIds` áp cho **cả hai** báo cáo — với báo cáo sự cố nó quy về "kênh có chỉ số này" chứ không
+join sang `alert_rule`, vì `alert.datastream_id` đã đủ để suy ra chỉ số.
+
+**`gatewayIds` và `externalSourceIds` HỢP nhau, không giao nhau.** Một kênh chỉ có thể neo vào chân
+gateway *hoặc* vào job của nguồn ngoài (`datastream.source_type`), nên giao hai tập luôn rỗng — truyền
+cả hai nghĩa là "kênh của những gateway này **cộng** kênh của những nguồn này". Với báo cáo sự cố,
+bộ lọc này quy về tập `datastream_id` rồi đưa **vào trong truy vấn**, không lọc sau khi lấy về: cắt
+trần 5000 dòng mới nhất rồi mới bỏ dòng ngoài phạm vi thì bộ lọc hẹp sẽ trả về gần như rỗng.
+
+Lưu ý `datastream.source_id` của kênh gateway là id của **pin**, không phải id gateway — backend
+phải tra `gateway_pin` theo `gatewayIds` trước rồi mới khớp `source_id`.
+
+`EnvironmentReportResponse`: `{ from, to, generatedAt, bucketSeconds, channels: EnvironmentChannelResponse[] }`.
+
+`EnvironmentChannelResponse`: `{ datastreamId, datastreamName, tenantNodeId, tenantNodeName, metricCode, metricName, metricUnit, sampleCount, minValue, maxValue, avgValue, alertCount, history: [{ value, measuredAt }] }`.
+
+`IncidentReportResponse`: `{ from, to, generatedAt, totalCount, incidents: IncidentResponse[], byNode: IncidentCountResponse[], byMetric: IncidentCountResponse[] }`.
+
+`IncidentResponse`: `{ id, ruleId, ruleName, tenantNodeId, tenantNodeName, datastreamId, datastreamName, metricCode, metricName, metricUnit, severity, status, thresholdSnapshot, lastObservedValue, startedAt, triggeredAt, recoveredAt, durationSeconds }`. `durationSeconds` **null** = chưa kết thúc (còn `PENDING`/`ACTIVE`, hoặc `STALE` vì quy tắc bị tắt giữa chừng). `ruleName` null nếu rule đã xoá mềm.
+
+`IncidentCountResponse`: `{ label, total, critical, warning }`, sắp giảm dần theo `total`.
+
+> `x-frontend` không dùng `byNode`/`byMetric` của response này: nó tự gom `incidents` theo đúng chiều đang lọc (đơn vị / nguồn / gateway / chỉ số) để phần thống kê và phần biểu đồ chắc chắn cùng một cách chia. Hai mảng kia giữ lại vì là dạng tổng hợp sẵn cho nơi gọi khác.
+
+**Ba điểm quyết định nội dung báo cáo:**
+
+1. **`sampleCount`/`minValue`/`maxValue`/`avgValue` tính trên dữ liệu THÔ**, không phải trên chuỗi đã gộp mẫu — `history` mới là chuỗi gộp (`bucketSeconds` là bề rộng cửa sổ). Lấy min/max từ chuỗi đã trung bình hoá sẽ giấu mất chính lần vượt ngưỡng mà báo cáo sinh ra để chỉ tới.
+2. **`alertCount` đếm từ bảng `alert`**, không tính lại từ InfluxDB. Tính lại vừa đắt vừa cho ra con số khác với cảnh báo đã thực sự bắn, và người đọc hai màn hình thấy hai số thì mất niềm tin vào cả hai. Hệ quả phải nói rõ trên UI: khoảng thời gian trước khi quy tắc được tạo hiện 0, không phải "không có vi phạm".
+3. **Sự cố lọc theo `started_at`**, không theo khoảng giao nhau — một sự cố kéo dài qua ranh giới kỳ báo cáo chỉ được tính đúng một lần, ở kỳ nó bắt đầu.
+
+**Mã lỗi:**
+
+| Code | Khi nào |
+|------|---------|
+| `INVALID_RANGE` | `to <= from`, hoặc khoảng dài quá **366 ngày** (400) |
+| `TOO_MANY_DATASTREAMS` | Quá **50 kênh** khớp bộ lọc — truy vấn chạy đồng bộ trong request thread (400) |
+| `INVALID_SEVERITY` | `severity` không phải `WARNING`/`CRITICAL` (400) |
+| `NODE_NOT_FOUND` | `tenantNodeIds` chứa id không tồn tại (404) |
+
+> **Khoảng báo cáo bị giới hạn bởi retention của bucket `raw`.** Bảng routing bucket ở `DATABASE.md` §4 chưa dùng được: chỉ `raw` tồn tại thật, `downsampled_*` sinh ra từ job của Phase 9. `InfluxReadService.bucketFor(from, to)` hiện luôn trả `raw` và là chỗ duy nhất cần sửa khi các bucket kia có thật.
+
 ### Module: Platform Dashboard (`PlatformDashboardController`)
 
 `@PreAuthorize("hasAuthority('PLATFORM_ADMIN')")` — chỉ System Admin. Dùng cho trang Dashboard của `x-frontend-admin` (tổng hợp cross-tenant, không có ở `x-frontend`).
@@ -423,4 +489,4 @@ Scope theo gateway như module Gateway ở trên (`@nodeScope.canAccessGateway`)
 
 ---
 
-> Module Alert/Report (Phase 6/8) chưa có endpoint — cập nhật bảng tương ứng khi Phase đó implement, theo `PLAN.md`.
+> Module Alert (Phase 6) và Report (Phase 8) đã có endpoint ở trên. Còn lại theo `PLAN.md`: Phase 9 (hardening) chưa thêm endpoint nào.
