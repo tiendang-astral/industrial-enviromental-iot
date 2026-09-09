@@ -48,7 +48,10 @@ export const LineWidget = memo(function LineWidget({
           : live
         return { label: datastream.name, points }
       }),
-    [datastreams, telemetry, readings]
+    // `readings` là object MỚI sau mỗi message STOMP của bất kỳ kênh nào trên board. Khoá theo mốc
+    // thời gian của đúng những kênh widget này bind, để nó chỉ dựng lại khi CHÍNH nó có số đo mới.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [datastreams, telemetry, datastreams.map((ds) => readings[ds.id]?.latestMeasuredAt ?? '').join('|')]
   )
 
   const unit = datastreams[0]?.metricUnit ?? telemetry[0]?.unit

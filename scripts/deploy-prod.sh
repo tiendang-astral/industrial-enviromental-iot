@@ -26,6 +26,22 @@ for key in POSTGRES_PASSWORD INFLUX_TOKEN INFLUX_PASSWORD MINIO_ROOT_PASSWORD \
   value="$(grep -E "^${key}=" "$ENV_FILE" | head -1 | cut -d= -f2-)"
   [ -z "$value" ] && missing+=("$key")
 done
+# Giá trị mở đầu bằng '-' bị CLI của công cụ hạ tầng hiểu là FLAG, không phải giá trị.
+# Đã gặp thật: INFLUX_PASSWORD bắt đầu bằng '-' làm `influx setup` hỏng với thông báo
+# "unknown command \"iiot\" for \"setup\"" — không hề gợi ý gì tới mật khẩu.
+bad_dash=()
+for key in POSTGRES_PASSWORD INFLUX_TOKEN INFLUX_PASSWORD MINIO_ROOT_PASSWORD \
+           EMQX_DASHBOARD_PASSWORD MQTT_SERVICE_PASSWORD; do
+  value="$(grep -E "^${key}=" "$ENV_FILE" | head -1 | cut -d= -f2-)"
+  case "$value" in -*) bad_dash+=("$key") ;; esac
+done
+if [ ${#bad_dash[@]} -gt 0 ]; then
+  echo "!! Các secret sau mở đầu bằng dấu '-', sẽ bị hiểu nhầm là flag:" >&2
+  printf '   - %s\n' "${bad_dash[@]}" >&2
+  echo "   Sinh lại bằng ký tự chữ và số: openssl rand -hex 24" >&2
+  exit 1
+fi
+
 if [ ${#missing[@]} -gt 0 ]; then
   echo "!! Các biến bắt buộc còn trống trong .env.production:" >&2
   printf '   - %s\n' "${missing[@]}" >&2
@@ -33,8 +49,28 @@ if [ ${#missing[@]} -gt 0 ]; then
   exit 1
 fi
 
+# Giá trị có dấu cách hoặc ký tự < > | & phải được bọc nháy, nếu không bash hiểu là cú pháp.
+# Thử trong subshell trước để báo lỗi cho ra hồn thay vì "syntax error near unexpected token".
+if ! ( set -a; source "$ENV_FILE" ) >/dev/null 2>&1; then
+  echo "!! .env.production có lỗi cú pháp. Dòng gây lỗi:" >&2
+  ( set -a; source "$ENV_FILE" ) 2>&1 >/dev/null | head -3 | sed 's/^/   /' >&2
+  echo "   Thường là giá trị có dấu cách hoặc < > mà chưa bọc nháy, ví dụ:" >&2
+  echo '     ALERT_MAIL_FROM="IIoT Alert <alert@example.com>"' >&2
+  exit 1
+fi
+
 # shellcheck disable=SC1090
 set -a; source "$ENV_FILE"; set +a
+
+# URL WebSocket bị nướng vào bundle lúc build. Sai thì trang vẫn mở được nhưng dashboard
+# KHÔNG có dữ liệu realtime — triệu chứng dễ chẩn đoán nhầm sang backend hoặc EMQX.
+if grep -q "REPLACE_WITH_VPS_HOST" "$ENV_FILE"; then
+  echo "!! TENANT_WS_BASE_URL còn placeholder trong .env.production" >&2
+  echo "   Sửa thành địa chỉ THẬT mà người dùng gõ vào trình duyệt, ví dụ:" >&2
+  echo "     TENANT_WS_BASE_URL=ws://203.0.113.10:31080/ws" >&2
+  echo "     TENANT_WS_BASE_URL=wss://iot.congty.vn/ws      # nếu đi qua reverse proxy có TLS" >&2
+  exit 1
+fi
 
 compose() { docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"; }
 
@@ -86,6 +122,20 @@ cat <<EOF
     1. Vào EMQX Dashboard, tạo user "${MQTT_SERVICE_USERNAME}" đúng mật khẩu trong .env.production
     2. Tạo tài khoản RIÊNG cho từng gateway, kèm ACL chỉ cho phép topic gateway/<mac>/#
     Chưa làm bước 1 thì ingestion/processing không nối được vào EMQX.
+
+$(if echo "$FLYWAY_LOCATIONS" | grep -q dev-seed; then cat <<'SEED'
+  ⚠ DỮ LIỆU DEMO ĐANG BẬT (FLYWAY_LOCATIONS có db/dev-seed):
+      Quản trị platform : admin  / 123456
+      Quản trị tenant   : admin1 / 123456   (tenant "Demo Farm")
+    Mật khẩu 123456 nằm công khai trong source. Trước khi mở hệ thống ra ngoài:
+    đổi mật khẩu, xoá tenant Demo Farm, rồi bỏ db/dev-seed khỏi FLYWAY_LOCATIONS.
+SEED
+else cat <<'NOSEED'
+  ĐĂNG NHẬP LẦN ĐẦU — ĐỔI MẬT KHẨU NGAY:
+    Quản trị platform: admin / ChangeMe123!
+    Đây là mật khẩu bootstrap trong migration V2, ai đọc source cũng biết.
+NOSEED
+fi)
 
   Log:  docker compose --env-file .env.production -f compose/docker-compose.prod.yml logs -f <service>
   Dừng: scripts/down-prod.sh

@@ -10,6 +10,9 @@ export function useSaveDashboardLayoutMutation(tenantNodeId: number) {
   const queryClient = useQueryClient()
 
   const mutation = useMutation({
+    // Huỷ mọi GET đang bay trước khi ghi: một GET phát trước lúc PUT nhưng đáp SAU sẽ mang dữ liệu
+    // CŨ ghi đè lên cache, và bản vừa lưu biến mất ngay trên màn hình đang mở.
+    onMutate: () => queryClient.cancelQueries({ queryKey: ['dashboard', tenantNodeId] }),
     mutationFn: (widgets: Widget[]) => saveDashboardLayout(tenantNodeId, widgets),
     onSuccess: (dashboard) => {
       queryClient.setQueryData(['dashboard', tenantNodeId], dashboard)

@@ -17,7 +17,9 @@ spring:
 
   flyway:
     baseline-on-migrate: false
-    locations: classpath:db/migration
+    # dev-seed chứa tài khoản test (admin/admin1 mật khẩu 123456) — production PHẢI ghi đè
+    # biến này để loại nó ra, xem compose/docker-compose.prod.yml.
+    locations: classpath:db/migration,classpath:db/dev-seed
 
   data:
     redis:

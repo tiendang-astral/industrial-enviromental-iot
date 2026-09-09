@@ -45,18 +45,27 @@ export function clampWidgets(widgets: Widget[]): Widget[] {
   return widgets.map(clampWidgetLayout)
 }
 
-/** Xếp widget mới vào chỗ trống cuối lưới — cùng luật với `GridCursor` ở x-backend (áp mẫu). */
+function overlaps(a: WidgetLayout, b: WidgetLayout): boolean {
+  return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
+}
+
+/**
+ * Ô trống ĐẦU TIÊN chứa vừa widget, quét từ trên xuống, trái sang phải.
+ *
+ * Bản trước suy vị trí từ "hàng cuối" nên khi các widget ở đáy cao thấp khác nhau, ô mới rơi trúng
+ * chỗ đã có widget — RGL phải đẩy widget kia xuống, và với bố cục tự do thì nó không trồi lại.
+ * Quét thật thì ô mới không bao giờ đụng ai, nên chẳng có gì để đẩy.
+ */
 export function nextWidgetLayout(existing: Widget[], type: WidgetType): WidgetLayout {
   const spec = widgetSizeSpec(type)
-  if (existing.length === 0) return { x: 0, y: 0, w: spec.w, h: spec.h }
+  const taken = existing.map((widget) => widget.layout)
+  const bottom = taken.reduce((max, layout) => Math.max(max, layout.y + layout.h), 0)
 
-  const bottom = Math.max(...existing.map((widget) => widget.layout.y + widget.layout.h))
-  // Hàng cuối = những widget chạm đáy lưới. Còn chỗ bên phải thì xếp tiếp vào đó, không thì xuống hàng.
-  const lastRow = existing.filter((widget) => widget.layout.y + widget.layout.h === bottom)
-  const rowRight = Math.max(...lastRow.map((widget) => widget.layout.x + widget.layout.w))
-  const rowTop = Math.min(...lastRow.map((widget) => widget.layout.y))
-
-  return rowRight + spec.w <= GRID_COLS
-    ? { x: rowRight, y: rowTop, w: spec.w, h: spec.h }
-    : { x: 0, y: bottom, w: spec.w, h: spec.h }
+  for (let y = 0; y <= bottom; y++) {
+    for (let x = 0; x + spec.w <= GRID_COLS; x++) {
+      const candidate = { x, y, w: spec.w, h: spec.h }
+      if (!taken.some((layout) => overlaps(candidate, layout))) return candidate
+    }
+  }
+  return { x: 0, y: bottom, w: spec.w, h: spec.h }
 }

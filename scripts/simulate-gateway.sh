@@ -8,6 +8,7 @@
 # Usage:
 #   ./scripts/simulate-gateway.sh --mac AA:BB:CC:DD:EE:FF
 #   ./scripts/simulate-gateway.sh --mac AA:BB:CC:DD:EE:FF --interval 10
+#   ./scripts/simulate-gateway.sh --mac AA:BB:CC:DD:EE:FF --port 31883 --user iiot-service --pass '...'   # prod
 #   ./scripts/simulate-gateway.sh --mac AA:BB:CC:DD:EE:FF --reading AI:1:23.5 --reading DI:1:1
 #   ./scripts/simulate-gateway.sh --mac AA:BB:CC:DD:EE:FF --measured-at 2026-08-12T09:41:00Z   # test dedup: chạy 2 lần cùng timestamp
 set -euo pipefail
@@ -17,6 +18,8 @@ PORT="1883"
 MAC=""
 INTERVAL=""
 MEASURED_AT=""
+USERNAME=""
+PASSWORD=""
 READINGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -26,13 +29,15 @@ while [[ $# -gt 0 ]]; do
     --port) PORT="$2"; shift 2 ;;
     --interval) INTERVAL="$2"; shift 2 ;;
     --measured-at) MEASURED_AT="$2"; shift 2 ;;
+    --user) USERNAME="$2"; shift 2 ;;
+    --pass) PASSWORD="$2"; shift 2 ;;
     --reading) READINGS+=("$2"); shift 2 ;;
     *) echo "Unknown arg: $1" >&2; exit 1 ;;
   esac
 done
 
 if [[ -z "$MAC" ]]; then
-  echo "Usage: $0 --mac <mac_address> [--host H] [--port P] [--interval SECONDS] [--measured-at ISO8601] [--reading TYPE:PINNUM:VALUE]..." >&2
+  echo "Usage: $0 --mac <mac_address> [--host H] [--port P] [--interval SECONDS] [--measured-at ISO8601] [--user U --pass P] [--reading TYPE:PINNUM:VALUE]..." >&2
   exit 1
 fi
 
@@ -63,7 +68,10 @@ publish_once() {
   payload="$(build_payload "$measured_at")"
   local topic="gateway/${MAC}/data"
   echo "==> Publishing to ${topic}: ${payload}"
-  mosquitto_pub -h "$HOST" -p "$PORT" -t "$topic" -q 1 -m "$payload"
+  # EMQX production bật xác thực; local dev để trống thì nối ẩn danh như cũ.
+  local auth=()
+  [[ -n "$USERNAME" ]] && auth+=(-u "$USERNAME" -P "$PASSWORD")
+  mosquitto_pub -h "$HOST" -p "$PORT" "${auth[@]}" -t "$topic" -q 1 -m "$payload"
 }
 
 if [[ -n "$INTERVAL" ]]; then

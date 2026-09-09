@@ -34,6 +34,8 @@ import type {
 import type { Metric } from '@/types/metric'
 
 const EMPTY_METRIC_BY_CODE = new Map<string, Metric>()
+/** Tham chiếu cố định — trả mảng rỗng mới mỗi lần cũng đủ phá `memo`. */
+const EMPTY_DATASTREAMS: Datastream[] = []
 
 const GRID_COLS = 12
 const ROW_HEIGHT = 60
@@ -136,6 +138,22 @@ export function DashboardBoard({
     return map
   }, [datastreams])
 
+  // Một mảng kênh ỔN ĐỊNH cho mỗi widget. Tạo mảng inline trong JSX thì mỗi lần board render là một
+  // mảng mới, `memo` của WidgetRenderer không bao giờ ăn — và biểu đồ dựng lại option nên ECharts
+  // (`notMerge`) vẽ lại từ đầu, thấy ra là nháy hoặc mất hình mỗi khi bấm vào widget.
+  const datastreamsByWidget = useMemo(() => {
+    const map = new Map<string, Datastream[]>()
+    for (const widget of widgets) {
+      map.set(
+        widget.id,
+        widgetDatastreamIds(widget)
+          .map((id) => datastreamById.get(id))
+          .filter((ds): ds is Datastream => !!ds)
+      )
+    }
+    return map
+  }, [widgets, datastreamById])
+
   const { width, containerRef, mounted, measureWidth } = useContainerWidth()
 
   useEffect(() => {
@@ -171,9 +189,18 @@ export function DashboardBoard({
       setActiveWidgetId(newItem.i)
     }
   }
-  function handleDragOrResizeStop() {
+  /**
+   * Chốt layout ngay khi thả, không đợi `onLayoutChange`.
+   *
+   * RGL bắn `onLayoutChange` cho resize nhưng KHÔNG bắn cho drag, nên cú kéo chỉ đổi vị trí trong
+   * state nội bộ của RGL còn `widgets` giữ toạ độ cũ: widget nhìn thì đã sang chỗ mới, mà bấm Lưu
+   * lại ghi xuống chỗ cũ — tải lại là nó nhảy về. `handleLayoutChange` tự bỏ qua khi không có gì
+   * đổi nên gọi thêm ở đây là an toàn.
+   */
+  function handleDragOrResizeStop(layout: readonly { i: string; x: number; y: number; w: number; h: number }[]) {
     setLiveMaxRow(0)
     setActiveWidgetId(null)
+    if (Array.isArray(layout)) handleLayoutChange(layout)
   }
 
   function handleAddWidget(input: {
@@ -398,9 +425,7 @@ export function DashboardBoard({
                   <WidgetRenderer
                     widget={widget}
                     tenantNodeId={tenantNodeId}
-                    datastreams={widgetDatastreamIds(widget)
-                      .map((id) => datastreamById.get(id))
-                      .filter((ds): ds is Datastream => !!ds)}
+                    datastreams={datastreamsByWidget.get(widget.id) ?? EMPTY_DATASTREAMS}
                     // Bind kênh nhưng KHÔNG kênh nào còn trong phạm vi board: đã chuyển đơn vị hoặc
                     // đã xoá. Widget vẫn vẽ nhưng đứng im — phải nói ra.
                     orphaned={

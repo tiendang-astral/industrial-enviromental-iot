@@ -31,6 +31,10 @@ mqtt:
   # trong nhóm, thay vì phát bản sao cho tất cả. Tiền tố bị broker bóc trước khi giao nên
   # RECEIVED_TOPIC vẫn là gateway/{mac}/data, regex ở SensorInboundMqttHandler không đổi.
   topic-filter: $share/ingestion/gateway/+/data
+  # Để rỗng = nối ẩn danh (EMQX local dev). Production bật xác thực nên bắt buộc điền,
+  # không thì broker từ chối kết nối và pipeline đứng im.
+  username: ${MQTT_USERNAME:}
+  password: ${MQTT_PASSWORD:}
 
 app:
   kafka:

@@ -19,3 +19,6 @@ node_modules/
 .env.*.local
 # Superpowers brainstorm companion (mockup tạm)
 .superpowers/
+.claude/
+context/
+docker/

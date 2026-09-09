@@ -26,6 +26,12 @@ public class MqttCommandConfig {
     @Value("${mqtt.broker-url}")
     private String brokerUrl;
 
+    @Value("${mqtt.username:}")
+    private String username;
+
+    @Value("${mqtt.password:}")
+    private String password;
+
     @Value("${mqtt.client-id}")
     private String clientId;
 
@@ -39,6 +45,11 @@ public class MqttCommandConfig {
         options.setServerURIs(new String[]{brokerUrl});
         options.setAutomaticReconnect(true);
         options.setCleanSession(true);
+        // Bỏ trống thì không gửi gì -> nối ẩn danh, giữ nguyên hành vi local dev.
+        if (!username.isBlank()) {
+            options.setUserName(username);
+            options.setPassword(password.toCharArray());
+        }
         factory.setConnectionOptions(options);
         return factory;
     }

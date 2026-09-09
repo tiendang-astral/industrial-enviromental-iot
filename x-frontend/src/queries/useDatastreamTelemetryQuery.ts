@@ -26,17 +26,19 @@ export function useDatastreamTelemetryQuery(datastreamId: number | undefined, ra
  * lặp — số kênh đổi theo widget nên số hook phải đổi theo, thứ mà quy tắc hook không cho phép.
  */
 export function useDatastreamsTelemetryQueries(datastreamIds: number[], rangeMinutes: number) {
-  const results = useQueries({
+  return useQueries({
     queries: datastreamIds.map((id) => ({
       queryKey: ['datastream-telemetry', id, rangeMinutes, true],
       queryFn: () => getDatastreamTelemetry(id, rangeMinutes),
       refetchInterval: REFRESH_MS,
     })),
+    // `combine` được TanStack ghi nhớ theo identity của results. Không có nó thì `results.map(...)`
+    // trả mảng MỚI mỗi lần render, mọi useMemo phía sau vô hiệu, và biểu đồ dựng lại option liên tục.
+    combine: (results) => ({
+      data: results.map((result) => result.data),
+      isLoading: results.some((result) => result.isLoading),
+    }),
   })
-  return {
-    data: results.map((result) => result.data),
-    isLoading: results.some((result) => result.isLoading),
-  }
 }
 
 /**
@@ -45,12 +47,12 @@ export function useDatastreamsTelemetryQueries(datastreamIds: number[], rangeMin
  * `includeHistory` nằm trong queryKey để không đụng cache của biểu đồ cùng kênh.
  */
 export function useDatastreamsLatestQueries(datastreamIds: number[]) {
-  const results = useQueries({
+  return useQueries({
     queries: datastreamIds.map((id) => ({
       queryKey: ['datastream-telemetry', id, LATEST_RANGE_MINUTES, false],
       queryFn: () => getDatastreamTelemetry(id, LATEST_RANGE_MINUTES, false),
       refetchInterval: REFRESH_MS,
     })),
+    combine: (results) => results.map((result) => result.data),
   })
-  return results.map((result) => result.data)
 }

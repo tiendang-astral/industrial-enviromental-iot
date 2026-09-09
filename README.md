@@ -1,106 +1,90 @@
-# Vibe Coding Template
+# Industrial Environmental IoT
 
-Template chuẩn hóa workflow cho vibe coding. Setup một lần, dùng mãi mãi.
+Phần mềm thu thập dữ liệu cảm biến đa điểm và hiển thị realtime trên dashboard, kèm cảnh báo tức thời.
 
-## 1. Cấu trúc
+Dữ liệu vào từ hai nguồn:
 
-```text
-vibe-template/
-├── context/
-│   ├── PRODUCT.md           # Sản phẩm, người dùng, chức năng
-│   ├── TECHSTACK.md         # Công nghệ theo từng tầng
-│   ├── ARCHITECTURE.md      # Component diagram, data flow
-│   ├── DATABASE.md          # ERD, bảng, indexes
-│   ├── API.md               # Base URL, response format, endpoints
-│   ├── CONVENTIONS.md       # Quy tắc code Frontend/Backend/Database
-│   └── business/            # Tài liệu nghiệp vụ
-│       └── README.md
-├── .claude/
-│   └── commands/            # Slash commands
-│       ├── vibe-start.md    # Đọc context + codegraph
-│       ├── vibe-brainstorm.md  # Phân tích yêu cầu
-│       ├── vibe-plan.md     # Lập plan chi tiết
-│       └── vibe-code.md     # Implement theo plan
-└── README.md                # File này
-```
+- **Gateway qua MQTT** — thiết bị ngoài hiện trường đọc cảm biến rồi gửi lên theo chu kỳ
+- **Database bên ngoài** — hệ thống tự đọc database của khách theo lịch
 
-## 2. Commands
+Dành cho kỹ sư vận hành cần theo dõi môi trường/sản xuất đa điểm — nhỏ gọn, đủ dùng.
 
-```
-/vibe-start → /vibe-brainstorm → /vibe-plan → /vibe-code
-```
+## Tính năng
 
-| Command | Mô tả |
-|---------|-------|
-| `/vibe-start` | Đọc toàn bộ context, nắm codebase |
-| `/vibe-brainstorm` | Phân tích yêu cầu, đề xuất phương án |
-| `/vibe-plan` | Lập plan, chờ confirm |
-| `/vibe-code` | Implement theo plan |
+**App người dùng**
 
-## 3. Tool
+- Dashboard tùy biến — widget kéo-thả, cập nhật realtime
+- Quản lý tổ chức đa cấp — Công ty → Chi nhánh → Khu sản xuất → Xưởng/Chuồng
+- Quản lý gateway và chân cảm biến
+- Nguồn dữ liệu ngoài — kết nối database khách, đọc theo lịch, vá dữ liệu lịch sử
+- Cảnh báo theo ngưỡng — gửi qua Email và Telegram
+- Điều khiển relay — bật/tắt thiết bị từ xa
+- Báo cáo môi trường và báo cáo sự cố — xuất PDF
+- Quản lý người dùng và phân quyền theo đơn vị
 
-### Skills
+**Trang quản trị**
 
-| Skill | Mục đích |
-|-------|----------|
-| `design-taste-frontend` | UI/frontend design premium |
-| `using-superpowers` | Superpowers plugin — brainstorm, plan, code flow |
+- Quản lý tenant
+- Quản lý tài khoản quản trị hệ thống
+- Dashboard tổng hợp toàn platform
 
-### MCP Servers
+## Gồm 5 phần chạy độc lập
 
-| Server | Mục đích |
-|--------|----------|
-| **CodeGraph** | Query codebase, symbol search, call paths |
-| **Context7** | Tra cứu docs framework mới nhất |
-| **Docker** | Quản lý container |
-| **Claude Mem** | Memory/context persistence giữa các session |
+| | |
+|---|---|
+| `x-frontend` | App người dùng — dashboard, cảnh báo, báo cáo |
+| `x-frontend-admin` | Trang quản trị — quản lý tenant |
+| `x-backend` | API + WebSocket |
+| `x-ingestion-service` | Nhận dữ liệu từ gateway và database ngoài |
+| `x-processing-service` | Xử lý, lưu trữ, chạy cảnh báo |
 
-### Sub-agents
+---
 
-Tương tự 1 phòng ban — mỗi agent lo 1 vai trò, không chồng chéo.
+# Runbook
 
-| Agent | Context | Responsibility |
-|-------|---------|----------------|
-| `product-manager` | `PRODUCT.md`, `ARCHITECTURE.md`, `DATABASE.md`, `business/` | Quy hoạch hệ thống, review tính năng, quyết định tech |
-| `backend-dev` | `TECHSTACK.md`, `CONVENTIONS.md` (BE), `API.md`, `DATABASE.md` | API, business logic, DB schema, migrations |
-| `frontend-dev` | `TECHSTACK.md`, `CONVENTIONS.md` (FE), `API.md` | UI components, state, styling, integration API |
-| `ui-designer` | `PRODUCT.md` | Thiết kế UI/UX, layout dashboard, component hierarchy, responsive, design system |
-| `devops` | `TECHSTACK.md`, `ARCHITECTURE.md` | CI/CD, Docker, deploy, monitoring |
+## Chạy local
 
-**Tạo sub-agent:** Trong Claude Code, dùng `Task` tool với prompt chứa context file:
-
-```text
-Task(subagent_type="general")
-- description: "product-manager"
-- prompt: "Đọc PRODUCT.md, ARCHITECTURE.md, DATABASE.md, business/README.md. Context: [mô tả task]. Yêu cầu: [cần làm gì]."
-```
-
-## 4. Setup
-
-Làm **một lần** trên máy. Sau đó mỗi project chỉ cần copy template.
+Cần Docker, JDK 21, Node 22.
 
 ```bash
-# Claude Code
-npm install -g @anthropic-ai/claude-code
-
-# Plugins (trong Claude Code)
-/plugin marketplace add obra/superpowers-marketplace
-/plugin install superpowers@superpowers-marketplace
-
-# MCP Servers
-claude mcp add -s user dbhub -- npx -y @bytebase/dbhub --transport stdio --dsn "postgres://user:pass@localhost:5432/mydb"
-claude mcp add -s user --transport http context7 https://mcp.context7.com/mcp
+scripts/up.sh      # bật hạ tầng + cả 5 phần
+scripts/down.sh    # tắt
 ```
 
-- **Docker**: Docker Desktop → Settings → Features → MCP Toolkit → Enable
-- **Claude Mem**: https://github.com/anthropics/claude-code-memory
+| | |
+|---|---|
+| App người dùng | http://localhost:7100 — `admin1` / `123456` |
+| Trang quản trị | http://localhost:7200 — `admin` / `123456` |
+| EMQX Dashboard | http://localhost:18083 — `admin` / `public` |
+| MailHog (xem mail) | http://localhost:8025 |
 
-## 5. Bắt đầu
+## Deploy production
 
 ```bash
-cp -r vibe-template/ my-new-project/
-cd my-new-project/
-codegraph init
+cp .env.example .env.production
+$EDITOR .env.production
+scripts/deploy-prod.sh
 ```
 
-Điền context vào `context/`, mở Claude Code → `/vibe-start`.
+| | |
+|---|---|
+| `scripts/deploy-prod.sh` | Khởi động |
+| `scripts/deploy-prod.sh --build` | Build lại — **bắt buộc khi đổi địa chỉ truy cập** |
+| `scripts/down-prod.sh` | Dừng, giữ dữ liệu |
+| `scripts/down-prod.sh --volumes` | Dừng và xoá sạch dữ liệu |
+
+Lần đầu build mất 1–2 tiếng. Script tự kiểm tra cấu hình và dừng ngay nếu thiếu, không để bạn chờ rồi mới báo lỗi.
+
+**Bốn thứ phải sửa trong `.env.production`:**
+
+```bash
+# 1. Mật khẩu — để trống là script không cho chạy
+POSTGRES_PASSWORD=  APP_JWT_SECRET=  ...
+
+# 2. Địa chỉ người dùng gõ vào trình duyệt
+TENANT_WS_BASE_URL=ws://<địa-chỉ>:31080/ws
+APP_CORS_ALLOWED_ORIGINS=http://<địa-chỉ>:31080,http://<địa-chỉ>:31090
+
+# 3. Bỏ dòng dev-seed đi khi chạy thật (nếu để, sẽ có sẵn tài khoản admin/123456)
+FLYWAY_LOCATIONS=classpath:db/migration
+```

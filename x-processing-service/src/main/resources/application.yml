@@ -68,6 +68,10 @@ mqtt:
   # Shared subscription (xem x-ingestion-service/application.yml) — nếu không, mỗi instance
   # đều nhận ACK và cùng cập nhật trạng thái một lệnh.
   ack-topic-filter: $share/processing/gateway/+/ack
+  # Để rỗng = nối ẩn danh (EMQX local dev). Production bật xác thực nên bắt buộc điền,
+  # không thì broker từ chối kết nối và pipeline đứng im.
+  username: ${MQTT_USERNAME:}
+  password: ${MQTT_PASSWORD:}
 
 app:
   kafka:

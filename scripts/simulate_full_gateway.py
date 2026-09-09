@@ -4,7 +4,8 @@ mọi pin INPUT hiện có 1 lần/chu kỳ (đúng contract MQTT thật, xem AR
 § Flow: Gateway sensor data) — mỗi metric random-walk quanh giá trị khởi điểm
 thực tế, không phải giá trị cố định.
 
-Usage: python3 scripts/simulate_full_gateway.py [--interval 5]
+Usage: python3 scripts/simulate_full_gateway.py [--interval 5] [--mac aa:bb:cc:dd:ee:ff]
+       python3 scripts/simulate_full_gateway.py --port 31883 --username iiot-service --password ...  # prod
 """
 import argparse
 import json
@@ -14,8 +15,7 @@ from datetime import datetime, timezone
 
 import paho.mqtt.publish as publish
 
-MAC = "aa:bb:cc:dd:ee:ff"
-TOPIC = f"gateway/{MAC}/data"
+DEFAULT_MAC = "aa:bb:cc:dd:ee:ff"
 
 # pinNumber: (type, giá trị khởi điểm, biên độ random-walk mỗi chu kỳ, min, max)
 CHANNELS = {
@@ -42,9 +42,16 @@ def step(value, amplitude, lo, hi, wrap=False):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--interval", type=float, default=5.0)
+    # MAC PHÂN BIỆT HOA/THƯỜNG: Ingestion tra đúng chuỗi trong topic, lệch một chữ là
+    # message bị bỏ với log "Gateway not found". Phải khớp y hệt MAC đã tạo trên UI.
+    parser.add_argument("--mac", default=DEFAULT_MAC)
     parser.add_argument("--host", default="localhost")
     parser.add_argument("--port", type=int, default=1883)
+    # EMQX production bật xác thực; bỏ trống thì nối ẩn danh (local dev).
+    parser.add_argument("--username", default=None)
+    parser.add_argument("--password", default=None)
     args = parser.parse_args()
+    topic = f"gateway/{args.mac}/data"
 
     state = {pin: cfg[1] for pin, cfg in CHANNELS.items()}
     humidity = DI_1_HUMIDITY[1]
@@ -63,7 +70,8 @@ def main():
             "measuredAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "readings": readings,
         })
-        publish.single(TOPIC, payload=payload, hostname=args.host, port=args.port, qos=1)
+        auth = {"username": args.username, "password": args.password} if args.username else None
+        publish.single(topic, payload=payload, hostname=args.host, port=args.port, qos=1, auth=auth)
         print(f"published {len(readings)} readings: {payload}")
         time.sleep(args.interval)
 

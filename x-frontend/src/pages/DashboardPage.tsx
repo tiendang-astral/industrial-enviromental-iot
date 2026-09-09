@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { Database, Network, Pencil } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -190,6 +190,13 @@ export default function DashboardPage() {
     () => (datastreams ?? []).filter((ds) => ds.sourceType === 'GATEWAY_PIN').map((ds) => ds.id),
     [datastreams]
   )
+
+  // Ghi lại nơi đang xem để lần sau vào `/dashboard` quay đúng chỗ này, không nhảy về gốc cây.
+  const rememberView = useDashboardStore((state) => state.rememberView)
+  useEffect(() => {
+    if (!Number.isFinite(tenantNodeId)) return
+    rememberView({ nodeId: tenantNodeId, sourceId: view === 'sources' ? (selectedSource?.id ?? null) : null })
+  }, [rememberView, tenantNodeId, view, selectedSource?.id])
 
   const boardKey = view === 'board' ? `node:${tenantNodeId}` : `source:${selectedSource?.id ?? 0}`
   const toggleEditMode = useDashboardStore((state) => state.toggleEditMode)

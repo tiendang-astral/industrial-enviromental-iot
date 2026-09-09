@@ -154,9 +154,8 @@ export const ValueWidget = memo(function ValueWidget({
 
   return (
     <Widget>
-      {/* Đơn vị lên tiêu đề: lặp nó ở từng dòng số thì cùng một chữ hiện 3-5 lần trong một ô. */}
       <Widget.Header
-        title={unit ? `${widget.title} (${unit})` : widget.title}
+        title={widget.title}
         badge={badge}
         actions={
           hidden > 0 ? (
@@ -172,19 +171,17 @@ export const ValueWidget = memo(function ValueWidget({
         }
       />
       <Widget.Body className="overflow-hidden">
-        <ChannelValues rows={rows.slice(0, VISIBLE_COLUMNS)} />
+        <ChannelValues rows={rows.slice(0, VISIBLE_COLUMNS)} unit={unit} />
       </Widget.Body>
       {worst && <Widget.StatusBar tone={worst} />}
 
       <Dialog open={isAllOpen} onOpenChange={setIsAllOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle className="uppercase tracking-wide">
-              {unit ? `${widget.title} (${unit})` : widget.title}
-            </DialogTitle>
+            <DialogTitle className="uppercase tracking-wide">{widget.title}</DialogTitle>
           </DialogHeader>
           <div className="max-h-96 overflow-y-auto">
-            <ChannelValues rows={rows} wrap />
+            <ChannelValues rows={rows} unit={unit} wrap />
           </div>
         </DialogContent>
       </Dialog>
@@ -202,9 +199,18 @@ function LiveBadge() {
   )
 }
 
-function ChannelValues({ rows, wrap = false }: { rows: ChannelRow[]; wrap?: boolean }) {
-  // Ba số chia nhau một ô rộng 3 cột chỉ còn ~90px mỗi số — cỡ 2xl là bị cắt thành "25...".
-  const valueSize = wrap || rows.length <= 2 ? 'text-2xl' : 'text-lg'
+function ChannelValues({
+  rows,
+  unit,
+  wrap = false,
+}: {
+  rows: ChannelRow[]
+  unit?: string | null
+  wrap?: boolean
+}) {
+  // Ba cột trong ô rộng 3 cột chỉ còn ~80px mỗi cột, mà giá trị nay kéo theo cả đơn vị — cỡ lớn là
+  // bị cắt thành "25.53…". Thu cỡ chữ và lề theo số cột thay vì để truncate ăn mất đơn vị.
+  const valueSize = wrap || rows.length <= 2 ? 'text-2xl' : 'text-base'
   return (
     <div
       className={cn(
@@ -216,10 +222,11 @@ function ChannelValues({ rows, wrap = false }: { rows: ChannelRow[]; wrap?: bool
         <div
           key={datastream.id}
           className={cn(
-            'flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-2',
-            wrap && 'min-w-32 border-b border-border py-3'
+            'flex min-w-0 flex-1 flex-col items-center justify-center gap-1',
+            wrap ? 'min-w-32 border-b border-border px-2 py-3' : rows.length > 2 ? 'px-1' : 'px-2'
           )}
         >
+          <p className="min-w-0 max-w-full truncate text-[11px] text-muted-foreground">{datastream.name}</p>
           <p
             className={cn(
               'min-w-0 max-w-full truncate font-semibold tabular transition-colors duration-(--motion-base)',
@@ -228,11 +235,15 @@ function ChannelValues({ rows, wrap = false }: { rows: ChannelRow[]; wrap?: bool
             )}
           >
             {value ?? '—'}
+            {unit && value != null && (
+              <span className={cn('ml-0.5 font-normal text-muted-foreground', valueSize === 'text-2xl' ? 'text-xs' : 'text-[10px]')}>
+                {unit}
+              </span>
+            )}
           </p>
-          <p className="min-w-0 max-w-full truncate text-[11px] text-muted-foreground">{datastream.name}</p>
-          {/* Vừa về qua realtime thì chấm sáng; số lấy từ API thì nói mốc của chính điểm đó. */}
+          {/* Vừa về qua realtime thì badge; số lấy từ API thì nói mốc của chính điểm đó. */}
           {live ? (
-            <span className="size-1.5 shrink-0 rounded-full bg-ok shadow-[0_0_5px_var(--ok)]" />
+            <LiveBadge />
           ) : (
             <span className="min-w-0 max-w-full truncate text-[10px] tabular text-muted-foreground/70">
               {measuredAt ? formatTime(measuredAt) : '—'}

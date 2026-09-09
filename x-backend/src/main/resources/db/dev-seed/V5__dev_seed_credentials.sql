@@ -1,4 +1,11 @@
 -- Dev convenience seed — KHÔNG dùng cho production.
+--
+-- Nằm ở db/dev-seed/ chứ không phải db/migration/ vì Flyway chạy MỌI file trong location được
+-- khai, không phân biệt môi trường. Để chung thì production cũng nuốt luôn: mật khẩu admin bị
+-- hạ xuống 123456 và DB có sẵn một tenant rác "Demo Farm" (đã xảy ra thật lúc deploy đầu tiên).
+--
+-- Local dev vẫn chạy nhờ spring.flyway.locations mặc định gồm cả 2 thư mục.
+-- compose/docker-compose.prod.yml ghi đè SPRING_FLYWAY_LOCATIONS chỉ còn db/migration.
 -- Đổi mật khẩu bootstrap platform_user (admin) sang 123456 (từ ChangeMe123!).
 UPDATE platform_user
 SET password_hash = '$2a$10$KOys.YhZd3Zx.KTNMM.KkOFPivMcw/ZBp/6f26ksNOpiFHnoTbqYm'
