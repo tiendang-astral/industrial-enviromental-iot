@@ -6,6 +6,7 @@ import com.corp.iot.processing.dto.AlertCondition;
 import com.corp.iot.processing.dto.AlertConditionGroup;
 import com.corp.iot.processing.entity.Alert;
 import com.corp.iot.processing.entity.Datastream;
+import com.corp.iot.processing.alert.ChannelRef;
 import com.corp.iot.processing.entity.SourceType;
 import com.corp.iot.processing.realtime.RealtimePublisher;
 import com.corp.iot.processing.repository.MetricRepository;
@@ -71,7 +72,7 @@ class AlertEvaluationServiceTest {
     private void evaluate(SourceType ruleSource, SourceType datastreamSource) {
         when(resolver.resolve(anyLong(), anyLong(), anyLong(), anyString()))
                 .thenReturn(List.of(rule(ruleSource)));
-        service.evaluate(TENANT_ID, NODE_ID, datastream(datastreamSource), "temperature", 34.7, MEASURED_AT);
+        service.evaluate(TENANT_ID, NODE_ID, ChannelRef.of(datastream(datastreamSource)), "temperature", 34.7, MEASURED_AT);
     }
 
     @Test
@@ -114,6 +115,6 @@ class AlertEvaluationServiceTest {
 
         // Không ném ra ngoài: bước này chạy SAU khi số đo đã ghi InfluxDB, ném lên sẽ làm
         // Kafka listener log lỗi cho một message vốn đã xử lý xong phần quan trọng.
-        service.evaluate(TENANT_ID, NODE_ID, datastream(SourceType.GATEWAY_PIN), "temperature", 34.7, MEASURED_AT);
+        service.evaluate(TENANT_ID, NODE_ID, ChannelRef.of(datastream(SourceType.GATEWAY_PIN)), "temperature", 34.7, MEASURED_AT);
     }
 }

@@ -11,15 +11,15 @@ mkdir -p "$RUN_DIR" "$LOG_DIR"
 cd "$ROOT_DIR"
 
 echo "==> Starting infrastructure (docker compose)..."
-docker compose up -d
+docker compose -f compose/docker-compose.yml up -d
 
 echo "==> Waiting for Postgres to be healthy..."
-until docker compose ps postgres --format json | grep -q '"Health":"healthy"'; do
+until docker compose -f compose/docker-compose.yml ps postgres --format json | grep -q '"Health":"healthy"'; do
   sleep 1
 done
 
 echo "==> Waiting for Kafka to be healthy..."
-until docker compose ps kafka --format json | grep -q '"Health":"healthy"'; do
+until docker compose -f compose/docker-compose.yml ps kafka --format json | grep -q '"Health":"healthy"'; do
   sleep 1
 done
 

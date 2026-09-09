@@ -1,3 +1,10 @@
+# Hạ tầng cho LOCAL DEV. Production dùng compose/docker-compose.prod.yml.
+#
+# name: bắt buộc ghim cứng — file này từng nằm ở root nên project name mặc định là tên thư
+# mục gốc. Chuyển vào compose/ mà không ghim thì project đổi thành "compose", toàn bộ
+# container và volume đang chạy (industrial-enviromental-iot_postgres_data...) thành mồ côi.
+name: industrial-enviromental-iot
+
 services:
   postgres:
     image: postgres:16

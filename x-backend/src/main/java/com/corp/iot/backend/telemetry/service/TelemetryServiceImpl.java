@@ -49,34 +49,36 @@ public class TelemetryServiceImpl implements TelemetryService {
     public List<DatastreamTelemetryResponse> getExternalSourceTelemetry(Long externalSourceId, int rangeMinutes) {
         Long tenantId = currentPrincipal().tenantId();
         return datastreamRepository.findByExternalSourceId(externalSourceId).stream()
-                .map(datastream -> toTelemetry(tenantId, datastream, rangeMinutes))
+                .map(datastream -> toTelemetry(tenantId, datastream, rangeMinutes, true))
                 .toList();
     }
 
     @Override
-    public DatastreamTelemetryResponse getDatastreamTelemetry(Long datastreamId, int rangeMinutes) {
+    public DatastreamTelemetryResponse getDatastreamTelemetry(Long datastreamId, int rangeMinutes, boolean includeHistory) {
         Long tenantId = currentPrincipal().tenantId();
         Datastream datastream = datastreamRepository.findById(datastreamId)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "DATASTREAM_NOT_FOUND", "Không tìm thấy kênh dữ liệu"));
         return datastream.getSourceType() == SourceType.GATEWAY_PIN
-                ? fromGatewayPin(tenantId, datastream, rangeMinutes)
-                : toTelemetry(tenantId, datastream, rangeMinutes);
+                ? fromGatewayPin(tenantId, datastream, rangeMinutes, includeHistory)
+                : toTelemetry(tenantId, datastream, rangeMinutes, includeHistory);
     }
 
     /**
      * Kênh gateway đọc measurement khác (`sensor_reading`) và định danh bằng pin chứ không bằng cột,
      * nhưng trả về CÙNG một DTO: nơi gọi chỉ quan tâm "kênh này có số đo gì", không quan tâm nguồn.
      */
-    private DatastreamTelemetryResponse fromGatewayPin(Long tenantId, Datastream datastream, int rangeMinutes) {
+    private DatastreamTelemetryResponse fromGatewayPin(Long tenantId, Datastream datastream, int rangeMinutes, boolean includeHistory) {
         GatewayPin pin = gatewayPinRepository.findById(datastream.getSourceId())
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "PIN_NOT_FOUND", "Không tìm thấy chân gateway của kênh"));
         String pinType = pin.getType().name();
         Metric metric = metricRepository.findById(datastream.getMetricId()).orElse(null);
         Optional<ReadingPoint> latest = influxReadService.latest(tenantId, pin.getGatewayId(), pinType, pin.getPinNumber());
-        List<ReadingPointDto> history = influxReadService
-                .history(tenantId, pin.getGatewayId(), pinType, pin.getPinNumber(), rangeMinutes, aggregateFn(metric)).stream()
-                .map(point -> new ReadingPointDto(point.value(), point.measuredAt()))
-                .toList();
+        List<ReadingPointDto> history = includeHistory
+                ? influxReadService
+                        .history(tenantId, pin.getGatewayId(), pinType, pin.getPinNumber(), rangeMinutes, aggregateFn(metric)).stream()
+                        .map(point -> new ReadingPointDto(point.value(), point.measuredAt()))
+                        .toList()
+                : List.of();
 
         return new DatastreamTelemetryResponse(
                 datastream.getId(),
@@ -87,21 +89,23 @@ public class TelemetryServiceImpl implements TelemetryService {
                 latest.map(ReadingPoint::value).orElse(null),
                 latest.map(ReadingPoint::measuredAt).orElse(null),
                 null, // oldestReadingAt: chỉ external mới có khái niệm đọc lại lịch sử
-                AggregationWindow.windowSeconds(rangeMinutes),
+                includeHistory ? AggregationWindow.windowSeconds(rangeMinutes) : null,
                 history
         );
     }
 
-    private DatastreamTelemetryResponse toTelemetry(Long tenantId, Datastream datastream, int rangeMinutes) {
+    private DatastreamTelemetryResponse toTelemetry(Long tenantId, Datastream datastream, int rangeMinutes, boolean includeHistory) {
         // Lọc theo (job, cột): 2 kênh cùng job có thể chung metric, lọc theo metric sẽ trộn lẫn.
         Long jobId = datastream.getSourceId();
         String sourceField = datastream.getSourceField();
         Metric metric = metricRepository.findById(datastream.getMetricId()).orElse(null);
         Optional<ReadingPoint> latest = influxReadService.latestExternal(tenantId, jobId, sourceField);
-        List<ReadingPointDto> history = influxReadService
-                .historyExternal(tenantId, jobId, sourceField, rangeMinutes, aggregateFn(metric)).stream()
-                .map(point -> new ReadingPointDto(point.value(), point.measuredAt()))
-                .toList();
+        List<ReadingPointDto> history = includeHistory
+                ? influxReadService
+                        .historyExternal(tenantId, jobId, sourceField, rangeMinutes, aggregateFn(metric)).stream()
+                        .map(point -> new ReadingPointDto(point.value(), point.measuredAt()))
+                        .toList()
+                : List.of();
 
         return new DatastreamTelemetryResponse(
                 datastream.getId(),
@@ -112,7 +116,7 @@ public class TelemetryServiceImpl implements TelemetryService {
                 latest.map(ReadingPoint::value).orElse(null),
                 latest.map(ReadingPoint::measuredAt).orElse(null),
                 datastream.getOldestReadingAt(),
-                AggregationWindow.windowSeconds(rangeMinutes),
+                includeHistory ? AggregationWindow.windowSeconds(rangeMinutes) : null,
                 history
         );
     }

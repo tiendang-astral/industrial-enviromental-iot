@@ -5,6 +5,7 @@ import com.corp.iot.processing.realtime.RealtimePublisher;
 import com.corp.iot.processing.repository.CommandRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,6 +28,7 @@ public class CommandTimeoutWorker {
     private final RealtimePublisher realtimePublisher;
 
     @Scheduled(fixedDelayString = "${app.command.timeout-worker-interval-ms}")
+    @SchedulerLock(name = "commandTimeoutSweep", lockAtMostFor = "PT1M")
     @Transactional
     public void sweep() {
         List<Command> expired = commandRepository.findByStatusInAndTimeoutAtBefore(PENDING_STATUSES, Instant.now());

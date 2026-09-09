@@ -46,6 +46,7 @@ class DashboardTemplateServiceImplTest {
     private static final long BOARD_NODE_ID = 10L;
     private static final long CHILD_NODE_ID = 11L;
 
+    private DashboardTemplateRepository templateRepositoryRef;
     private Dashboard dashboard;
     private DashboardTemplateServiceImpl service;
 
@@ -54,6 +55,7 @@ class DashboardTemplateServiceImplTest {
         TenantContext.setTenantId(TENANT_ID);
 
         DashboardTemplateRepository templateRepository = mock(DashboardTemplateRepository.class);
+        templateRepositoryRef = templateRepository;
         DatastreamRepository datastreamRepository = mock(DatastreamRepository.class);
         MetricRepository metricRepository = mock(MetricRepository.class);
         TenantNodeRepository tenantNodeRepository = mock(TenantNodeRepository.class);
@@ -68,8 +70,8 @@ class DashboardTemplateServiceImplTest {
         template.setId(7L);
         template.setName("Giám sát cơ bản");
         template.setLayoutJson(List.of(
-                new TemplateWidget("LINE", "temperature", Map.of()),
-                new TemplateWidget("VALUE", "humidity", Map.of())
+                new TemplateWidget("LINE", "temperature", new WidgetLayout(0, 0, 8, 4), Map.of()),
+                new TemplateWidget("VALUE", "humidity", new WidgetLayout(8, 0, 4, 2), Map.of())
         ));
         when(templateRepository.findById(7L)).thenReturn(Optional.of(template));
 
@@ -80,8 +82,8 @@ class DashboardTemplateServiceImplTest {
         when(tenantNodeRepository.findAllById(anyList()))
                 .thenReturn(List.of(boardNode, node(CHILD_NODE_ID, "Chuồng B", "1.10.11")));
 
-        when(metricRepository.findByCode("temperature")).thenReturn(Optional.of(metric(5L, "temperature")));
-        when(metricRepository.findByCode("humidity")).thenReturn(Optional.of(metric(6L, "humidity")));
+        when(metricRepository.findByCode("temperature")).thenReturn(Optional.of(metric(5L, "temperature", "Nhiệt độ")));
+        when(metricRepository.findByCode("humidity")).thenReturn(Optional.of(metric(6L, "humidity", "Độ ẩm")));
 
         when(datastreamRepository.findByTenantNodeIdInAndMetricId(anyList(), eq(5L)))
                 .thenReturn(List.of(
@@ -104,44 +106,59 @@ class DashboardTemplateServiceImplTest {
     }
 
     @Test
-    void moiLoaiWidgetDungCoRieng() {
+    void moiEntryMotOTaiDungToaDoMauKhai() {
         DashboardResponse response = service.applyToNode(BOARD_NODE_ID, 7L);
 
-        assertThat(response.widgets()).hasSize(3);
-        assertThat(widgetOf(response, 100L).layout()).isEqualTo(new WidgetLayout(0, 0, 6, 4));
-        assertThat(widgetOf(response, 101L).layout()).isEqualTo(new WidgetLayout(6, 0, 6, 4));
-        // Hàng đầu đã dùng hết 12 cột, nên ô số xuống hàng mới ở đúng chiều cao của LINE (4), không
-        // phải chiều cao của chính nó.
-        assertThat(widgetOf(response, 102L).layout()).isEqualTo(new WidgetLayout(0, 4, 3, 2));
+        // 2 entry -> 2 widget, dù entry nhiệt độ khớp TỚI HAI kênh: chúng gộp vào cùng một ô.
+        assertThat(response.widgets()).hasSize(2);
+        assertThat(widgetOfType(response, "LINE").layout()).isEqualTo(new WidgetLayout(0, 0, 8, 4));
+        assertThat(widgetOfType(response, "VALUE").layout()).isEqualTo(new WidgetLayout(8, 0, 4, 2));
     }
 
     @Test
-    void kenhCuaSiteConMangTenDonViOTruoc() {
+    void nhieuKenhCungChiSoGopVaoMotWidget() {
         DashboardResponse response = service.applyToNode(BOARD_NODE_ID, 7L);
 
-        assertThat(widgetOf(response, 100L).title()).isEqualTo("Nhiệt độ");
-        assertThat(widgetOf(response, 101L).title()).isEqualTo("Chuồng B · Nhiệt độ");
-        assertThat(widgetOf(response, 102L).title()).isEqualTo("Độ ẩm");
+        Widget line = widgetOfType(response, "LINE");
+        assertThat(line.binding().resolvedDatastreamIds()).containsExactly(100L, 101L);
+        // Không tên kênh nào đại diện được cho cả ô -> lấy tên chỉ số.
+        assertThat(line.title()).isEqualTo("Nhiệt độ");
+
+        Widget value = widgetOfType(response, "VALUE");
+        assertThat(value.binding().resolvedDatastreamIds()).containsExactly(102L);
+        assertThat(value.title()).isEqualTo("Độ ẩm");
     }
 
     @Test
-    void widgetDaCoThiKhongThemLai() {
+    void apMauGhiDeBoardCu() {
         dashboard.setLayoutJson(new DashboardLayout(List.of(new Widget(
-                "cu", "LINE", new WidgetLayout(0, 0, 6, 4), "Nhiệt độ", new WidgetBinding(100L), Map.of()))));
+                "cu", "VALUE", new WidgetLayout(0, 0, 3, 2), "Widget cũ", new WidgetBinding(999L, null, null, null), Map.of()))));
 
         DashboardResponse response = service.applyToNode(BOARD_NODE_ID, 7L);
 
-        assertThat(response.widgets()).hasSize(3);
-        assertThat(response.widgets().stream().filter(w -> "cu".equals(w.id()))).hasSize(1);
-        // Widget mới xếp phía dưới khối đã có, không đè lên nó.
-        assertThat(widgetOf(response, 101L).layout().y()).isEqualTo(4);
+        assertThat(response.widgets()).hasSize(2);
+        assertThat(response.widgets()).noneMatch(w -> "cu".equals(w.id()));
     }
 
-    private static Widget widgetOf(DashboardResponse response, long datastreamId) {
+    @Test
+    void toaDoVuotBienBiKep() {
+        DashboardTemplate wide = new DashboardTemplate();
+        wide.setId(9L);
+        wide.setLayoutJson(List.of(
+                new TemplateWidget("VALUE", "humidity", new WidgetLayout(11, 0, 99, 99), Map.of())));
+        when(templateRepositoryRef.findById(9L)).thenReturn(Optional.of(wide));
+
+        DashboardResponse response = service.applyToNode(BOARD_NODE_ID, 9L);
+
+        // VALUE trần 6x4; x bị đẩy vào lưới sau khi biết bề rộng thật.
+        assertThat(response.widgets().get(0).layout()).isEqualTo(new WidgetLayout(6, 0, 6, 4));
+    }
+
+    private static Widget widgetOfType(DashboardResponse response, String type) {
         return response.widgets().stream()
-                .filter(w -> w.binding() != null && datastreamId == w.binding().datastreamId())
+                .filter(w -> type.equals(w.type()))
                 .findFirst()
-                .orElseThrow(() -> new AssertionError("Không có widget bind datastream " + datastreamId));
+                .orElseThrow(() -> new AssertionError("Không có widget loại " + type));
     }
 
     private static TenantNode node(long id, String name, String path) {
@@ -152,10 +169,11 @@ class DashboardTemplateServiceImplTest {
         return node;
     }
 
-    private static Metric metric(long id, String code) {
+    private static Metric metric(long id, String code, String name) {
         Metric metric = new Metric();
         metric.setId(id);
         metric.setCode(code);
+        metric.setName(name);
         return metric;
     }
 

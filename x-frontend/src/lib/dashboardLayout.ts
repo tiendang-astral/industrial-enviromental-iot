@@ -17,7 +17,7 @@ export interface WidgetSizeSpec {
  * trắng quanh một con số; sàn có mặt vì biểu đồ dưới 4 cột không còn chỗ ghi nhãn trục thời gian.
  */
 export const WIDGET_SIZE_SPEC: Record<WidgetType, WidgetSizeSpec> = {
-  VALUE: { minW: 2, maxW: 3, minH: 2, maxH: 3, w: 3, h: 2 },
+  VALUE: { minW: 2, maxW: 6, minH: 2, maxH: 4, w: 3, h: 2 },
   LINE: { minW: 4, maxW: 12, minH: 3, maxH: 8, w: 6, h: 4 },
   SWITCH: { minW: 2, maxW: 4, minH: 2, maxH: 2, w: 3, h: 2 },
   DEVICES_ONLINE: { minW: 2, maxW: 4, minH: 2, maxH: 3, w: 3, h: 2 },

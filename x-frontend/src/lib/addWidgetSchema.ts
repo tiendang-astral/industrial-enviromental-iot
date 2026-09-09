@@ -5,14 +5,14 @@ import type { WidgetType } from '@/types/dashboard'
 export const addWidgetSchema = z
   .object({
     type: z.enum(['VALUE', 'LINE', 'DEVICE_LIST', 'DEVICES_ONLINE', 'SWITCH']),
-    datastreamId: z.string().optional(),
+    datastreamIds: z.array(z.string()),
     gatewayId: z.string().optional(),
     pinId: z.string().optional(),
     title: z.string().min(1, 'Vui lòng nhập tên widget'),
   })
-  .refine((data) => (data.type !== 'VALUE' && data.type !== 'LINE') || !!data.datastreamId, {
-    message: 'Vui lòng chọn datastream',
-    path: ['datastreamId'],
+  .refine((data) => (data.type !== 'VALUE' && data.type !== 'LINE') || data.datastreamIds.length > 0, {
+    message: 'Vui lòng chọn ít nhất một kênh dữ liệu',
+    path: ['datastreamIds'],
   })
   .refine((data) => data.type !== 'SWITCH' || !!data.pinId, {
     message: 'Vui lòng chọn pin OUTPUT',

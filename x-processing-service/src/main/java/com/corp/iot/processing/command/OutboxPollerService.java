@@ -4,6 +4,7 @@ import com.corp.iot.processing.entity.OutboxEvent;
 import com.corp.iot.processing.repository.OutboxEventRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.internals.RecordHeader;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -32,6 +33,9 @@ public class OutboxPollerService {
     private final ObjectMapper objectMapper;
 
     @Scheduled(fixedDelayString = "${app.command.outbox-poll-interval-ms}")
+    // status=PUBLISHED chỉ set SAU khi publish xong — không khoá thì 2 bản cùng đọc một dòng
+    // PENDING và bắn lệnh relay xuống thiết bị 2 lần.
+    @SchedulerLock(name = "commandOutboxPoll", lockAtMostFor = "PT1M")
     public void poll() {
         List<OutboxEvent> due = outboxEventRepository.findDueForDispatch(Instant.now());
         for (OutboxEvent event : due) {

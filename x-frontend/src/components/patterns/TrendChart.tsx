@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState } from 'react'
 import { ResizableChart } from '@/components/widgets/ResizableChart'
 import { useChartPalette } from '@/hooks/useChartPalette'
 import { downsampleReadings } from '@/lib/downsample'
-import { buildAxisLineOption, buildPinTrendOption } from '@/lib/echarts'
+import { buildAxisLineOption, buildMultiLineOption, buildPinTrendOption, type ChartSeries } from '@/lib/echarts'
 import { cn } from '@/lib/utils'
 import type { ReadingPoint } from '@/types/telemetry'
 
@@ -27,7 +27,8 @@ const INITIAL_WIDTH = 240
  * nên mỗi lần đổi luật hiển thị phải sửa cả ba.
  */
 export function TrendChart({
-  history,
+  history = [],
+  series,
   variant,
   unit,
   rangeMinutes,
@@ -36,7 +37,10 @@ export function TrendChart({
   className,
   emptyLabel = 'Chưa đủ số đo để vẽ biểu đồ',
 }: {
-  history: ReadingPoint[]
+  /** Một chuỗi — dùng cho `sparkline` và cho nơi chỉ vẽ một kênh. */
+  history?: ReadingPoint[]
+  /** Nhiều chuỗi (widget bind nhiều kênh cùng chỉ số). Có `series` thì `history` bị bỏ qua. */
+  series?: ChartSeries[]
   /** `sparkline` = chỉ trục thời gian, dùng trong card. `axis` = đủ trục X/Y cho widget. */
   variant: 'sparkline' | 'axis'
   /**
@@ -60,20 +64,32 @@ export function TrendChart({
     setWidth(Math.max(Math.round(next / 40) * 40, 40))
   }, [])
 
+  // Ngân sách điểm chia đều cho các chuỗi: 5 kênh mà mỗi kênh vẫn lấy trọn ngân sách thì tổng số
+  // điểm phải vẽ tăng gấp 5, và khung hẹp lại thành một dải đặc.
   const option = useMemo(() => {
     const budget = Math.min(
       Math.max(Math.floor(width / PX_PER_POINT[variant]), MIN_POINTS[variant]),
       MAX_POINTS
     )
+    if (series) {
+      const perSeries = Math.max(Math.floor(budget / Math.max(series.length, 1)), MIN_POINTS[variant])
+      return buildMultiLineOption(
+        series.map((item) => ({ ...item, points: downsampleReadings(item.points, perSeries) })),
+        unit,
+        palette,
+        zoomable
+      )
+    }
     const points = downsampleReadings(history, budget)
     return variant === 'sparkline'
       ? buildPinTrendOption(points, palette, rangeMinutes ?? 60, now ?? Date.now())
       : buildAxisLineOption(points, unit, palette, zoomable)
     // `now` cố tình không nằm trong deps: nó đổi mỗi lần render và sẽ dựng lại option liên tục.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [history, palette, variant, unit, rangeMinutes, width, zoomable])
+  }, [history, series, palette, variant, unit, rangeMinutes, width, zoomable])
 
-  if (history.length <= 1) {
+  const hasData = series ? series.some((item) => item.points.length > 1) : history.length > 1
+  if (!hasData) {
     return (
       <div
         className={cn(

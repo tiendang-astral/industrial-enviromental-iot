@@ -8,6 +8,7 @@ import org.mockito.ArgumentCaptor;
 import tools.jackson.databind.ObjectMapper;
 
 import java.time.Instant;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -42,11 +43,12 @@ class ExternalDataRawListenerContractTest {
 
     @Test
     void parsesCanonicalIngestionPayloadIntoExpectedEvent() {
-        listener.onMessage(CANONICAL_JSON);
+        listener.onMessage(List.of(CANONICAL_JSON));
 
-        ArgumentCaptor<ExternalReadingEvent> captor = ArgumentCaptor.forClass(ExternalReadingEvent.class);
-        verify(processor).process(captor.capture());
-        ExternalReadingEvent event = captor.getValue();
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<ExternalReadingEvent>> captor = ArgumentCaptor.forClass(List.class);
+        verify(processor).processBatch(captor.capture());
+        ExternalReadingEvent event = captor.getValue().getFirst();
 
         assertThat(event.messageId()).isEqualTo("abc123");
         assertThat(event.tenantId()).isEqualTo(12L);
@@ -62,11 +64,12 @@ class ExternalDataRawListenerContractTest {
     // được và mặc định là luồng sống, không phải backfill.
     @Test
     void payloadCuKhongCoCoBackfillVanParseDuoc() {
-        listener.onMessage(CANONICAL_JSON.replace(",\n              \"backfill\": false", ""));
+        listener.onMessage(List.of(CANONICAL_JSON.replace(",\n              \"backfill\": false", "")));
 
-        ArgumentCaptor<ExternalReadingEvent> captor = ArgumentCaptor.forClass(ExternalReadingEvent.class);
-        verify(processor).process(captor.capture());
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<ExternalReadingEvent>> captor = ArgumentCaptor.forClass(List.class);
+        verify(processor).processBatch(captor.capture());
 
-        assertThat(captor.getValue().backfill()).isFalse();
+        assertThat(captor.getValue().getFirst().backfill()).isFalse();
     }
 }

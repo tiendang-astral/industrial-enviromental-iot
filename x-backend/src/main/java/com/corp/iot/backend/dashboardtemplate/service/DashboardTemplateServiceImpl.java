@@ -6,7 +6,6 @@ import com.corp.iot.backend.dashboard.dto.DashboardLayout;
 import com.corp.iot.backend.dashboard.dto.DashboardResponse;
 import com.corp.iot.backend.dashboard.dto.Widget;
 import com.corp.iot.backend.dashboard.dto.WidgetBinding;
-import com.corp.iot.backend.dashboard.dto.WidgetLayout;
 import com.corp.iot.backend.dashboard.dto.WidgetSizeSpec;
 import com.corp.iot.backend.dashboard.entity.Dashboard;
 import com.corp.iot.backend.dashboard.mapper.DashboardMapper;
@@ -29,6 +28,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -64,42 +64,42 @@ public class DashboardTemplateServiceImpl implements DashboardTemplateService {
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "NODE_NOT_FOUND", "Không tìm thấy node"));
         Dashboard dashboard = dashboardService.getOrCreateEntity(tenantNodeId);
 
-        // Datastream chỉ neo vào SITE (xem DATABASE.md § datastream) — node đang xem
-        // dashboard có thể là node gộp (BRANCH/PRODUCTION_AREA/TENANT_ROOT), nên phải
-        // tìm datastream trên toàn subtree thay vì match đúng tenantNodeId, nếu không
-        // áp template ở node gộp sẽ không tạo được widget nào (bug đã gặp).
+        // Datastream chỉ neo vào SITE (xem DATABASE.md § datastream) — node đang xem dashboard có thể
+        // là node gộp, nên phải tìm trên toàn subtree thay vì match đúng tenantNodeId.
         List<Long> subtreeNodeIds = tenantNodeRepository.findDescendantIdsIncludingSelf(TenantContext.getTenantId(), node.getPath());
+        List<TenantNode> subtree = tenantNodeRepository.findAllById(subtreeNodeIds);
+        Map<Long, String> nodeNames = subtree.stream().collect(Collectors.toMap(TenantNode::getId, TenantNode::getName));
+        Map<Long, String> nodePaths = subtree.stream().collect(Collectors.toMap(TenantNode::getId, TenantNode::getPath));
 
-        // Tên đơn vị để đặt tiền tố cho widget bind kênh của site con — board ở cấp trên gom nhiều
-        // site nên thiếu tiền tố là N widget cùng tên "Nhiệt độ" (xem DATABASE.md § dashboard).
-        Map<Long, String> nodeNames = tenantNodeRepository.findAllById(subtreeNodeIds).stream()
-                .collect(Collectors.toMap(TenantNode::getId, TenantNode::getName));
-
-        List<Widget> widgets = new ArrayList<>(dashboard.getLayoutJson().widgets());
-        Set<String> existingKeys = widgets.stream().map(this::widgetKey).collect(Collectors.toSet());
-        GridCursor cursor = new GridCursor(
-                widgets.stream().mapToInt(w -> w.layout().y() + w.layout().h()).max().orElse(0));
+        // GHI ĐÈ: board trở thành đúng bố cục của mẫu. Không gộp với widget cũ — áp mẫu hai lần
+        // liên tiếp phải ra cùng một kết quả, mà cộng dồn thì không.
+        List<Widget> widgets = new ArrayList<>();
 
         for (TemplateWidget templateWidget : template.getLayoutJson()) {
             Metric metric = metricRepository.findByCode(templateWidget.metric()).orElse(null);
             if (metric == null) {
                 continue;
             }
-            List<Datastream> matched = datastreamRepository.findByTenantNodeIdInAndMetricId(subtreeNodeIds, metric.getId());
-            for (Datastream datastream : matched) {
-                String key = templateWidget.widgetType() + ":" + datastream.getId();
-                if (!existingKeys.add(key)) {
-                    continue; // đã có widget này (type + datastreamId) — không ghi đè
-                }
-                widgets.add(new Widget(
-                        UUID.randomUUID().toString(),
-                        templateWidget.widgetType(),
-                        cursor.place(WidgetSizeSpec.of(templateWidget.widgetType())),
-                        widgetTitle(datastream, tenantNodeId, nodeNames),
-                        new WidgetBinding(datastream.getId()),
-                        templateWidget.config() != null ? templateWidget.config() : Map.of()
-                ));
+            List<Datastream> matched = datastreamRepository
+                    .findByTenantNodeIdInAndMetricId(subtreeNodeIds, metric.getId()).stream()
+                    // Thứ tự cây tổ chức, không phải thứ tự id: hai ô cạnh nhau phải liệt kê chuồng
+                    // theo cùng một trật tự, nếu không mắt phải dò lại tên ở từng ô.
+                    .sorted(Comparator
+                            .comparing((Datastream ds) -> nodePaths.getOrDefault(ds.getTenantNodeId(), ""))
+                            .thenComparing(Datastream::getId))
+                    .toList();
+            if (matched.isEmpty()) {
+                continue; // không có kênh nào khớp thì không dựng ô rỗng
             }
+
+            widgets.add(new Widget(
+                    UUID.randomUUID().toString(),
+                    templateWidget.widgetType(),
+                    WidgetSizeSpec.clamp(templateWidget.layout(), templateWidget.widgetType()),
+                    widgetTitle(metric, matched, tenantNodeId, nodeNames),
+                    WidgetBinding.ofDatastreams(matched.stream().map(Datastream::getId).toList()),
+                    templateWidget.config() != null ? templateWidget.config() : Map.of()
+            ));
         }
 
         dashboard.setLayoutJson(new DashboardLayout(widgets));
@@ -107,12 +107,15 @@ public class DashboardTemplateServiceImpl implements DashboardTemplateService {
         return dashboardMapper.toResponse(dashboard);
     }
 
-    private String widgetKey(Widget widget) {
-        return widget.type() + ":" + (widget.binding() != null ? widget.binding().datastreamId() : null);
-    }
-
-    /** Kênh của site con mới cần tiền tố đơn vị; kênh ngay tại node của board thì tên trần là đủ. */
-    private String widgetTitle(Datastream datastream, Long boardNodeId, Map<Long, String> nodeNames) {
+    /**
+     * Nhiều kênh thì không tên kênh nào đại diện được cho cả ô — dùng tên chỉ số. Một kênh thì giữ
+     * tên kênh, kèm tiền tố đơn vị nếu nó thuộc site con của board.
+     */
+    private String widgetTitle(Metric metric, List<Datastream> matched, Long boardNodeId, Map<Long, String> nodeNames) {
+        if (matched.size() > 1) {
+            return metric.getName();
+        }
+        Datastream datastream = matched.get(0);
         if (datastream.getTenantNodeId().equals(boardNodeId)) {
             return datastream.getName();
         }
@@ -120,29 +123,4 @@ public class DashboardTemplateServiceImpl implements DashboardTemplateService {
         return nodeName == null ? datastream.getName() : nodeName + " · " + datastream.getName();
     }
 
-    /**
-     * Xếp widget từ trái sang phải, tràn 12 cột thì xuống hàng mới. Chiều cao hàng lấy theo widget
-     * cao nhất trong hàng — các loại giờ có cỡ khác nhau nên chia đều theo số lượng sẽ chồng lên nhau.
-     */
-    private static final class GridCursor {
-        private int x = 0;
-        private int y;
-        private int rowHeight = 0;
-
-        GridCursor(int startY) {
-            this.y = startY;
-        }
-
-        WidgetLayout place(WidgetSizeSpec size) {
-            if (x + size.w() > GRID_COLS) {
-                y += rowHeight;
-                x = 0;
-                rowHeight = 0;
-            }
-            WidgetLayout layout = new WidgetLayout(x, y, size.w(), size.h());
-            x += size.w();
-            rowHeight = Math.max(rowHeight, size.h());
-            return layout;
-        }
-    }
 }

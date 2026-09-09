@@ -1,6 +1,7 @@
 import { memo, useEffect, useMemo, useState } from 'react'
 import { useBlocker } from 'react-router-dom'
-import ReactGridLayout, { noCompactor, useContainerWidth } from 'react-grid-layout'
+import ReactGridLayout, { useContainerWidth } from 'react-grid-layout'
+import type { Compactor, Layout } from 'react-grid-layout'
 import { GridBackground } from 'react-grid-layout/extras'
 import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
@@ -18,6 +19,7 @@ import { LineWidget } from '@/components/widgets/LineWidget'
 import { SwitchWidget } from '@/components/widgets/SwitchWidget'
 import { ValueWidget } from '@/components/widgets/ValueWidget'
 import { clampWidgets, nextWidgetLayout, widgetSizeSpec } from '@/lib/dashboardLayout'
+import { widgetDatastreamIds } from '@/lib/widgetBinding'
 import { cn } from '@/lib/utils'
 import { useDashboardStore } from '@/stores/useDashboardStore'
 import type { CommandUpdate } from '@/types/command'
@@ -36,6 +38,23 @@ const EMPTY_METRIC_BY_CODE = new Map<string, Metric>()
 const GRID_COLS = 12
 const ROW_HEIGHT = 60
 const MARGIN: [number, number] = [12, 12]
+
+/**
+ * Bố cục tự do, KHÔNG đẩy widget khác.
+ *
+ * - `compact` trả nguyên layout: không nén dọc, nên kéo widget xuống một chút không bị hút ngược về
+ *   chỗ cũ — tức đặt được chồng lên một phần vị trí cũ của chính nó.
+ * - `preventCollision`: thả vào chỗ đã có widget thì **chặn**, không đẩy widget kia đi. Không có nó
+ *   thì RGL đẩy widget bị đụng xuống dưới, mà không có phép nén thì nó **không bao giờ trồi lại** —
+ *   mỗi lần kéo ngang qua là nó tụt thêm một đoạn, tích lại thành trôi rất sâu.
+ * - `allowOverlap: false`: resize không được đè lên widget khác.
+ */
+const FREE_LAYOUT_COMPACTOR: Compactor = {
+  type: null,
+  allowOverlap: false,
+  preventCollision: true,
+  compact: (layout: Layout) => layout,
+}
 
 interface DashboardBoardProps {
   /** Định danh board (`node:{id}` / `source:{id}`) — chế độ chỉnh sửa bám theo board, xem useDashboardStore. */
@@ -160,13 +179,13 @@ export function DashboardBoard({
   function handleAddWidget(input: {
     type: WidgetType
     title: string
-    datastreamId: number | null
+    datastreamIds: number[]
     gatewayId: number | null
     pinId: number | null
   }) {
     let binding: WidgetT['binding'] = null
-    if (input.datastreamId != null) {
-      binding = { datastreamId: input.datastreamId }
+    if (input.datastreamIds.length > 0) {
+      binding = { datastreamIds: input.datastreamIds }
     } else if (input.gatewayId != null && input.pinId != null) {
       binding = { gatewayId: input.gatewayId, pinId: input.pinId }
     }
@@ -233,19 +252,12 @@ export function DashboardBoard({
   // bằng đúng luật dedupe của backend (type + datastreamId), tính trên bản nháp đang hiện.
   const pendingWidgetCount = useMemo(() => {
     if (!pendingTemplate) return 0
-    const existing = new Set(widgets.map((widget) => `${widget.type}:${widget.binding?.datastreamId ?? null}`))
-    let count = 0
-    for (const entry of pendingTemplate.layoutJson) {
-      for (const datastream of datastreams) {
-        if (datastream.metricCode !== entry.metric) continue
-        const key = `${entry.widgetType}:${datastream.id}`
-        if (existing.has(key)) continue
-        existing.add(key)
-        count++
-      }
-    }
-    return count
-  }, [pendingTemplate, widgets, datastreams])
+    // Một entry = một ô, bất kể khớp mấy kênh (chúng gộp vào cùng widget). Entry không khớp kênh
+    // nào thì backend bỏ hẳn, không dựng ô rỗng.
+    return pendingTemplate.layoutJson.filter((entry) =>
+      datastreams.some((datastream) => datastream.metricCode === entry.metric)
+    ).length
+  }, [pendingTemplate, datastreams])
 
   function startAddingWidget() {
     if (!editMode) toggleEditMode(boardKey)
@@ -336,15 +348,14 @@ export function DashboardBoard({
             )}
             <ReactGridLayout
               width={width}
-              // noCompactor: mặc định RGL nén dọc, nên kéo widget xuống một chút là nó bị hút
-              // ngược về chỗ cũ — không đặt được widget chồng lên một phần vị trí cũ. Board này là
-              // bố cục tự do do người dùng sắp, không phải danh sách tự dồn.
-              compactor={noCompactor}
+              compactor={FREE_LAYOUT_COMPACTOR}
               gridConfig={{ cols: GRID_COLS, rowHeight: ROW_HEIGHT, margin: MARGIN, maxRows: editMode ? rows : Infinity }}
               // cancel: bấm vào ô chọn khoảng / nút phóng to trong widget cũng bị RGL tính là một
               // cú kéo, thả chuột ra là widget nhảy chỗ.
               dragConfig={{ enabled: editMode, cancel: '.widget-no-drag' }}
-              resizeConfig={{ enabled: editMode }}
+              // Chỉ hai mép: phải kéo ngang, dưới kéo dọc. Bỏ góc `se` mặc định của RGL — kéo góc
+              // luôn đổi đồng thời hai chiều, khó canh đúng một chiều.
+              resizeConfig={{ enabled: editMode, handles: ['e', 's'] }}
               layout={widgets.map((widget) => {
                 const spec = widgetSizeSpec(widget.type)
                 return {
@@ -365,7 +376,9 @@ export function DashboardBoard({
               {widgets.map((widget) => (
                 <div
                   key={widget.id}
-                  className={cn('group relative overflow-hidden', editMode && 'cursor-grab active:cursor-grabbing')}
+                  // Không `overflow-hidden` ở đây: dải resize nhô nửa ra ngoài mép nên sẽ bị cắt.
+                  // Nội dung widget đã được chính `Widget` (rounded-xl + overflow-hidden) cắt rồi.
+                  className={cn('group relative', editMode && 'cursor-grab active:cursor-grabbing')}
                 >
                   {editMode && (
                     <Tooltip>
@@ -385,16 +398,16 @@ export function DashboardBoard({
                   <WidgetRenderer
                     widget={widget}
                     tenantNodeId={tenantNodeId}
-                    datastream={
-                      widget.binding?.datastreamId != null ? datastreamById.get(widget.binding.datastreamId) : undefined
-                    }
-                    // Kênh đã bind nhưng không có trong danh sách của board: bị chuyển sang đơn vị
-                    // ngoài phạm vi, hoặc đã xóa. Widget vẫn vẽ nhưng đứng im — phải nói ra.
+                    datastreams={widgetDatastreamIds(widget)
+                      .map((id) => datastreamById.get(id))
+                      .filter((ds): ds is Datastream => !!ds)}
+                    // Bind kênh nhưng KHÔNG kênh nào còn trong phạm vi board: đã chuyển đơn vị hoặc
+                    // đã xoá. Widget vẫn vẽ nhưng đứng im — phải nói ra.
                     orphaned={
-                      widget.binding?.datastreamId != null &&
-                      !datastreamById.has(widget.binding.datastreamId)
+                      widgetDatastreamIds(widget).length > 0 &&
+                      !widgetDatastreamIds(widget).some((id) => datastreamById.has(id))
                     }
-                    reading={widget.binding?.datastreamId != null ? readings[widget.binding.datastreamId] : undefined}
+                    readings={readings}
                     metricByCode={metricByCode}
                     commandUpdates={commandUpdates}
                   />
@@ -437,7 +450,7 @@ export function DashboardBoard({
       <ConfirmDialog
         open={!!pendingTemplate}
         onOpenChange={(open) => !open && setPendingTemplate(null)}
-        title="Áp dụng mẫu này?"
+        title="Thay toàn bộ bố cục?"
         question={
           <>
             Áp mẫu <span className="font-semibold">&ldquo;{pendingTemplate?.name}&rdquo;</span>?
@@ -445,10 +458,11 @@ export function DashboardBoard({
         }
         description={
           pendingWidgetCount > 0
-            ? `Sẽ thêm ${pendingWidgetCount} widget cho mọi kênh khớp trong đơn vị này và các đơn vị bên dưới. Widget đang có được giữ nguyên.`
-            : 'Không có kênh nào khớp mẫu này trong phạm vi đơn vị đang xem — áp mẫu sẽ không thêm widget nào.'
+            ? `Board hiện có ${widgets.length} widget sẽ bị XOÁ và thay bằng ${pendingWidgetCount} widget của mẫu, kể cả widget bạn tự thêm (công tắc relay, danh sách thiết bị). Không hoàn tác được.`
+            : 'Không có kênh nào khớp mẫu này trong phạm vi đơn vị đang xem — áp mẫu sẽ xoá sạch board mà không dựng được widget nào.'
         }
-        confirmLabel="Áp dụng"
+        confirmLabel="Thay bố cục"
+        destructive
         isPending={isApplyingTemplate}
         onConfirm={handleApplyTemplate}
       />
@@ -471,17 +485,18 @@ export function DashboardBoard({
 const WidgetRenderer = memo(function WidgetRenderer({
   widget,
   tenantNodeId,
-  datastream,
+  datastreams,
   orphaned,
-  reading,
+  readings,
   metricByCode,
   commandUpdates,
 }: {
   widget: WidgetT
   tenantNodeId: number
-  datastream?: Datastream
+  /** Mọi kênh widget đang bind, đã lọc bỏ kênh ngoài phạm vi board. */
+  datastreams: Datastream[]
   orphaned?: boolean
-  reading?: DatastreamReading
+  readings: Record<number, DatastreamReading>
   metricByCode: Map<string, Metric>
   commandUpdates: Record<string, CommandUpdate>
 }) {
@@ -490,14 +505,14 @@ const WidgetRenderer = memo(function WidgetRenderer({
       return (
         <ValueWidget
           widget={widget}
-          datastream={datastream}
+          datastreams={datastreams}
           orphaned={orphaned}
-          reading={reading}
-          metric={datastream?.metricCode ? metricByCode.get(datastream.metricCode) : undefined}
+          readings={readings}
+          metricByCode={metricByCode}
         />
       )
     case 'LINE':
-      return <LineWidget widget={widget} datastream={datastream} orphaned={orphaned} reading={reading} />
+      return <LineWidget widget={widget} datastreams={datastreams} orphaned={orphaned} readings={readings} />
     case 'DEVICE_LIST':
       return <DeviceListWidget widget={widget} tenantNodeId={tenantNodeId} />
     case 'DEVICES_ONLINE':

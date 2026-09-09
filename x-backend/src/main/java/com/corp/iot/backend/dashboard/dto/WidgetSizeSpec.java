@@ -3,27 +3,35 @@ package com.corp.iot.backend.dashboard.dto;
 import java.util.Map;
 
 /**
- * Cỡ mặc định của widget theo loại. Trước đây mọi loại đều dùng chung 4x3 nên áp mẫu cho ra biểu đồ
- * đúng bằng cỡ ô số.
+ * Sàn/trần kích thước theo loại widget. Backend dùng để **kẹp toạ độ mẫu khai** — mẫu viết tay
+ * trong migration nên phải có lưới chắn, không thì một con số gõ nhầm đi thẳng vào `layout_json`.
  *
- * <p>Sàn/trần khi người dùng kéo-resize nằm ở frontend ({@code src/lib/dashboardLayout.ts}) — đó là
- * ràng buộc tương tác, không phải ràng buộc dữ liệu. Cột {@code w}/{@code h} dưới đây phải khớp với
- * cỡ mặc định trong bảng đó.
+ * <p>Phải khớp bảng trong `x-frontend/src/lib/dashboardLayout.ts` (nơi kẹp lúc người dùng kéo).
  */
-public record WidgetSizeSpec(int w, int h) {
+public record WidgetSizeSpec(int minW, int maxW, int minH, int maxH) {
 
-    private static final WidgetSizeSpec FALLBACK = new WidgetSizeSpec(3, 2);
+    public static final int GRID_COLS = 12;
+
+    private static final WidgetSizeSpec FALLBACK = new WidgetSizeSpec(2, 6, 2, 4);
 
     private static final Map<String, WidgetSizeSpec> BY_TYPE = Map.of(
-            "VALUE", new WidgetSizeSpec(3, 2),
-            "LINE", new WidgetSizeSpec(6, 4),
-            "SWITCH", new WidgetSizeSpec(3, 2),
-            "DEVICES_ONLINE", new WidgetSizeSpec(3, 2),
-            "DEVICE_LIST", new WidgetSizeSpec(4, 4)
+            "VALUE", new WidgetSizeSpec(2, 6, 2, 4),
+            "LINE", new WidgetSizeSpec(4, 12, 3, 8),
+            "SWITCH", new WidgetSizeSpec(2, 4, 2, 2),
+            "DEVICES_ONLINE", new WidgetSizeSpec(2, 4, 2, 3),
+            "DEVICE_LIST", new WidgetSizeSpec(3, 12, 3, 8)
     );
 
-    /** Loại lạ (template seed cũ, widget của phase sau) rơi về cỡ ô số thay vì ném lỗi. */
     public static WidgetSizeSpec of(String widgetType) {
         return BY_TYPE.getOrDefault(widgetType, FALLBACK);
+    }
+
+    /** Kẹp về trong biên hợp lệ; `x` bị đẩy vào lưới sau khi đã biết bề rộng thật. */
+    public static WidgetLayout clamp(WidgetLayout layout, String widgetType) {
+        WidgetSizeSpec spec = of(widgetType);
+        int w = Math.clamp(layout.w(), spec.minW(), spec.maxW());
+        int h = Math.clamp(layout.h(), spec.minH(), spec.maxH());
+        int x = Math.clamp(layout.x(), 0, GRID_COLS - w);
+        return new WidgetLayout(x, Math.max(layout.y(), 0), w, h);
     }
 }

@@ -176,13 +176,15 @@ Lọc InfluxDB theo `(external_source_job_id, source_field)` chứ **không** th
 
 | Method | Path | Body / Query | Response mẫu | Mô tả |
 |--------|------|--------------|--------------|-------|
-| GET | /api/v1/datastreams/{id}/telemetry | Query `rangeMinutes` (optional, default 1440, trần 10080) | `{ data: DatastreamTelemetryResponse }` | **Mới.** Số đo của **đúng một kênh**, dùng chung cho cả `GATEWAY_PIN` lẫn `EXTERNAL_SOURCE_JOB`. Scope `@nodeScope.canAccessDatastream` |
+| GET | /api/v1/datastreams/{id}/telemetry | Query `rangeMinutes` (optional, default 1440, trần 10080), `includeHistory` (optional, mặc định `true`) | `{ data: DatastreamTelemetryResponse }` | **Mới.** Số đo của **đúng một kênh**, dùng chung cho cả `GATEWAY_PIN` lẫn `EXTERNAL_SOURCE_JOB`. Scope `@nodeScope.canAccessDatastream` |
 
 Hai endpoint trên lấy theo lô (mọi chân của 1 gateway, mọi kênh của 1 nguồn) nên hợp với trang chi tiết. Widget biểu đồ trên dashboard thì ngược lại: nó chỉ cầm `datastreamId` và **không tra ngược ra được nguồn cha** — `datastream.sourceId` của kênh external là id của *job*, không phải của *external_source* — nên không gọi được endpoint theo nguồn. Đó là lý do endpoint theo kênh tồn tại chứ không phải để tiện.
 
 Trả về **cùng một `DatastreamTelemetryResponse`** cho cả hai loại nguồn, đúng vai trò "điểm gặp" của `datastream` (xem `DATABASE.md` § datastream): nơi gọi chỉ hỏi "kênh này có số đo gì", không cần biết phía sau là chân gateway hay câu SQL. Kênh `GATEWAY_PIN` trả `sourceField = null` và `oldestReadingAt = null`. Kênh không tồn tại → 404 `DATASTREAM_NOT_FOUND`; kênh gateway mà chân đã bị xoá → 404 `PIN_NOT_FOUND`.
 
 **`history` luôn đã gộp mẫu** theo cùng luật `AggregationWindow` với hai endpoint kia (≤500 điểm/kênh), nên phóng to ở giao diện **không** làm dữ liệu mịn thêm — muốn vậy phải cho endpoint nhận `from`/`to` thay vì `rangeMinutes`.
+
+**`includeHistory=false`** bỏ **hẳn** truy vấn lịch sử ở tầng Influx (không phải tải rồi vứt), trả `history: []` và `bucketSeconds: null`, chỉ giữ `latestValue`/`latestMeasuredAt`. Widget ô số dùng nó: mỗi lần đọc lịch sử là tối đa ~500 điểm/kênh, board mười ô giá trị làm mới mỗi phút thì đó là vài trăm KB cho mười con số. Đo thực tế trên một kênh: mặc định 481 điểm, `includeHistory=false` còn 0 điểm mà `latestValue` vẫn nguyên.
 
 ### WebSocket (STOMP)
 
@@ -380,16 +382,16 @@ Scope theo node như module Gateway ở trên. Mỗi user tối đa 1 board/node
 | GET | /api/v1/external-sources/{sourceId}/dashboard | — | `{ data: DashboardResponse }` | **Mới — Phase 5.** Board riêng theo nguồn — tự tạo rỗng nếu chưa có |
 | PUT | /api/v1/external-sources/{sourceId}/dashboard | `{ layoutJson }` | `{ data: DashboardResponse }` | **Mới — Phase 5.** Ghi đè layout board theo nguồn |
 
-`DashboardResponse`: `{ id, tenantNodeId, externalSourceId, name, widgets: [{ id, type, layout, title, binding, config }] }`. `type` ∈ `VALUE`/`LINE`/`DEVICE_COUNT`/`DEVICES_ONLINE`/`SWITCH` (`SWITCH` — Phase 7; `DEVICE_TABLE`/`EVENT_*` để phase sau, xem `PLAN.md`). `binding = { datastreamId }` cho `VALUE`/`LINE`; `binding = { gatewayId, pinId }` cho `SWITCH` (pin `OUTPUT`, không có `datastream`); `null` cho `DEVICE_COUNT`/`DEVICES_ONLINE`. Board theo nguồn (`externalSourceId != null`) chỉ cho phép `type` `VALUE`/`LINE` — không có khái niệm gateway/subtree để tổng hợp `DEVICE_COUNT`/`DEVICES_ONLINE`/`SWITCH`.
+`DashboardResponse`: `{ id, tenantNodeId, externalSourceId, name, widgets: [{ id, type, layout, title, binding, config }] }`. `type` ∈ `VALUE`/`LINE`/`DEVICE_COUNT`/`DEVICES_ONLINE`/`SWITCH` (`SWITCH` — Phase 7; `DEVICE_TABLE`/`EVENT_*` để phase sau, xem `PLAN.md`). `binding = { datastreamIds: [...] }` cho `VALUE`/`LINE` (dạng cũ `{ datastreamId }` một kênh vẫn đọc được — cả hai đầu phải hiểu cả hai, xem `DATABASE.md` § dashboard); `binding = { gatewayId, pinId }` cho `SWITCH` (pin `OUTPUT`, không có `datastream`); `null` cho `DEVICE_COUNT`/`DEVICES_ONLINE`. Board theo nguồn (`externalSourceId != null`) chỉ cho phép `type` `VALUE`/`LINE` — không có khái niệm gateway/subtree để tổng hợp `DEVICE_COUNT`/`DEVICES_ONLINE`/`SWITCH`.
 
 ### Module: Dashboard Template (`DashboardTemplateController`)
 
 | Method | Path | Body / Query | Response mẫu | Mô tả |
 |--------|------|--------------|--------------|-------|
 | GET | /api/v1/dashboard-templates | — | `{ data: DashboardTemplateResponse[] }` | List template (global, chéo tenant, giống Metric) |
-| POST | /api/v1/tenant-nodes/{id}/dashboard/apply-template/{templateId} | — | `{ data: DashboardResponse }` | Query `datastream` theo `metric` khớp template tại node, sinh widget cho từng datastream khớp, **append** vào dashboard hiện có của user (dedupe theo `type`+`datastreamId`, không ghi đè widget cũ) |
+| POST | /api/v1/tenant-nodes/{id}/dashboard/apply-template/{templateId} | — | `{ data: DashboardResponse }` | **GHI ĐÈ** board của user bằng đúng bố cục mẫu (`V21`). Mỗi entry mẫu = **một** widget tại toạ độ mẫu khai, gộp mọi `datastream` khớp `metric` trong subtree vào widget đó. Widget cũ bị xoá hết, kể cả widget mẫu không sinh được (`SWITCH`, `DEVICE_LIST`) |
 
-`DashboardTemplateResponse`: `{ id, name, description, layoutJson }`.
+`DashboardTemplateResponse`: `{ id, name, description, layoutJson }` — `layoutJson` là `[{ widgetType, metric, layout: {x,y,w,h}, config }]`.
 
 ### Module: Device Stats
 

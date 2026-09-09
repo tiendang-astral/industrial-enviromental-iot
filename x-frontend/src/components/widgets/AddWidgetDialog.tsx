@@ -11,6 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import {
@@ -18,10 +19,10 @@ import {
   SelectContent,
   SelectGroup,
   SelectItem,
-  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { WIDGET_TYPE_SOURCE, WidgetTypePreview } from '@/components/widgets/WidgetTypePreview'
 import { cn } from '@/lib/utils'
 import {
   addWidgetSchema,
@@ -46,7 +47,7 @@ interface AddWidgetDialogProps {
   onAdd: (input: {
     type: WidgetType
     title: string
-    datastreamId: number | null
+    datastreamIds: number[]
     gatewayId: number | null
     pinId: number | null
   }) => void
@@ -72,7 +73,7 @@ export function AddWidgetDialog({
 
   const form = useForm<AddWidgetFormValues>({
     resolver: zodResolver(addWidgetSchema),
-    defaultValues: { type: 'VALUE', datastreamId: '', gatewayId: '', pinId: '', title: '' },
+    defaultValues: { type: 'VALUE', datastreamIds: [], gatewayId: '', pinId: '', title: '' },
   })
   const {
     register,
@@ -82,7 +83,7 @@ export function AddWidgetDialog({
     handleSubmit,
     formState: { errors },
   } = form
-  const datastreamId = watch('datastreamId')
+  const datastreamIds = watch('datastreamIds')
   const gatewayId = watch('gatewayId')
   const pinId = watch('pinId')
 
@@ -108,12 +109,21 @@ export function AddWidgetDialog({
   const { data: gatewayPins } = useGatewayPinsQuery(gatewayId ? Number(gatewayId) : 0)
   const outputPins = gatewayPins?.filter((pin) => pin.direction === 'OUTPUT') ?? []
 
+  const bindingReady = !selectedType
+    ? false
+    : bindsDatastream(selectedType)
+      ? datastreamIds.length > 0
+      : bindsGatewayPin(selectedType)
+        ? !!pinId
+        : true
+
   useEffect(() => {
     if (!selectedType || !bindsDatastream(selectedType)) {
       return
     }
-    const datastream = datastreams.find((item) => String(item.id) === datastreamId)
-    if (datastream) {
+    const selected = datastreams.filter((item) => datastreamIds.includes(String(item.id)))
+    if (selected.length === 1) {
+      const datastream = selected[0]
       const site = datastreamGroups.find((group) => group.nodeId === datastream.tenantNodeId)
       setValue(
         'title',
@@ -121,9 +131,12 @@ export function AddWidgetDialog({
           ? `${site.name} · ${datastream.name}`
           : datastream.name
       )
+    } else if (selected.length > 1) {
+      // Không tên kênh nào đại diện được cho cả ô — dùng mã chỉ số, giống cách backend đặt tên khi áp mẫu.
+      setValue('title', selected[0].metricCode ?? 'Nhiều kênh')
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [datastreamId])
+  }, [datastreamIds.join(',')])
 
   useEffect(() => {
     if (!selectedType || !bindsGatewayPin(selectedType)) {
@@ -145,13 +158,13 @@ export function AddWidgetDialog({
   function reset() {
     setStep('type')
     setSelectedType(null)
-    form.reset({ type: 'VALUE', datastreamId: '', gatewayId: '', pinId: '', title: '' })
+    form.reset({ type: 'VALUE', datastreamIds: [], gatewayId: '', pinId: '', title: '' })
   }
 
   function goToDetails() {
     if (!selectedType) return
     setValue('type', selectedType)
-    setValue('datastreamId', '')
+    setValue('datastreamIds', [])
     setValue('gatewayId', '')
     setValue('pinId', '')
     setValue(
@@ -167,8 +180,7 @@ export function AddWidgetDialog({
     onAdd({
       type: values.type,
       title: values.title,
-      datastreamId:
-        bindsDatastream(values.type) && values.datastreamId ? Number(values.datastreamId) : null,
+      datastreamIds: bindsDatastream(values.type) ? values.datastreamIds.map(Number) : [],
       gatewayId: bindsGatewayPin(values.type) && values.gatewayId ? Number(values.gatewayId) : null,
       pinId: bindsGatewayPin(values.type) && values.pinId ? Number(values.pinId) : null,
     })
@@ -184,21 +196,25 @@ export function AddWidgetDialog({
         onOpenChange(next)
       }}
     >
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent
+        className="sm:max-w-lg"
+        // Bước chọn loại không còn dòng mô tả nào — nói rõ để Radix không cảnh báo thiếu Description.
+        {...(step === 'type' ? { 'aria-describedby': undefined } : {})}
+      >
         <DialogHeader>
           <DialogTitle>
-            {step === 'type' ? 'Thêm widget — chọn loại' : 'Thêm widget — thông tin'}
+            {  'Thêm widget' }
           </DialogTitle>
-          <DialogDescription>
-            {step === 'type'
-              ? 'Mỗi loại widget hiển thị dữ liệu theo một cách khác nhau.'
-              : 'Gắn dữ liệu cho widget và đặt tên hiển thị trên bảng điều khiển.'}
-          </DialogDescription>
+          {step === 'details' && (
+            <DialogDescription>
+              Gắn dữ liệu cho widget và đặt tên hiển thị trên bảng điều khiển.
+            </DialogDescription>
+          )}
         </DialogHeader>
 
         {step === 'type' && (
           <>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-2.5">
               {typeOptions.map((option) => {
                 const Icon = option.icon
                 const isSelected = selectedType === option.type
@@ -210,15 +226,19 @@ export function AddWidgetDialog({
                     onClick={() => setSelectedType(option.type)}
                     onDoubleClick={goToDetails}
                     className={cn(
-                      'flex flex-col items-start gap-1.5 rounded-lg border p-3 text-left transition-colors duration-(--motion-fast) focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none',
+                      'flex flex-col gap-2 rounded-xl border p-3 text-center transition-colors duration-(--motion-fast) focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none',
                       isSelected
                         ? 'border-primary bg-primary/5 ring-1 ring-primary'
-                        : 'border-input hover:bg-muted/50'
+                        : 'border-input hover:border-border hover:bg-muted/40'
                     )}
                   >
-                    <Icon className={cn('size-5', isSelected ? 'text-primary' : 'text-muted-foreground')} />
-                    <span className="text-sm font-medium">{option.label}</span>
-                    <span className="text-xs text-muted-foreground">{option.description}</span>
+                    <WidgetTypePreview type={option.type} selected={isSelected} />
+                    <span className="flex min-w-0 items-center justify-center gap-1.5">
+                      <Icon className={cn('size-4 shrink-0', isSelected ? 'text-primary' : 'text-muted-foreground')} />
+                      <span className="min-w-0 truncate text-sm font-medium">{option.label}</span>
+                    </span>
+                    {/* Bind vào cái gì — thứ quyết định người dùng chọn loại nào, thay cho dòng mô tả cũ. */}
+                    <span className="text-[11px] text-muted-foreground">{WIDGET_TYPE_SOURCE[option.type]}</span>
                   </button>
                 )
               })}
@@ -238,46 +258,69 @@ export function AddWidgetDialog({
           <form className="flex flex-col gap-6" onSubmit={handleSubmit(onSubmit)} noValidate>
             <FieldGroup>
               {bindsDatastream(selectedType) && (
-                <Field data-invalid={!!errors.datastreamId}>
-                  <FieldLabel htmlFor="widget-datastream">Datastream</FieldLabel>
+                <Field>
+                  <FieldLabel htmlFor="widget-datastreams">Kênh dữ liệu</FieldLabel>
                   <Controller
                     control={control}
-                    name="datastreamId"
-                    render={({ field }) => (
-                      <Select
-                        value={field.value}
-                        onValueChange={field.onChange}
-                        disabled={datastreams.length === 0}
-                      >
-                        <SelectTrigger
-                          id="widget-datastream"
-                          aria-invalid={!!errors.datastreamId}
-                          className="w-full"
+                    name="datastreamIds"
+                    render={({ field }) => {
+                      // Chỉ gộp được kênh CÙNG chỉ số: khác chỉ số là khác đơn vị, chồng chung một
+                      // trục Y thì con số đọc ra vô nghĩa (xem PLAN.md Phase 2).
+                      const lockedMetric = datastreams.find((item) =>
+                        field.value.includes(String(item.id))
+                      )?.metricCode
+                      const toggle = (id: string, checked: boolean) =>
+                        field.onChange(
+                          checked ? [...field.value, id] : field.value.filter((item) => item !== id)
+                        )
+                      return (
+                        <div
+                          id="widget-datastreams"
+                          className="max-h-56 overflow-y-auto rounded-lg border border-input p-1"
                         >
-                          <SelectValue placeholder="Chọn datastream" />
-                        </SelectTrigger>
-                        <SelectContent>
                           {datastreamGroups.map((group) => (
-                            <SelectGroup key={group.nodeId}>
-                              {showGroupLabels && <SelectLabel>{group.name}</SelectLabel>}
-                              {group.items.map((datastream) => (
-                                <SelectItem key={datastream.id} value={String(datastream.id)}>
-                                  {datastream.name} ({datastream.metricCode ?? 'chưa gán metric'})
-                                </SelectItem>
-                              ))}
-                            </SelectGroup>
+                            <div key={group.nodeId} className="flex flex-col">
+                              {showGroupLabels && (
+                                <p className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground">
+                                  {group.name}
+                                </p>
+                              )}
+                              {group.items.map((datastream) => {
+                                const id = String(datastream.id)
+                                const checked = field.value.includes(id)
+                                const blocked =
+                                  !checked && !!lockedMetric && datastream.metricCode !== lockedMetric
+                                return (
+                                  <label
+                                    key={datastream.id}
+                                    className={cn(
+                                      'flex items-center gap-2 rounded-md px-2 py-1.5 text-sm',
+                                      blocked ? 'opacity-40' : 'cursor-pointer hover:bg-muted/50'
+                                    )}
+                                  >
+                                    <Checkbox
+                                      checked={checked}
+                                      disabled={blocked}
+                                      onCheckedChange={(next) => toggle(id, next === true)}
+                                    />
+                                    <span className="min-w-0 flex-1 truncate">{datastream.name}</span>
+                                    <span className="shrink-0 text-xs text-muted-foreground">
+                                      {datastream.metricCode ?? 'chưa gán chỉ số'}
+                                    </span>
+                                  </label>
+                                )
+                              })}
+                            </div>
                           ))}
-                        </SelectContent>
-                      </Select>
-                    )}
+                        </div>
+                      )
+                    }}
                   />
-                  {datastreams.length === 0 && (
-                    <FieldDescription>
-                      Đơn vị này và các đơn vị bên dưới chưa có kênh dữ liệu nào — khai báo pin
-                      INPUT trên gateway hoặc gắn kênh cho nguồn dữ liệu trước.
-                    </FieldDescription>
-                  )}
-                  <FieldError errors={[errors.datastreamId]} />
+                  <FieldDescription>
+                    {datastreams.length === 0
+                      && 'Đơn vị này và các đơn vị bên dưới chưa có kênh dữ liệu nào — khai báo pin INPUT trên gateway hoặc gắn kênh cho nguồn dữ liệu trước.'
+                      }
+                  </FieldDescription>
                 </Field>
               )}
 
@@ -312,7 +355,7 @@ export function AddWidgetDialog({
                     <FieldError errors={[errors.gatewayId]} />
                   </Field>
 
-                  <Field data-invalid={!!errors.pinId}>
+                  <Field>
                     <FieldLabel htmlFor="widget-pin">Chân điều khiển</FieldLabel>
                     <Controller
                       control={control}
@@ -345,7 +388,6 @@ export function AddWidgetDialog({
                     {gatewayId && outputPins.length === 0 && (
                       <FieldDescription>Gateway này chưa có chân OUTPUT nào.</FieldDescription>
                     )}
-                    <FieldError errors={[errors.pinId]} />
                   </Field>
                 </>
               )}
@@ -367,7 +409,11 @@ export function AddWidgetDialog({
                 <ArrowLeft data-icon="inline-start" />
                 Quay lại
               </Button>
-              <Button type="submit">Thêm widget</Button>
+              {/* Chưa chọn nguồn thì khoá nút, không tô đỏ danh sách: người dùng chưa làm gì sai,
+                  họ mới chỉ chưa làm xong. */}
+              <Button type="submit" disabled={!bindingReady}>
+                Thêm widget
+              </Button>
             </DialogFooter>
           </form>
         )}

@@ -10,6 +10,7 @@ import com.corp.iot.backend.gateway.dto.UpdateGatewayRequest;
 import com.corp.iot.backend.gateway.entity.Gateway;
 import com.corp.iot.backend.gateway.mapper.GatewayMapper;
 import com.corp.iot.backend.gateway.repository.GatewayRepository;
+import com.corp.iot.backend.gatewaypin.service.GatewayPinCacheEvictor;
 import com.corp.iot.backend.tenantnode.entity.NodeType;
 import com.corp.iot.backend.tenantnode.entity.TenantNode;
 import com.corp.iot.backend.tenantnode.repository.TenantNodeRepository;
@@ -31,6 +32,7 @@ public class GatewayServiceImpl implements GatewayService {
     private final TenantNodeRepository tenantNodeRepository;
     private final GatewayMapper gatewayMapper;
     private final ScopeService scopeService;
+    private final GatewayPinCacheEvictor gatewayPinCacheEvictor;
 
     @Override
     public List<GatewayResponse> list(Long tenantNodeId, boolean includeDescendants) {
@@ -111,6 +113,7 @@ public class GatewayServiceImpl implements GatewayService {
         Gateway gateway = getOrThrow(id);
         gateway.setDeletedAt(Instant.now());
         gatewayRepository.save(gateway);
+        gatewayPinCacheEvictor.evictByGateway(id);
     }
 
     private Gateway getOrThrow(Long id) {

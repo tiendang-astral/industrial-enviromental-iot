@@ -1,7 +1,7 @@
 # Database ngoài để test tính năng External Source (Phase 5) — KHÔNG phải hạ tầng platform
 # thật (tách riêng khỏi docker-compose.yml chính), mô phỏng đúng kịch bản "khách hàng cho
-# platform quyền đọc 1 Postgres của họ". Chạy: docker compose -f docker-compose.mock-external-db.yml up -d
-# Dừng:  docker compose -f docker-compose.mock-external-db.yml down (thêm -v để xóa luôn data).
+# platform quyền đọc 1 Postgres của họ". Chạy: docker compose -f compose/docker-compose.mock-external-db.yml up -d
+# Dừng:  docker compose -f compose/docker-compose.mock-external-db.yml down (thêm -v để xóa luôn data).
 #
 # `name:` bắt buộc phải có — 2 file compose trong cùng thư mục mà không khai project name
 # riêng sẽ bị Docker Compose gộp chung 1 project (theo tên thư mục), khiến `down` trên file
@@ -21,7 +21,7 @@ services:
       - "5435:5432"
     volumes:
       - mock_external_db_data:/var/lib/postgresql/data
-      - ./docker/mock-external-db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ../docker/mock-external-db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U sensors -d sensors"]
       interval: 5s
@@ -38,7 +38,7 @@ services:
     environment:
       DATABASE_URL: postgresql://sensors:sensors@mock-external-db:5432/sensors
     volumes:
-      - ./docker/mock-external-db/insert-loop.sh:/insert-loop.sh:ro
+      - ../docker/mock-external-db/insert-loop.sh:/insert-loop.sh:ro
     entrypoint: ["sh", "/insert-loop.sh"]
 
 volumes:

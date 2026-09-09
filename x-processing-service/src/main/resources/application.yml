@@ -9,10 +9,27 @@ spring:
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       auto-offset-reset: earliest
+      # Trần MỘT lô, không phải mục tiêu — poll() trả về ngay khi có dữ liệu, nên lúc tải thấp lô
+      # chỉ vài bản ghi và độ trễ gần như không đổi; lúc tải cao lô mới đầy, đúng lúc cần gom.
+      max-poll-records: 500
+      properties:
+        # Thời gian xấu nhất xử lý 1 lô phải nhỏ hơn giá trị này, nếu không broker coi consumer đã
+        # chết -> kick khỏi group -> rebalance -> lô lại được giao lại -> vòng lặp chết.
+        max.poll.interval.ms: 300000
+        fetch.max.wait.ms: 500
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
       acks: all
+    listener:
+      # Gom lô cho telemetry. gateway-commands KHÔNG theo (commandListenerFactory ép record
+      # listener) — lệnh do người bấm nút thì gom lô chỉ thêm độ trễ.
+      type: batch
+      # Số consumer thread MỖI @KafkaListener. Không khai thì mặc định 1 — cả topic telemetry
+      # chỉ có 1 thread chạy toàn bộ SensorReadingProcessor. Khớp với 24 partition:
+      # 6 instance x 4 thread = 24 consumer = dùng hết công suất.
+      # gateway-commands không theo giá trị này (dùng commandListenerFactory riêng).
+      concurrency: 4
 
   datasource:
     url: jdbc:postgresql://localhost:5433/iiot
@@ -48,7 +65,9 @@ influx:
 mqtt:
   broker-url: tcp://localhost:1883
   client-id: processing-service
-  ack-topic-filter: gateway/+/ack
+  # Shared subscription (xem x-ingestion-service/application.yml) — nếu không, mỗi instance
+  # đều nhận ACK và cùng cập nhật trạng thái một lệnh.
+  ack-topic-filter: $share/processing/gateway/+/ack
 
 app:
   kafka:
@@ -58,6 +77,13 @@ app:
       gateway-commands: gateway-commands
   redis:
     telemetry-dedup-ttl-hours: 6
+    # Cache gateway_pin -> metric -> datastream, bỏ 3 query Postgres mỗi số đo.
+    # 60s (không phải 10 phút): `enabled` sửa được từ UI, sót một chỗ xoá cache ở x-backend
+    # thì thiệt hại giới hạn trong 1 phút.
+    pin-resolve-ttl-seconds: 60
+    # Tiết chế UPDATE gateway.last_seen_at. Mọi ngưỡng "gateway mất kết nối" phải >= 3 lần
+    # giá trị này (>= 90s), nếu không sẽ báo giả.
+    gateway-seen-throttle-seconds: 30
   alert:
     rule-cache-ttl-seconds: 60
     notify-pool-size: 2
@@ -69,10 +95,24 @@ app:
     mqtt-publish-retry-delay-ms: 2000
 
 server:
-  port: 8082
+  # -1 = không mở HTTP cho ứng dụng. Service này chỉ giao tiếp qua Kafka/Redis/Postgres
+  # (CONVENTIONS.md §2); toàn bộ HTTP nằm ở management server bên dưới.
+  port: -1
 
 management:
+  server:
+    port: 8082
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      show-details: always
+  health:
+    mail:
+      # SMTP chết KHÔNG được làm service thành DOWN: gửi cảnh báo đã cố ý là best-effort
+      # (NotificationDispatcher nuốt lỗi, chỉ log — xem ARCHITECTURE.md § Flow: Alert bước 5).
+      # Để nguyên thì readiness probe giết pod dù luồng ghi telemetry vẫn hoàn toàn khoẻ.
+      # Lỗi gửi mail vẫn thấy được qua log ERROR, đúng chỗ thiết kế đã đặt nó.
+      enabled: false

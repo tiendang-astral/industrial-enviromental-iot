@@ -4,6 +4,8 @@ export interface ChartPalette {
   line: string
   grid: string
   text: string
+  /** Màu cho biểu đồ nhiều đường — `--chart-1..6` đã khai sẵn trong index.css. */
+  series: string[]
 }
 
 /**
@@ -59,31 +61,37 @@ export function resolveChartPalette(): ChartPalette {
   // dự phòng lại tái tạo đúng lỗi nó sinh ra để tránh.
   const read = (name: string, fallback: string) =>
     toParsableColor(style.getPropertyValue(name).trim(), fallback)
+  const series = [1, 2, 3, 4, 5, 6].map((index) =>
+    read(`--chart-${index}`, ['#2f86a6', '#6366f1', '#c2549d', '#d97706', '#16a34a', '#0891b2'][index - 1])
+  )
   return {
-    line: read('--chart-1', '#2f86a6'),
+    line: series[0],
     grid: read('--border', '#d7dce2'),
     text: read('--muted-foreground', '#6b7683'),
+    series,
   }
 }
 
-function lineSeries(history: ReadingPoint[], palette: ChartPalette, showSymbol: boolean) {
+function lineSeries(history: ReadingPoint[], palette: ChartPalette, showSymbol: boolean, color?: string, name?: string) {
+  const stroke = color ?? palette.line
   return {
+    name,
     type: 'line' as const,
     data: history.map((p) => p.value),
     showSymbol,
     symbolSize: 5,
     smooth: true,
-    itemStyle: { color: palette.line },
-    lineStyle: { width: 2, color: palette.line },
-    areaStyle: { color: palette.line, opacity: 0.1 },
+    itemStyle: { color: stroke },
+    lineStyle: { width: 2, color: stroke },
+    areaStyle: { color: stroke, opacity: 0.1 },
     // Khai sẵn màu cho trạng thái nhấn. `echarts/lib/util/states.js` chỉ tự dẫn xuất màu
     // (`liftColor`) KHI emphasis chưa khai fill/stroke — mà phép dẫn xuất đó trả `undefined`
     // với màu ngoài sRGB, làm đường và vùng nền biến mất đúng lúc hover. Khai đủ ba lớp thì
     // ECharts không phải tự đoán, và nét vẽ an toàn với mọi định dạng màu.
     emphasis: {
-      lineStyle: { width: 2.5, color: palette.line },
-      itemStyle: { color: palette.line },
-      areaStyle: { color: palette.line, opacity: 0.16 },
+      lineStyle: { width: 2.5, color: stroke },
+      itemStyle: { color: stroke },
+      areaStyle: { color: stroke, opacity: 0.16 },
     },
   }
 }
@@ -250,5 +258,80 @@ export function buildAxisLineOption(
       },
     },
     series: [lineSeries(history, palette, history.length <= 30)],
+  }
+}
+
+export interface ChartSeries {
+  label: string
+  points: ReadingPoint[]
+}
+
+/**
+ * Biểu đồ nhiều đường cho widget bind nhiều kênh CÙNG chỉ số (cùng đơn vị — khác đơn vị thì không
+ * chồng chung trục Y được, xem PLAN.md Phase 2).
+ *
+ * Trục X là HỢP các mốc thời gian của mọi kênh: backend gộp mẫu theo cùng cửa sổ nhưng bỏ bucket
+ * rỗng (`createEmpty: false`), nên hai kênh cùng khoảng vẫn có thể lệch mốc. Chỗ thiếu để `null` và
+ * `connectNulls` nối qua, thay vì đẩy dữ liệu lệch sang mốc của kênh khác.
+ */
+export function buildMultiLineOption(
+  series: ChartSeries[],
+  unit: string | null | undefined,
+  palette: ChartPalette,
+  zoomable = false
+) {
+  const axis = [...new Set(series.flatMap((s) => s.points.map((p) => p.measuredAt)))].sort()
+  const showLegend = series.length > 1
+
+  // Truyền trục thật vào để nhãn thời gian tự biết có bắc qua nhiều ngày hay không; `series` và
+  // `xAxis.data` của base bị ghi đè ngay bên dưới.
+  const base = buildAxisLineOption(
+    axis.map((measuredAt) => ({ value: 0, measuredAt })), unit, palette, zoomable
+  )
+  return {
+    ...base,
+    legend: showLegend
+      ? {
+          type: 'scroll' as const,
+          top: 0,
+          left: unit ? 28 : 0,
+          itemHeight: 8,
+          itemWidth: 14,
+          textStyle: { fontSize: 10, color: palette.text },
+        }
+      : undefined,
+    grid: { ...base.grid, top: showLegend ? 28 : base.grid.top },
+    xAxis: { ...base.xAxis, data: axis },
+    tooltip: {
+      trigger: 'axis' as const,
+      formatter: (params: unknown) => {
+        const rows = (Array.isArray(params) ? params : [params]) as {
+          axisValue: string
+          seriesName: string
+          data: number | null
+          color: string
+        }[]
+        if (rows.length === 0) return ''
+        const when = new Date(rows[0].axisValue).toLocaleString('vi-VN', {
+          day: '2-digit', month: '2-digit', year: 'numeric',
+          hour: '2-digit', minute: '2-digit', second: '2-digit',
+        })
+        const lines = rows
+          .filter((row) => row.data != null)
+          .map((row) => `<span style="color:${row.color}">●</span> ${row.seriesName}: <strong>${row.data}${unit ? ' ' + unit : ''}</strong>`)
+        return `${when}<br/>${lines.join('<br/>')}`
+      },
+    },
+    series: series.map((item, index) => {
+      const byTime = new Map(item.points.map((point) => [point.measuredAt, point.value]))
+      const data = axis.map((measuredAt) => byTime.get(measuredAt) ?? null)
+      return {
+        ...lineSeries([], palette, false, palette.series[index % palette.series.length], item.label),
+        data,
+        connectNulls: true,
+        // Nhiều đường chồng nhau mà tô nền thì lớp dưới bị che — chỉ tô khi có đúng một đường.
+        areaStyle: showLegend ? undefined : lineSeries([], palette, false).areaStyle,
+      }
+    }),
   }
 }

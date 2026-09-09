@@ -30,6 +30,7 @@ import { useMetricsQuery } from '@/queries/useMetricsQuery'
 import { useSaveDashboardLayoutMutation } from '@/queries/useSaveDashboardLayoutMutation'
 import { useTenantNodesQuery } from '@/queries/useTenantNodesQuery'
 import { useDashboardStore } from '@/stores/useDashboardStore'
+import { widgetDatastreamIds } from '@/lib/widgetBinding'
 import { ancestorIdsOf, orderNodesDepthFirst } from '@/lib/tenantNodeTree'
 import type { Datastream, DatastreamReading } from '@/types/dashboard'
 import type { Metric } from '@/types/metric'
@@ -81,9 +82,10 @@ export default function DashboardPage() {
     const datastreamById = new Map(datastreams?.map((ds) => [ds.id, ds]) ?? [])
     const gatewayById = new Map(gateways?.map((gateway) => [gateway.id, gateway]) ?? [])
     for (const widget of dashboard?.widgets ?? []) {
-      const boundDatastream =
-        widget.binding?.datastreamId != null ? datastreamById.get(widget.binding.datastreamId) : undefined
-      if (boundDatastream) ids.add(boundDatastream.tenantNodeId)
+      for (const datastreamId of widgetDatastreamIds(widget)) {
+        const boundDatastream = datastreamById.get(datastreamId)
+        if (boundDatastream) ids.add(boundDatastream.tenantNodeId)
+      }
       const boundGateway =
         widget.binding?.gatewayId != null ? gatewayById.get(widget.binding.gatewayId) : undefined
       if (boundGateway?.tenantNodeId != null) ids.add(boundGateway.tenantNodeId)

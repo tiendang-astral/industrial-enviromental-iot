@@ -9,6 +9,7 @@ import com.corp.iot.ingestion.external.repository.ExternalSourceRepository;
 import com.corp.iot.ingestion.external.util.CronNextRunCalculator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -32,6 +33,7 @@ public class ExternalSourceSchedulerService {
     private final CronNextRunCalculator cronNextRunCalculator;
 
     @Scheduled(fixedDelayString = "${app.external.sweep-interval-ms}")
+    @SchedulerLock(name = "externalSourceSweep", lockAtMostFor = "PT5M")
     public void sweep() {
         List<ExternalSourceJob> dueJobs = externalSourceJobRepository.findDueJobs(Instant.now());
         dueJobs.forEach(this::runJob);
@@ -40,6 +42,7 @@ public class ExternalSourceSchedulerService {
     // Bảng log chạy mỗi phút/job nên phải tự dọn — trang chi tiết chỉ đọc 12 giờ gần nhất,
     // giữ 7 ngày là đủ rộng cho việc lần lại sự cố.
     @Scheduled(fixedDelayString = "${app.external.run-history-cleanup-interval-ms}")
+    @SchedulerLock(name = "externalRunHistoryCleanup", lockAtMostFor = "PT10M")
     @Transactional
     public void cleanupRunHistory() {
         int deleted = externalSourceJobRunRepository.deleteOlderThan(Instant.now().minus(7, ChronoUnit.DAYS));

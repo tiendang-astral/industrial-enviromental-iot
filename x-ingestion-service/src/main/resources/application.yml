@@ -27,7 +27,10 @@ spring:
 mqtt:
   broker-url: tcp://localhost:1883
   client-id: ingestion-service
-  topic-filter: gateway/+/data
+  # $share/<group>/ — shared subscription của EMQX: mỗi message chỉ giao cho MỘT instance
+  # trong nhóm, thay vì phát bản sao cho tất cả. Tiền tố bị broker bóc trước khi giao nên
+  # RECEIVED_TOPIC vẫn là gateway/{mac}/data, regex ở SensorInboundMqttHandler không đổi.
+  topic-filter: $share/ingestion/gateway/+/data
 
 app:
   kafka:
@@ -50,10 +53,14 @@ app:
     key: ${APP_ENCRYPTION_KEY:htcBFqnfOVeXpRFzOHXr3wAl1qRamivL3PBA5IC+hEY=}
 
 server:
-  port: 8081
+  # -1 = không mở HTTP cho ứng dụng. Service này chỉ giao tiếp qua Kafka/Redis/Postgres
+  # (CONVENTIONS.md §2); toàn bộ HTTP nằm ở management server bên dưới.
+  port: -1
 
 management:
+  server:
+    port: 8081
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,prometheus,metrics

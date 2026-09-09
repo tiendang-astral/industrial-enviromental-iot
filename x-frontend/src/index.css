@@ -596,3 +596,89 @@
     padding-block: 4px;
     white-space: normal;
 }
+
+/* --------------------------------------------------------------------------------------------
+ * Vùng đệm resize của widget: một dải LIỀN bo nhẹ nằm vắt qua mép phải (kéo ngang) và mép dưới
+ * (kéo dọc), bên trong có vạch nắm. Không có tay nắm ở góc.
+ *
+ * Dải liền + vạch bên trong, chứ không cắt cả dải thành các mẩu rời — cắt rời thì đọc ra như một
+ * đường nét đứt bị lỗi, không ra "chỗ này nắm được".
+ *
+ * Phải bám thêm `.react-grid-layout` để thắng độ ưu tiên: react-grid-layout dùng ĐÚNG cùng selector
+ * và được import trong component nên nạp sau index.css. Ba thứ của nó phải huỷ bằng tay:
+ * `transform: rotate()` (làm dải thành hình thoi), `::after` (vẽ góc chữ L đen cứng), và
+ * `margin: -10px` theo trục (đẩy dải lệch khỏi tâm cạnh).
+ * ------------------------------------------------------------------------------------------ */
+.react-grid-layout .react-grid-item > .react-resizable-handle {
+    background-image: none;
+    background-color: var(--muted);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    margin: 0;
+    opacity: 0;
+    transition:
+        opacity var(--motion-fast) var(--motion-ease),
+        background-color var(--motion-fast) var(--motion-ease);
+}
+
+.react-grid-layout .react-grid-item:hover > .react-resizable-handle {
+    opacity: 1;
+}
+
+.react-grid-layout .react-grid-item > .react-resizable-handle:hover,
+.react-grid-layout .react-grid-item.resizing > .react-resizable-handle {
+    background-color: var(--accent);
+    border-color: var(--primary);
+}
+
+/* Một vạch nắm duy nhất ở giữa dải, cùng phương với chiều kéo. Màu trung tính mờ: nó chỉ để nói
+   "chỗ này nắm được", không phải thứ cần đọc. */
+.react-grid-layout .react-grid-item > .react-resizable-handle::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background-color: var(--muted-foreground);
+    opacity: 0.55;
+}
+
+.react-grid-layout .react-grid-item > .react-resizable-handle.react-resizable-handle-e {
+    top: 50%;
+    right: -5px;
+    bottom: auto;
+    left: auto;
+    width: 10px;
+    height: 42px;
+    /* RGL đặt `margin-top: -10px` ngay trong quy tắc theo trục nên `margin: 0` ở quy tắc chung thua —
+       không huỷ ở đây thì dải lệch 10px khỏi tâm cạnh. */
+    margin: 0;
+    transform: translateY(-50%);
+}
+
+.react-grid-layout .react-grid-item > .react-resizable-handle.react-resizable-handle-e::after {
+    width: 1px;
+    height: 18px;
+}
+
+.react-grid-layout .react-grid-item > .react-resizable-handle.react-resizable-handle-s {
+    bottom: -5px;
+    left: 50%;
+    top: auto;
+    right: auto;
+    width: 42px;
+    height: 10px;
+    margin: 0;
+    transform: translateX(-50%);
+}
+
+.react-grid-layout .react-grid-item > .react-resizable-handle.react-resizable-handle-s::after {
+    width: 18px;
+    height: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .react-grid-layout .react-grid-item > .react-resizable-handle {
+        transition: none;
+    }
+}

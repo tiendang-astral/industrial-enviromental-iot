@@ -3,12 +3,12 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { RangePicker } from '@/components/dashboard/RangePicker'
 import { TrendChart } from '@/components/patterns/TrendChart'
 import { formatDateTime } from '@/lib/datetime'
-import type { ReadingPoint } from '@/types/telemetry'
+import type { ChartSeries } from '@/lib/echarts'
 
 /** Thống kê tính từ chính chuỗi đang vẽ, không phải từ dữ liệu thô — nói đúng cái mắt thấy. */
-function stats(points: ReadingPoint[]) {
-  if (points.length === 0) return null
-  const values = points.map((point) => point.value)
+function stats(series: ChartSeries[]) {
+  const values = series.flatMap((item) => item.points.map((point) => point.value))
+  if (values.length === 0) return null
   const sum = values.reduce((total, value) => total + value, 0)
   return { min: Math.min(...values), max: Math.max(...values), avg: sum / values.length }
 }
@@ -21,7 +21,7 @@ interface WidgetChartDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   title: string
-  history: ReadingPoint[]
+  series: ChartSeries[]
   unit?: string | null
   isLoading: boolean
   rangeMinutes: number
@@ -34,16 +34,17 @@ export function WidgetChartDialog({
   open,
   onOpenChange,
   title,
-  history,
+  series,
   unit,
   isLoading,
   rangeMinutes,
   onRangeChange,
   bucketSeconds,
 }: WidgetChartDialogProps) {
-  const summary = history.length > 1 ? stats(history) : null
-  const first = history[0]
-  const last = history[history.length - 1]
+  const points = series.flatMap((item) => item.points).sort((a, b) => a.measuredAt.localeCompare(b.measuredAt))
+  const summary = points.length > 1 ? stats(series) : null
+  const first = points[0]
+  const last = points[points.length - 1]
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -77,7 +78,7 @@ export function WidgetChartDialog({
             <Skeleton className="w-full rounded-lg" />
           ) : (
             <TrendChart
-              history={history}
+              series={series}
               variant="axis"
               zoomable
               unit={unit}
@@ -101,7 +102,7 @@ export function WidgetChartDialog({
               {unit ? ` ${unit}` : ''}
             </span>
             <span>
-              Số điểm <span className="tabular font-medium text-foreground">{history.length}</span>
+              Số điểm <span className="tabular font-medium text-foreground">{points.length}</span>
             </span>
           </div>
         )}

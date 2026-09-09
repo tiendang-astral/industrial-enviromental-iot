@@ -5,11 +5,14 @@ import com.corp.iot.processing.telemetry.SensorReadingProcessor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.kafka.listener.BatchListenerFailedException;
 import tools.jackson.databind.ObjectMapper;
 
 import java.time.Instant;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -45,11 +48,12 @@ class SensorDataRawListenerContractTest {
 
     @Test
     void parsesCanonicalIngestionPayloadIntoExpectedEvent() {
-        listener.onMessage(CANONICAL_JSON);
+        listener.onMessage(List.of(CANONICAL_JSON));
 
-        ArgumentCaptor<SensorReadingEvent> captor = ArgumentCaptor.forClass(SensorReadingEvent.class);
-        verify(processor).process(captor.capture());
-        SensorReadingEvent event = captor.getValue();
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<SensorReadingEvent>> captor = ArgumentCaptor.forClass(List.class);
+        verify(processor).processBatch(captor.capture());
+        SensorReadingEvent event = captor.getValue().getFirst();
 
         assertThat(event.messageId()).isEqualTo("abc123");
         assertThat(event.tenantId()).isEqualTo(12L);
@@ -62,10 +66,16 @@ class SensorDataRawListenerContractTest {
         assertThat(event.measuredAt()).isEqualTo(Instant.parse("2026-08-12T09:41:00Z"));
     }
 
+    // Message hỏng phải chỉ đích danh vị trí trong lô: DefaultErrorHandler dùng index đó để bỏ
+    // riêng nó rồi chạy tiếp phần còn lại. Bọc try/catch quanh cả lô sẽ mất 499 message tốt.
     @Test
-    void malformedJsonIsLoggedAndSkippedNotThrown() {
-        listener.onMessage("{not-valid-json");
+    void payloadHongOGiuaLoNemKemChiSoCuaNo() {
+        List<String> batch = List.of(CANONICAL_JSON, "{not-valid-json", CANONICAL_JSON);
 
-        verify(processor, never()).process(any());
+        assertThatThrownBy(() -> listener.onMessage(batch))
+                .isInstanceOf(BatchListenerFailedException.class)
+                .satisfies(e -> assertThat(((BatchListenerFailedException) e).getIndex()).isEqualTo(1));
+
+        verify(processor, never()).processBatch(any());
     }
 }

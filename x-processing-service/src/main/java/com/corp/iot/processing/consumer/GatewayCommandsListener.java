@@ -19,7 +19,11 @@ public class GatewayCommandsListener {
     private final ObjectMapper objectMapper;
     private final CommandDispatchService commandDispatchService;
 
-    @KafkaListener(topics = "${app.kafka.topic.gateway-commands}")
+    // Group riêng khỏi telemetry: rebalance khi scale processing không được làm đứng luồng
+    // lệnh relay, và reset offset để replay telemetry không được bắn lại lệnh cũ.
+    @KafkaListener(topics = "${app.kafka.topic.gateway-commands}",
+            groupId = "processing-command",
+            containerFactory = "commandListenerFactory")
     public void onMessage(String payload) {
         CommandOutboxPayload event;
         try {

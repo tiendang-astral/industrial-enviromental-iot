@@ -33,6 +33,7 @@ public class GatewayPinServiceImpl implements GatewayPinService {
     private final GatewayRepository gatewayRepository;
     private final GatewayPinMapper gatewayPinMapper;
     private final DatastreamRepository datastreamRepository;
+    private final GatewayPinCacheEvictor gatewayPinCacheEvictor;
 
     @Override
     public List<GatewayPinResponse> list(Long gatewayId) {
@@ -93,6 +94,9 @@ public class GatewayPinServiceImpl implements GatewayPinService {
             pin.setEnabled(request.enabled());
         }
         gatewayPinRepository.save(pin);
+        // enabled là field duy nhất trong cache pin-resolve mà người dùng đổi được — không xoá thì
+        // tắt chân xong x-processing-service vẫn ghi tiếp cho tới hết TTL.
+        gatewayPinCacheEvictor.evict(pin);
         return gatewayPinMapper.toResponse(pin);
     }
 
@@ -115,6 +119,7 @@ public class GatewayPinServiceImpl implements GatewayPinService {
         datastreamRepository.deleteAll(
                 datastreamRepository.findBySourceTypeAndSourceId(SourceType.GATEWAY_PIN, pinId));
         gatewayPinRepository.delete(pin);
+        gatewayPinCacheEvictor.evict(pin);
     }
 
     private void validateTypeMatchesDirection(PinDirection direction, PinType type) {

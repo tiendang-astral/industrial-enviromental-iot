@@ -147,7 +147,7 @@ class TelemetryServiceImplTest {
         when(influxReadService.history(12L, 34L, "AI", 3, 60, AggregateFn.MEAN))
                 .thenReturn(List.of(new ReadingPoint(23.5, Instant.EPOCH)));
 
-        DatastreamTelemetryResponse result = service.getDatastreamTelemetry(7L, 60);
+        DatastreamTelemetryResponse result = service.getDatastreamTelemetry(7L, 60, true);
 
         assertThat(result.datastreamId()).isEqualTo(7L);
         assertThat(result.unit()).isEqualTo("°C");
@@ -167,9 +167,27 @@ class TelemetryServiceImplTest {
         when(influxReadService.latestExternal(12L, 5L, "temp_in")).thenReturn(Optional.empty());
         when(influxReadService.historyExternal(12L, 5L, "temp_in", 60, AggregateFn.MEAN)).thenReturn(List.of());
 
-        DatastreamTelemetryResponse result = service.getDatastreamTelemetry(8L, 60);
+        DatastreamTelemetryResponse result = service.getDatastreamTelemetry(8L, 60, true);
 
         assertThat(result.sourceField()).isEqualTo("temp_in");
+        verify(influxReadService, never()).history(anyLong(), anyLong(), anyString(), anyInt(), anyInt(), any());
+    }
+
+    // Ô số chỉ cần một con số: phải BỎ HẲN truy vấn lịch sử, không phải tải rồi vứt.
+    @Test
+    void khongKemLichSuThiKhongDocInfluxLichSu() {
+        Datastream datastream = datastream(7L, SourceType.GATEWAY_PIN, 1L, null, 99L);
+        when(datastreamRepository.findById(7L)).thenReturn(Optional.of(datastream));
+        when(gatewayPinRepository.findById(1L)).thenReturn(Optional.of(pin(1L, PinDirection.INPUT, PinType.AI, 3, 99L)));
+        when(metricRepository.findById(99L)).thenReturn(Optional.of(metric(99L, "temperature", "°C")));
+        when(influxReadService.latest(12L, 34L, "AI", 3))
+                .thenReturn(Optional.of(new ReadingPoint(23.5, Instant.EPOCH)));
+
+        DatastreamTelemetryResponse result = service.getDatastreamTelemetry(7L, 60, false);
+
+        assertThat(result.latestValue()).isEqualTo(23.5);
+        assertThat(result.history()).isEmpty();
+        assertThat(result.bucketSeconds()).isNull();
         verify(influxReadService, never()).history(anyLong(), anyLong(), anyString(), anyInt(), anyInt(), any());
     }
 
@@ -177,7 +195,7 @@ class TelemetryServiceImplTest {
     void kenhKhongTonTaiThiBao404() {
         when(datastreamRepository.findById(404L)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.getDatastreamTelemetry(404L, 60))
+        assertThatThrownBy(() -> service.getDatastreamTelemetry(404L, 60, true))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("kênh dữ liệu");
     }

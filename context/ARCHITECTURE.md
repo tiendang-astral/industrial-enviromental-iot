@@ -61,10 +61,10 @@ BE <--> ADMINFE : REST
 |------|---------|-----------|
 | 1 | Gateway | Đọc **tất cả** chân INPUT (AI/DI) theo 1 chu kỳ polling cố định, đóng gói **batch** giá trị thành 1 JSON, publish 1 lần lên topic MQTT định danh bằng `mac_address` |
 | 2 | EMQX | Nhận kết nối MQTT từ hàng nghìn gateway đồng thời, route message theo topic |
-| 3 | Ingestion Service | Subscribe topic (Paho/Spring Integration MQTT), resolve `mac_address` → `gateway_id`/`tenant_id`/`tenant_node_id` (cache Redis `gw-resolve`, TTL 10', fallback query Postgres read-only nếu miss), **unbundle batch → 1 Kafka message/reading**, sinh `messageId` deterministic, publish Kafka `sensor-data-raw` (partition `tenant_id`+`gateway_id`) |
+| 3 | Ingestion Service | Subscribe topic bằng **shared subscription** `$share/ingestion/gateway/+/data` (Paho/Spring Integration MQTT) — EMQX giao mỗi message cho ĐÚNG MỘT instance trong nhóm thay vì phát bản sao cho tất cả; tiền tố `$share/` bị broker bóc trước khi giao nên `RECEIVED_TOPIC` vẫn là `gateway/{mac}/data`. Resolve `mac_address` → `gateway_id`/`tenant_id`/`tenant_node_id` (cache Redis `gw-resolve`, TTL 10', fallback query Postgres read-only nếu miss), **unbundle batch → 1 Kafka message/reading**, sinh `messageId` deterministic, publish Kafka `sensor-data-raw` (partition `tenant_id`+`gateway_id`) |
 | 4 | Kafka | Buffer `sensor-data-raw`, đảm bảo at-least-once, decouple ingestion khỏi xử lý |
-| 5 | Processing Service | Consume, dedup theo `messageId` (Redis `telemetry-dedup`, TTL 6h), validate schema, resolve `gateway_pin` theo `(gatewayId, type, pinNumber)` để lấy `metric`, bỏ qua pin có `enabled=false` hoặc không tìm thấy (log + skip, không throw) |
-| 6 | Processing Service | Ghi InfluxDB measurement `sensor_reading` (tag `tenant_id`, `tenant_node_id`, `gateway_id`, `metric`, `pin_number`, `pin_type` — 2 tag pin bắt buộc để phân biệt khi nhiều pin chung metric); update `gateway.last_seen_at` trong Postgres |
+| 5 | Processing Service | Consume **theo lô** (`listener.type: batch`, `max-poll-records: 500`), lọc trùng cả lô bằng 1 lần MGET Redis `telemetry-dedup`, resolve `gateway_pin`→`metric`→`datastream` qua cache Redis `pin-resolve` (TTL 60s, gộp 3 query cũ thành 1 lần đọc), bỏ qua pin có `enabled=false` hoặc không tìm thấy (log + skip riêng số đo đó, lô vẫn chạy tiếp) |
+| 6 | Processing Service | Ghi InfluxDB measurement `sensor_reading` bằng **một** `writePoints()` cho cả lô (tag `tenant_id`, `tenant_node_id`, `gateway_id`, `metric`, `pin_number`, `pin_type` — 2 tag pin bắt buộc để phân biệt khi nhiều pin chung metric); update `gateway.last_seen_at` **có tiết chế** (cờ Redis `gw-seen`, tối đa 1 UPDATE/gateway/30s). Ghi xong mới đánh dấu `telemetry-dedup` — đánh dấu trước thì Influx lỗi là mất nguyên lô |
 | 7 | Processing Service | Đánh giá `alert_rule` theo `metric` tại node ngay sau khi ghi (chi tiết ở flow Alert — **Phase 6**); publish event realtime lên Redis pub/sub channel `realtime:{tenantId}:{tenantNodeId}` (payload kèm `pinNumber`/`pinType`) |
 | 8 | Backend | `RedisRealtimeBridge` (`RedisMessageListenerContainer`, pattern `realtime:*`) nhận message, forward `SimpMessagingTemplate` vào STOMP topic `/topic/realtime/{tenantId}/{tenantNodeId}` (fan-out khi chạy nhiều instance nhờ mọi instance đều subscribe Redis) |
 | 9 | Frontend | `@stomp/stompjs` client connect endpoint `/ws` (JWT ở header CONNECT), subscribe đúng topic theo site đang xem, khớp `pinNumber`/`pinType` để cập nhật đúng widget/card, render realtime |
@@ -89,6 +89,9 @@ Message payload (JSON, forward nguyên văn từ Redis): {gatewayId, metric, pin
 
 ```
 Topic: gateway/{mac_address}/data   (QoS 1)
+       Gateway publish nguyên văn topic này. Phía Ingestion đăng ký bằng
+       $share/ingestion/gateway/+/data (shared subscription) — thay đổi nằm hoàn toàn
+       ở phía subscriber, gateway không biết và không cần đổi gì.
 Payload:
 {
   "measuredAt": "2026-08-12T09:41:00Z",
@@ -208,7 +211,7 @@ Kênh dữ liệu gắn **sau** khi job đã chạy thì mất phần lịch s�
 
 **Ba ràng buộc của luồng đánh giá (Phase 6a):**
 
-1. **Thuần event-driven** — chỉ chạy khi có reading mới. Nguồn ngừng gửi giữa lúc alert đang `PENDING`/`ACTIVE` thì nó kẹt nguyên trạng; cảnh báo mất kết nối để `alert_rule` loại `GATEWAY` làm sau.
+1. **Thuần event-driven** — chỉ chạy khi có reading mới. Nguồn ngừng gửi giữa lúc alert đang `PENDING`/`ACTIVE` thì nó kẹt nguyên trạng; cảnh báo mất kết nối để `alert_rule` loại `GATEWAY` làm sau — **khi làm, ngưỡng mất kết nối phải >= 90 giây**: `gateway.last_seen_at` được ghi có tiết chế (cờ Redis `gw-seen`, TTL 30s, xem `DATABASE.md` §5) nên nó trễ tối đa 30s so với thực tế, ngưỡng ngắn hơn 3 lần khoảng đó sẽ báo giả liên tục.
 2. **Bỏ qua message backfill** (`external-data-raw` có `backfill=true`) — giá trị của tháng trước sẽ bắn cảnh báo cho sự cố đã qua từ lâu.
 3. **Không làm hỏng luồng ghi** — toàn bộ bước đánh giá bọc try/catch, lỗi thì log + bỏ qua, đúng nguyên tắc "log + skip, không throw" của các bước resolve khác.
 
@@ -241,7 +244,9 @@ Payload:
   "commandType": "TURN_ON"
 }
 
-Topic ACK: gateway/{mac_address}/ack        (QoS 1, Gateway publish, Processing Service subscribe)
+Topic ACK: gateway/{mac_address}/ack        (QoS 1, Gateway publish, Processing Service subscribe
+                                            qua $share/processing/gateway/+/ack — không thì mỗi
+                                            instance đều cập nhật trạng thái cùng một lệnh)
 Payload:
 {
   "commandId": "3fa85f64-...",
@@ -321,9 +326,66 @@ production áp đúng retention 7 ngày cho `raw`, báo cáo theo tháng/quý s�
 
 ## 3. Kafka topics
 
-| Topic | Producer | Consumer | Partition key | Ghi chú |
-|-------|----------|----------|----------------|---------|
-| `sensor-data-raw` | Ingestion Service | Processing Service | `tenant_id` + `gateway_id` | Tách riêng khỏi external để rate-limit/backpressure độc lập |
-| `external-data-raw` | Ingestion Service | Processing Service | `tenant_id` + `external_source_job_id` | Đặc tính khác sensor: theo cron, không phải push liên tục |
-| `gateway-commands` | Processing Service (outbox poller) | Processing Service (command dispatcher) | `tenant_id` + `gateway_id` | Publish qua transactional outbox (`outbox_event`) trong cùng service, giữ đúng thứ tự lệnh/gateway |
-| (dynamic theo `outbox_event.event_type`) | Processing Service | tuỳ consumer | — | Outbox là cơ chế dùng chung, hiện chỉ có Command dùng |
+| Topic | Partitions | Consumer group | Partition key | Ghi chú |
+|-------|-----------|----------------|----------------|---------|
+| `sensor-data-raw` | 24 | `processing-telemetry` | `tenant_id` + `gateway_id` | Tách riêng khỏi external để rate-limit/backpressure độc lập. Batch listener, `max-poll-records: 500` |
+| `external-data-raw` | 24 | `processing-telemetry` | `tenant_id` + `external_source_job_id` | Đặc tính khác sensor: theo cron. Vẫn gom lô vì backfill (`V13`) đọc tới 1000 dòng/lô liên tiếp |
+| `gateway-commands` | 6 | `processing-command` | `tenant_id` + `gateway_id` | Publish qua transactional outbox (`outbox_event`), giữ đúng thứ tự lệnh/gateway. **Record listener** (`max-poll-records: 1`), `auto-offset-reset: latest` |
+| (dynamic theo `outbox_event.event_type`) | — | tuỳ consumer | — | Outbox là cơ chế dùng chung, hiện chỉ có Command dùng |
+
+Producer: `sensor-data-raw`/`external-data-raw` từ Ingestion Service, `gateway-commands` từ Outbox
+Poller trong chính Processing Service. Consumer của cả 3 đều là Processing Service.
+
+**Vì sao 24 partition:** trong một consumer group, mỗi partition được assign cho ĐÚNG MỘT consumer
+(luật này chính là thứ giữ lời hứa về thứ tự — key `tenant_id:gateway_id` đưa mọi số đo của một
+gateway vào cùng một partition). Nên **số partition là trần cứng của số consumer hoạt động**: 3
+partition cũ nghĩa là bật quá 3 bản Processing thì bản thứ 4 ngồi không. 24 partition khớp 6 bản ×
+`listener.concurrency: 4`. Partition **chỉ tăng được, không giảm** — và lúc tăng, mẫu số của
+`murmur2(key) % số_partition` đổi nên một gateway có thể nhảy partition, trong vài giây chuyển đổi
+thứ tự có thể đảo. Vì vậy nâng sớm, lúc chưa có dữ liệu production.
+
+**Vì sao tách `processing-command` khỏi telemetry:** config consumer trong `application.yml` là của
+cả group. Telemetry cần `listener.type: batch` + `max-poll-records: 500` để đạt thông lượng; lệnh
+bật/tắt relay cần đi lẻ để người bấm nút thấy kết quả ngay — không thể cùng lúc có hai chế độ. Thêm
+hai lý do nữa: rebalance khi scale telemetry sẽ làm đứng luôn luồng lệnh, và reset offset để replay
+telemetry sẽ bắn lại mọi lệnh relay cũ xuống thiết bị thật. Group mới bắt buộc dùng
+`auto-offset-reset: latest` (`commandListenerFactory`) chính vì lý do cuối.
+
+**Xử lý lỗi khi consume theo lô:** message hỏng ném `BatchListenerFailedException` kèm **chỉ số**
+trong lô → `DefaultErrorHandler` bỏ đúng message đó rồi chạy tiếp phần còn lại (bọc try/catch quanh
+cả lô sẽ khiến một message hỏng làm mất 499 message tốt). Lỗi hạ tầng (InfluxDB/Redis/Postgres
+chết) ném nguyên → retry cả lô **không giới hạn số lần**: Kafka là buffer chống cascading failure
+nên chặn lại chờ hạ tầng hồi đúng hơn là bỏ số đo. Đánh đổi: một lô hỏng vì bug sẽ chặn partition —
+nhìn ra bằng log ERROR mỗi lượt retry và bằng consumer lag trên Prometheus. DLQ topic vẫn còn nợ.
+
+## 4. Scale ngang
+
+Ba service đều **stateless** và giao tiếp chỉ qua Kafka/Redis/PostgreSQL, nên hình dạng kiến trúc
+scale ngang được. Bốn cơ chế dưới đây là thứ khiến việc bật thêm instance trở nên **đúng** và **có
+ích** thay vì chỉ nhân đôi công việc.
+
+| Cơ chế | Giải bài gì | Ở đâu |
+|--------|-------------|-------|
+| **Shared subscription MQTT** (`$share/<group>/...`) | MQTT là mô hình phát thanh: subscription thường giao bản sao cho MỌI subscriber, nên 2 bản Ingestion = mỗi số đo vào Kafka 2 lần. `$share` bắt EMQX giao cho đúng một bản trong nhóm | `mqtt.topic-filter` (ingestion), `mqtt.ack-topic-filter` (processing) |
+| **ShedLock** trên mọi `@Scheduled` | `@Scheduled` là đồng hồ riêng của từng tiến trình. Xem `DATABASE.md § shedlock` | `ShedLockConfig` ở cả 2 service, bảng `shedlock` (`V20`) |
+| **Partition 24 + `listener.concurrency: 4`** | Partition là trần cứng của số consumer; concurrency là số thread mỗi bản | `scripts/create-kafka-topics.sh`, `application.yml` |
+| **Consumer group tách theo workload** | Config consumer là của cả group, mà telemetry và command cần ngược nhau | `KafkaConsumerConfig.commandListenerFactory` |
+
+**Backend** không cần cơ chế riêng: mọi instance đều subscribe Redis pattern `realtime:*`
+(`RedisRealtimeBridge`), nên fan-out WebSocket vẫn đúng khi chạy N bản, và không cần sticky session
+vì WebSocket là một kết nối dài (không dùng SockJS fallback).
+
+**Điểm nghẽn còn lại — tất cả nằm ở tầng hạ tầng, không ở tầng ứng dụng:**
+
+| Thành phần | Hiện tại | Cần khi lên production |
+|---|---|---|
+| InfluxDB | OSS 2.7, 1 node | **Trần cứng** — bản OSS không cluster được, không HA. Phải chốt hướng (Influx 3 / TimescaleDB) trước khi dữ liệu lớn |
+| Kafka | 1 broker, `RF=1` | 3 broker, `RF=3`, `min.insync.replicas=2` (producer đã `acks=all` nên app không phải sửa) |
+| EMQX | 1 node | Cluster + cân bằng tải TCP trước cổng 1883 (gateway giữ kết nối dài, không thể tự chọn node) |
+| Redis | 1 node | Sentinel/Cluster — đây là điểm chết chung của cả 3 service: dedup, cache resolve, pub/sub realtime |
+| PostgreSQL | 1 node | Primary + replica, `pgbouncer` |
+| Deploy | `container_name`/port cố định trong compose | Bỏ tên và port cứng, thêm readiness probe |
+
+**Đo trước khi scale:** cả 3 service mở `/actuator/prometheus`. Ba con số quyết định khi nào thêm
+instance: consumer lag (`kafka.consumer.fetch.manager.records.lag.max`), thời gian xử lý một lô, và
+số message/giây. Lag tăng đều = đã đến lúc.

@@ -7,39 +7,52 @@ import { TrendChart } from '@/components/patterns/TrendChart'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { useDatastreamTelemetryQuery } from '@/queries/useDatastreamTelemetryQuery'
+import { useDatastreamsTelemetryQueries } from '@/queries/useDatastreamTelemetryQuery'
 import { DEFAULT_RANGE_MINUTES } from '@/lib/telemetryRanges'
+import type { ChartSeries } from '@/lib/echarts'
 import type { Datastream, DatastreamReading, Widget as WidgetT } from '@/types/dashboard'
 
 interface LineWidgetProps {
   widget: WidgetT
-  datastream?: Datastream
-  /** Widget bind kênh không có trong phạm vi board — xem DashboardBoard. */
+  /** Mọi kênh widget đang bind — mỗi kênh một đường trên cùng biểu đồ (cùng chỉ số = cùng đơn vị). */
+  datastreams: Datastream[]
   orphaned?: boolean
-  reading?: DatastreamReading
+  readings: Record<number, DatastreamReading>
 }
 
 // memo — tránh nháy widget khi kéo/resize widget khác trên cùng dashboard (xem ValueWidget).
-export const LineWidget = memo(function LineWidget({ widget, datastream, reading, orphaned }: LineWidgetProps) {
+export const LineWidget = memo(function LineWidget({
+  widget,
+  datastreams,
+  readings,
+  orphaned,
+}: LineWidgetProps) {
   // Khoảng thời gian là lựa chọn xem, không phải cấu hình widget: ghi vào `layout_json` ngay ở chế
   // độ xem sẽ phá mô hình "bản nháp + bấm Lưu" của board.
   const [rangeMinutes, setRangeMinutes] = useState<number>(DEFAULT_RANGE_MINUTES)
   const [isDetailOpen, setIsDetailOpen] = useState(false)
 
-  const datastreamId = widget.binding?.datastreamId
-  const { data: telemetry, isLoading } = useDatastreamTelemetryQuery(datastreamId, rangeMinutes)
+  const ids = useMemo(() => datastreams.map((datastream) => datastream.id), [datastreams])
+  const { data: telemetry, isLoading } = useDatastreamsTelemetryQueries(ids, rangeMinutes)
 
   // Lịch sử từ server + phần realtime bắn về SAU điểm cuối đã tải. Không lọc theo mốc đó thì mỗi
   // lần server làm mới, các điểm cuối bị đếm hai lần và biểu đồ có một đoạn răng cưa giả.
-  const history = useMemo(() => {
-    const base = telemetry?.history ?? []
-    const live = reading?.history ?? []
-    if (base.length === 0) return live
-    const lastAt = new Date(base[base.length - 1].measuredAt).getTime()
-    return [...base, ...live.filter((point) => new Date(point.measuredAt).getTime() > lastAt)]
-  }, [telemetry, reading])
+  const series: ChartSeries[] = useMemo(
+    () =>
+      datastreams.map((datastream, index) => {
+        const base = telemetry[index]?.history ?? []
+        const live = readings[datastream.id]?.history ?? []
+        const lastAt = base.length ? new Date(base[base.length - 1].measuredAt).getTime() : 0
+        const points = base.length
+          ? [...base, ...live.filter((point) => new Date(point.measuredAt).getTime() > lastAt)]
+          : live
+        return { label: datastream.name, points }
+      }),
+    [datastreams, telemetry, readings]
+  )
 
-  const unit = datastream?.metricUnit ?? telemetry?.unit
+  const unit = datastreams[0]?.metricUnit ?? telemetry[0]?.unit
+  const hasData = series.some((item) => item.points.length > 1)
 
   return (
     <Widget>
@@ -58,26 +71,21 @@ export const LineWidget = memo(function LineWidget({ widget, datastream, reading
                 bị xóa. Widget sẽ không nhận dữ liệu mới ở đây.
               </TooltipContent>
             </Tooltip>
-          ) : datastream?.sourceEnabled === false ? (
+          ) : datastreams.length === 1 && datastreams[0].sourceEnabled === false ? (
             <Badge variant="outline" className="shrink-0">
               Pin đã tắt
             </Badge>
           ) : undefined
         }
         actions={
-          datastreamId != null && (
+          ids.length > 0 && (
             // widget-no-drag: RGL nhận cả cú bấm vào đây thành cú kéo, mở ô chọn xong thả chuột là
             // widget nhảy chỗ. Xem `dragConfig.cancel` ở DashboardBoard.
             <div className="widget-no-drag flex shrink-0 items-center gap-1">
               <RangePicker value={rangeMinutes} onChange={setRangeMinutes} />
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="size-7"
-                    onClick={() => setIsDetailOpen(true)}
-                  >
+                  <Button size="icon" variant="ghost" className="size-7" onClick={() => setIsDetailOpen(true)}>
                     <Maximize2 />
                     <span className="sr-only">Xem chi tiết {widget.title}</span>
                   </Button>
@@ -92,10 +100,10 @@ export const LineWidget = memo(function LineWidget({ widget, datastream, reading
           mắt, và trục thời gian dùng được hết bề ngang thay vì bị padding ăn mất 2rem. */}
       <Widget.Body className="-mx-4 -mb-4 justify-end">
         <TrendChart
-          history={history}
+          series={series}
           variant="axis"
           unit={unit}
-          emptyLabel={isLoading ? 'Đang tải số đo…' : 'Chưa đủ dữ liệu để vẽ biểu đồ'}
+          emptyLabel={isLoading && !hasData ? 'Đang tải số đo…' : 'Chưa đủ dữ liệu để vẽ biểu đồ'}
         />
       </Widget.Body>
 
@@ -103,12 +111,12 @@ export const LineWidget = memo(function LineWidget({ widget, datastream, reading
         open={isDetailOpen}
         onOpenChange={setIsDetailOpen}
         title={widget.title}
-        history={history}
+        series={series}
         unit={unit}
         isLoading={isLoading}
         rangeMinutes={rangeMinutes}
         onRangeChange={setRangeMinutes}
-        bucketSeconds={telemetry?.bucketSeconds}
+        bucketSeconds={telemetry[0]?.bucketSeconds}
       />
     </Widget>
   )

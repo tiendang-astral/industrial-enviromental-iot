@@ -22,6 +22,6 @@ for name in backend ingestion-service processing-service frontend frontend-admin
 done
 
 echo "==> Stopping infrastructure (docker compose)..."
-docker compose down
+docker compose -f compose/docker-compose.yml down
 
 echo "==> Done."

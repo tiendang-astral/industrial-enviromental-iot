@@ -28,9 +28,11 @@ public class DatastreamTelemetryController {
     @PreAuthorize("hasAnyAuthority('TENANT_ADMIN','MANAGER','OPERATOR','VIEWER') and @nodeScope.canAccessDatastream(#id)")
     public ApiResponse<DatastreamTelemetryResponse> get(
             @PathVariable Long id,
-            @RequestParam(required = false) Integer rangeMinutes
+            @RequestParam(required = false) Integer rangeMinutes,
+            // Ô số chỉ cần `latestValue`; `false` bỏ hẳn truy vấn lịch sử thay vì tải 500 điểm rồi vứt.
+            @RequestParam(defaultValue = "true") boolean includeHistory
     ) {
         int range = Math.clamp(rangeMinutes != null ? rangeMinutes : DEFAULT_RANGE_MINUTES, 1, MAX_RANGE_MINUTES);
-        return ApiResponse.of(telemetryService.getDatastreamTelemetry(id, range));
+        return ApiResponse.of(telemetryService.getDatastreamTelemetry(id, range, includeHistory));
     }
 }

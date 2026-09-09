@@ -49,11 +49,12 @@ export async function deleteDatastream(id: number): Promise<void> {
 /** Lịch sử của đúng 1 kênh — dùng chung cho kênh gateway lẫn kênh external (xem API.md). */
 export async function getDatastreamTelemetry(
   datastreamId: number,
-  rangeMinutes: number
+  rangeMinutes: number,
+  includeHistory = true
 ): Promise<DatastreamTelemetry> {
   const { data } = await httpClient.get<ApiEnvelope<DatastreamTelemetry>>(
     `/datastreams/${datastreamId}/telemetry`,
-    { params: { rangeMinutes } }
+    { params: { rangeMinutes, includeHistory } }
   )
   return data.data!
 }

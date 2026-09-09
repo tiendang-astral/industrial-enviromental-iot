@@ -10,6 +10,7 @@ import com.corp.iot.ingestion.external.repository.ExternalSourceJobRepository;
 import com.corp.iot.ingestion.external.repository.ExternalSourceRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -30,6 +31,9 @@ public class ExternalBackfillSchedulerService {
     private final ExternalBackfillService externalBackfillService;
 
     @Scheduled(fixedDelayString = "${app.external.backfill-sweep-interval-ms}")
+    // findOpenTasks() chọn cả status=RUNNING (để lượt sweep sau chạy tiếp dở dang), nên
+    // không có khoá thì bản thứ hai coi tác vụ đang chạy là tác vụ chưa ai làm.
+    @SchedulerLock(name = "externalBackfillSweep", lockAtMostFor = "PT5M")
     public void sweep() {
         backfillRepository.findOpenTasks().stream().findFirst().ifPresent(this::runTask);
     }

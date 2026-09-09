@@ -416,6 +416,23 @@ Kênh gắn sau khi job đã chạy sẽ mất sạch dữ liệu trước `incr
 - Tiến độ = `(covered_from - cursor_at) / (covered_from - target_from)`, tính ở `x-backend` khi trả response.
 - Message backfill mang cờ `backfill=true` trong Kafka `external-data-raw` và **bỏ qua dedup** ở Processing Service — xem `ARCHITECTURE.md` § Flow: External source backfill.
 
+### shedlock
+
+Khoá phân tán cho các job `@Scheduled` (`V20`). `name` (PK) là tên khoá khai trong `@SchedulerLock`,
+`lock_until` là mốc khoá tự mở nếu instance giữ nó chết giữa chừng.
+
+| Cột | Kiểu | Ghi chú |
+|-----|------|---------|
+| `name` | varchar(64) PK | `externalSourceSweep`, `externalRunHistoryCleanup`, `externalBackfillSweep`, `commandOutboxPoll`, `commandTimeoutSweep` |
+| `lock_until` | timestamp | Mốc hết hạn khoá (`lockAtMostFor`) |
+| `locked_at` | timestamp | Lấy từ **giờ Postgres** (`usingDbTime()`), không phải đồng hồ máy chạy service — lệch giờ giữa các máy sẽ làm khoá hết hạn sớm |
+| `locked_by` | varchar(255) | Tên instance đang giữ |
+
+`@Scheduled` là đồng hồ của riêng từng tiến trình, và cả 3 câu quét việc (`findDueJobs`,
+`findOpenTasks`, `findDueForDispatch`) đều chỉ đánh dấu "đã nhận" **sau** khi làm xong — nên trong
+suốt lúc job chạy, cửa vẫn mở cho instance thứ hai. Bảng này đóng cửa đó. Ghi/đọc qua JdbcTemplate
+(không phải JPA entity) nên `ddl-auto=validate` của x-ingestion/x-processing không đụng tới.
+
 ### dashboard
 **Vì sao cần:** Bảng điều khiển. Widget + layout lưu JSONB (`layout_json`).
 
@@ -435,20 +452,20 @@ Kênh gắn sau khi job đã chạy sẽ mất sạch dữ liệu trước `incr
 
 - Unique `(tenant_id, user_id, tenant_node_id, COALESCE(external_source_id, 0))` — `V11` đổi từ unique `(tenant_id, user_id, tenant_node_id)` cũ, vì Postgres coi nhiều `NULL` là phân biệt nên phải `COALESCE` (giống pattern `uq_user_role_scope`).
 - WidgetType: VALUE/LINE/SWITCH (gắn nguồn); DEVICE_COUNT/DEVICES_ONLINE/DEVICE_TABLE/EVENT_* (tổng hợp theo node) — **board theo nguồn (`external_source_id NOT NULL`) chỉ cho phép VALUE/LINE**, không có khái niệm gateway/subtree để tổng hợp DEVICE_COUNT/DEVICES_ONLINE.
-- `binding` theo `type` — **`VALUE`/`LINE`**: `{ datastreamId }`; **`SWITCH`** (Phase 7): `{ gatewayId, pinId }` — pin OUTPUT (`DO`/`AO`) không có `datastream` nên không dùng chung shape với VALUE/LINE; **`DEVICE_COUNT`/`DEVICES_ONLINE`**: `null` (tổng hợp theo subtree node, không bind 1 nguồn cụ thể).
+- `binding` theo `type` — **`VALUE`/`LINE`**: `{ datastreamIds: [...] }` (dạng cũ `{ datastreamId }` một kênh vẫn đọc được, xem ghi chú cuối mục); **`SWITCH`** (Phase 7): `{ gatewayId, pinId }` — pin OUTPUT (`DO`/`AO`) không có `datastream` nên không dùng chung shape với VALUE/LINE; **`DEVICE_COUNT`/`DEVICES_ONLINE`**: `null` (tổng hợp theo subtree node, không bind 1 nguồn cụ thể).
 - Điều hướng FE: **mọi** node đều có board riêng, không riêng SITE — `uq_dashboard_user_node` vốn đã không ràng buộc `node_type`, giới hạn cũ chỉ nằm ở frontend. Đổi node bằng `TenantNodePicker` ngay trên trang (cây có thụt lề + rẽ nhánh + icon theo cấp), không còn sidebar cây tổ chức thường trực. Mỗi node có 2 tab: "Xem đơn vị" (board theo node, có ô chọn đơn vị) / "Xem theo nguồn" (dropdown chọn nguồn rồi hiện thẳng board riêng của nguồn đó tại chỗ — cùng một board với tab "Dashboard" ở trang chi tiết nguồn). Tab nguồn liệt kê **toàn bộ nguồn trong scope người dùng** (`GET /external-sources`), không lọc theo node đang chọn, nên ô chọn đơn vị **ẩn** ở tab này — để lại thì nó là ô điều khiển không điều khiển gì. Nguồn đang xem nằm ở query param `?source=<id>`; có param = đang ở tab nguồn, nên reload/chia sẻ link giữ đúng tab lẫn nguồn. Route cũ `/dashboard/source/:id` giữ lại làm redirect.
 - **Board ở node gộp bind được kênh của site con.** Widget vẫn `binding = { datastreamId }` như cũ, chỉ khác là danh sách kênh chọn được lấy theo subtree (`GET /tenant-nodes/{id}/datastreams?includeDescendants=true`). Widget nào bind kênh ngoài node của board thì tên mặc định kèm tên site (`Chuồng A · Nhiệt độ`) — không có nó thì board khu sản xuất là N ô cùng tên "Nhiệt độ".
 - **Kích thước widget có sàn và trần theo loại.** Trước đây mọi loại dùng chung `minW/minH = 2` và áp mẫu đặt cứng 4×3, nên biểu đồ ra đúng cỡ ô số còn ô số kéo to được hết board:
 
 | `type` | minW | maxW | minH | maxH | Mặc định |
 |--------|------|------|------|------|----------|
-| `VALUE` | 2 | 4 | 2 | 3 | 3×2 |
+| `VALUE` | 2 | 6 | 2 | 4 | 3×2 |
 | `LINE` | 4 | 12 | 3 | 8 | 6×4 |
 | `SWITCH` | 2 | 4 | 2 | 2 | 3×2 |
 | `DEVICES_ONLINE` | 2 | 4 | 2 | 3 | 3×2 |
 | `DEVICE_LIST` | 3 | 12 | 3 | 8 | 4×4 |
 
-  Bảng nằm ở **hai nơi phải khớp nhau**: `x-frontend/src/lib/dashboardLayout.ts` (sàn/trần lúc kéo-resize + kẹp layout cũ lúc nạp) và `x-backend` `WidgetSizeSpec` (cỡ mặc định lúc áp mẫu). Backend chỉ giữ cỡ mặc định — sàn/trần là ràng buộc tương tác, không phải ràng buộc dữ liệu, nên `layout_json` cũ vẫn hợp lệ và chỉ bị kẹp lúc hiển thị; bản kẹp ghi xuống DB khi người dùng bấm Lưu.
+  Bảng nằm ở **hai nơi phải khớp nhau**: `x-frontend/src/lib/dashboardLayout.ts` (sàn/trần lúc kéo-resize + kẹp layout cũ lúc nạp) và `x-backend` `WidgetSizeSpec` (kẹp toạ độ mẫu khai — mẫu viết tay trong migration nên phải có lưới chắn). Backend chỉ giữ cỡ mặc định — sàn/trần là ràng buộc tương tác, không phải ràng buộc dữ liệu, nên `layout_json` cũ vẫn hợp lệ và chỉ bị kẹp lúc hiển thị; bản kẹp ghi xuống DB khi người dùng bấm Lưu.
 - **Tiền tố tên đơn vị do `DashboardTemplateServiceImpl` sinh ra**, không phải quy ước suông: áp mẫu ở node gộp đặt `title = "{tên site} · {tên kênh}"` cho kênh của site con, kênh ngay tại node của board thì giữ tên trần.
 - Kênh của một site vẫn publish vào đúng channel `realtime:{tenantId}:{siteId}` của nó, nên FE subscribe **nhiều** STOMP topic cho một board — tập topic suy ra từ chính widget đang có (xem `ARCHITECTURE.md` § Contract STOMP/WebSocket). Board ở SITE thu về đúng 1 topic như trước.
 
@@ -468,17 +485,28 @@ Kênh gắn sau khi job đã chạy sẽ mất sạch dữ liệu trước `incr
 
 Seed sẵn 6 mẫu: "Giám sát cơ bản" (`V7`) và 5 mẫu thêm ở `V14` — Môi trường chuồng trại, Khí độc & an toàn, Chất lượng không khí, Thời tiết ngoài trời, Điện năng. `metric` trong `layout_json` phải khớp `metric.code`, sai thì entry đó bị bỏ qua **im lặng** lúc áp. Widget `DEVICE_LIST`/`DEVICES_ONLINE` chưa dùng được trong template vì cơ chế áp mẫu đi từ metric ra datastream.
 
-**logic áp dụng:**
+**logic áp dụng (`V21` — đổi mô hình):**
+
 ```
 Template layout = [
-  { widget_type: "LINE", metric: "temperature", config: {...} },
-  { widget_type: "VALUE", metric: "humidity", config: {...} }
+  { widgetType: "LINE",  metric: "temperature", layout: {x:0, y:0, w:8, h:4}, config: {} },
+  { widgetType: "VALUE", metric: "humidity",    layout: {x:8, y:0, w:4, h:4}, config: {} }
 ]
 
-Áp dụng vào node X → hệ thống query:
-  SELECT * FROM datastream WHERE tenant_node_id = X AND metric = 'temperature'
-  → Mỗi datastream = 1 widget LINE trong dashboard
+Áp vào node X → mỗi entry sinh ĐÚNG MỘT widget tại đúng toạ độ đã khai:
+  mọi datastream trong subtree khớp metric  →  gộp hết vào MỘT widget
+  LINE  = N đường trên cùng biểu đồ (cùng chỉ số ⇒ cùng đơn vị)
+  VALUE = N số nhỏ trong cùng một ô
+  entry không khớp kênh nào → bỏ hẳn, không dựng ô rỗng
 ```
+
+Ba tính chất của mô hình này:
+
+- **Ô không nở.** Mẫu khai `(0,4,3,2)` thì áp ở SITE hay ở TENANT_ROOT vẫn nằm đúng `(0,4,3,2)` — không có cơ chế lặp hay đẩy hàng, nên bố cục tất định.
+- **Mẫu không cần biết node đích.** Vì cả hai loại widget tự hấp thụ số kênh, mẫu viết sẵn trong migration chạy đúng ở mọi cấp node.
+- **Áp mẫu GHI ĐÈ**, không cộng dồn: board trở thành đúng bố cục của mẫu, mọi widget cũ bị xoá **kể cả widget người dùng tự thêm** (công tắc relay, danh sách thiết bị — mẫu không sinh được chúng vì cơ chế đi từ metric ra datastream). Áp hai lần liên tiếp cho cùng một kết quả.
+
+Toạ độ do lập trình viên viết tay trong migration; không có API tạo/sửa mẫu.
 
 ### datastream
 **Vì sao cần:** Kênh dữ liệu/điều khiển kiểu Blynk. Nguồn từ gateway_pin hoặc external_source_job.
@@ -505,6 +533,7 @@ Template layout = [
 - **Tự động tạo 1-1** khi tạo `gateway_pin` INPUT (`GatewayPinServiceImpl.create()`, cùng transaction) — không có endpoint tạo/xóa datastream riêng, khớp nguyên tắc "1 gateway_pin → 1 datastream" ở bảng `gateway_pin`. Backfill 1 lần cho pin có trước tính năng Dashboard qua `V6__backfill_datastream_from_gateway_pin.sql`.
 - **`EXTERNAL_SOURCE_JOB` — tạo/xóa thủ công** (`V11`, khác gateway_pin): `POST /external-source-jobs/{jobId}/datastreams` (chọn `metricId` + `sourceField` là **cột thật trong kết quả truy vấn** của job — backend chạy thử để đối chiếu; `valueColumns` đã bị bỏ ở `V12`, xem ghi chú `source_field` phía trên), `DELETE /datastreams/{id}` chỉ cho phép khi `sourceType=EXTERNAL_SOURCE_JOB` (400 nếu là `GATEWAY_PIN`, giữ nguyên invariant lifecycle gateway_pin sở hữu ở trên).
 - **Gắn kênh muộn để lại lỗ hổng** (`V13`): job đã chạy thì phần trước `incremental_cursor` đã bị Processing Service vứt (không có datastream để resolve). Lúc tạo kênh, API nhận thêm `startFrom` để xếp luôn một tác vụ vá; kênh cũ vá sau qua `POST /datastreams/{id}/backfill`. Xem § external_source_job_backfill.
+- **`binding` mang hai thế hệ dữ liệu.** Board lưu trước khi có widget đa kênh dùng `datastreamId` số ít; board mới dùng `datastreamIds`. Cả `WidgetBinding` (backend) lẫn `widgetDatastreamIds()` (frontend) phải hiểu cả hai — đọc thẳng `binding.datastreamId` ở nơi khác là làm board cũ mất widget. Record backend còn **bắt buộc khai đủ mọi field có thật trong JSON** (`gatewayId`/`pinId` của widget `SWITCH`): đường lưu board là đọc-rồi-ghi-lại, Jackson bỏ im lặng field không khai nên field thiếu sẽ **mất hẳn khỏi DB**.
 - **KHÔNG bị xóa khi pin bị tắt** (`gateway_pin.enabled=false`) — `id` phải ổn định để widget Dashboard đang bind không mất liên kết khi user bật lại pin; lúc pin tắt chỉ dừng nhận data (Processing Service đã skip từ Phase 3), Backend expose thêm `sourceEnabled` (API.md) để FE hiện badge "Pin đã tắt" thay vì hiển thị âm thầm dữ liệu cũ.
 
 ### alert_rule
@@ -740,8 +769,28 @@ Fields: value_float (double), quality (string)
 Không phải nguồn bền vững. Key đang dùng:
 
 ```text
-telemetry-dedup:{tenantId}:{messageId}  — dedup ingestion, TTL 6h
+telemetry-dedup:{tenantId}:{messageId}  — dedup ingestion, TTL 6h. Đánh dấu SAU khi ghi InfluxDB xong,
+                                          không phải SETNX trước: ghi lỗi mà đã đánh dấu thì lần đọc lại bị
+                                          chặn oan và mất số đo vĩnh viễn 6 tiếng — với xử lý theo lô là mất
+                                          cả 500 message chứ không phải một. Khe đua (2 consumer cùng vượt
+                                          bước đọc) vô hại: InfluxDB idempotent theo tag + timestamp.
 gw-resolve:{mac}                        — "gatewayId|tenantId|tenantNodeId", TTL 10'
+pin-resolve:{gatewayId}:{pinType}:{pinNumber}
+                                        — JSON ResolvedPin {pinId, metricCode, metricId, enabled, datastreamId,
+                                          datastreamName}, TTL 60s. Gộp 3 query từng chạy cho MỖI số đo
+                                          (gateway_pin → metric → datastream) thành 1 lần đọc Redis.
+                                          Chỉ luồng GATEWAY; external chạy theo cron nên không đáng đổi lấy
+                                          rủi ro cache sai. TTL ngắn (60s chứ không phải 10') vì `enabled` là
+                                          field người dùng đổi được — sót một chỗ xoá cache thì thiệt hại giới
+                                          hạn trong 1 phút. `metricCode` không thể lệch: gateway_pin.metric_id
+                                          không có endpoint sửa, datastream.metric_id là updatable=false.
+                                          x-backend xoá key khi sửa/xoá pin và khi xoá gateway
+                                          (GatewayPinCacheEvictor). KHÔNG cache "không tìm thấy" — cache âm sẽ
+                                          bắt phải xoá key cả khi TẠO pin mới.
+gw-seen:{gatewayId}                     — cờ tiết chế ghi gateway.last_seen_at, TTL 30s. Trước đó mỗi số đo là
+                                          1 UPDATE (~800/giây ở 1000 gateway x 8 chân / 10s) chỉ để cập nhật
+                                          một cái đồng hồ. RÀNG BUỘC: mọi ngưỡng "gateway mất kết nối" phải
+                                          >= 3 lần khoảng này (>= 90s), nếu không sẽ báo giả.
 scope-sites:{tenant}:{user}             — tập SITE in-scope, TTL 60s
 ws-site-auth:{tenant}:{site}            — WS site↔tenant, TTL 10'
 ws-scope-auth:{...}                     — WS site↔scope user, TTL 60s

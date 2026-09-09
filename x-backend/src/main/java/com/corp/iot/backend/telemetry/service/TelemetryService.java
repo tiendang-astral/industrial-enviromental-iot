@@ -18,5 +18,10 @@ public interface TelemetryService {
      * được `external_source_id` (`datastream.source_id` là id của *job*), nên hai endpoint theo
      * gateway/theo nguồn không phục vụ được nó.
      */
-    DatastreamTelemetryResponse getDatastreamTelemetry(Long datastreamId, int rangeMinutes);
+    /**
+     * `includeHistory=false` bỏ HẲN truy vấn lịch sử (không phải tải rồi vứt): ô số chỉ cần một con
+     * số, mà mỗi lần đọc lịch sử là tối đa 500 điểm/kênh — board mười ô giá trị làm mới mỗi phút thì
+     * đó là vài trăm KB cho mười con số.
+     */
+    DatastreamTelemetryResponse getDatastreamTelemetry(Long datastreamId, int rangeMinutes, boolean includeHistory);
 }

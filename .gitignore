@@ -15,6 +15,7 @@ node_modules/
 # Secrets — chưa có file nào hiện tại, chặn trước khi lỡ tạo/commit
 .env
 .env.local
+.env.production
 .env.*.local
 # Superpowers brainstorm companion (mockup tạm)
 .superpowers/

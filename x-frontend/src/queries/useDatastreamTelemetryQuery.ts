@@ -1,7 +1,9 @@
-import { useQuery } from '@tanstack/react-query'
+import { useQueries, useQuery } from '@tanstack/react-query'
 import { getDatastreamTelemetry } from '@/services/datastreamService'
 
 const REFRESH_MS = 60_000
+/** Không dùng tới khi bỏ lịch sử (`latest()` tự quét 8 ngày), nhưng endpoint vẫn nhận nên gửi giá trị nhỏ. */
+const LATEST_RANGE_MINUTES = 60
 
 /**
  * Lịch sử của 1 kênh theo khoảng thời gian. `rangeMinutes` nằm trong queryKey nên nhiều widget cùng
@@ -17,4 +19,38 @@ export function useDatastreamTelemetryQuery(datastreamId: number | undefined, ra
     enabled: !!datastreamId,
     refetchInterval: REFRESH_MS,
   })
+}
+
+/**
+ * Nhiều kênh cùng lúc cho widget biểu đồ đa kênh. Dùng `useQueries` chứ không gọi hook trong vòng
+ * lặp — số kênh đổi theo widget nên số hook phải đổi theo, thứ mà quy tắc hook không cho phép.
+ */
+export function useDatastreamsTelemetryQueries(datastreamIds: number[], rangeMinutes: number) {
+  const results = useQueries({
+    queries: datastreamIds.map((id) => ({
+      queryKey: ['datastream-telemetry', id, rangeMinutes, true],
+      queryFn: () => getDatastreamTelemetry(id, rangeMinutes),
+      refetchInterval: REFRESH_MS,
+    })),
+  })
+  return {
+    data: results.map((result) => result.data),
+    isLoading: results.some((result) => result.isLoading),
+  }
+}
+
+/**
+ * CHỈ giá trị mới nhất, không kèm lịch sử — cho ô số. Nếu không có nó, ô số mở trang lên là trống
+ * cho tới khi có message realtime kế tiếp (kênh chạy theo cron có thể là 5 phút sau).
+ * `includeHistory` nằm trong queryKey để không đụng cache của biểu đồ cùng kênh.
+ */
+export function useDatastreamsLatestQueries(datastreamIds: number[]) {
+  const results = useQueries({
+    queries: datastreamIds.map((id) => ({
+      queryKey: ['datastream-telemetry', id, LATEST_RANGE_MINUTES, false],
+      queryFn: () => getDatastreamTelemetry(id, LATEST_RANGE_MINUTES, false),
+      refetchInterval: REFRESH_MS,
+    })),
+  })
+  return results.map((result) => result.data)
 }

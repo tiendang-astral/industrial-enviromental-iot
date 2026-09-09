@@ -183,6 +183,23 @@
 - [x] Bỏ icon ở tiêu đề widget, phân biệt loại bằng nền/viền/bố cục + vạch trạng thái sát đáy `VALUE` (xem `CONVENTIONS.md` § Quy tắc styling). `ValueWidget` nói thẳng ngưỡng đang chạm (`38.5` / `ngưỡng 35 °C`) thay vì badge "gần ngưỡng" chung chung.
 - [x] Test: `DashboardTemplateServiceImplTest` (3 ca — cỡ theo loại, tiền tố đơn vị, không thêm trùng).
 
+**Đợt sau (template có bố cục cố định + widget đa kênh):**
+- [x] `V21__dashboard_template_layout.sql` — mỗi entry mẫu mang `layout {x,y,w,h}`; viết lại toạ độ tay cho cả 6 mẫu. Không đổi kiểu cột (`layout_json` đã là JSONB).
+- [x] **Đổi mô hình áp mẫu**: một entry = **một** widget tại đúng toạ độ mẫu khai, gộp mọi kênh khớp metric trong subtree; áp mẫu **GHI ĐÈ** board thay vì cộng dồn. Bỏ `GridCursor` và bỏ dedupe `type:datastreamId`.
+- [x] `LINE` vẽ **N đường** (chú giải + `--chart-1..6` vốn khai sẵn mà chưa dùng quá cái đầu); `VALUE` gộp nhiều kênh thành **N số nhỏ** trong một ô, tràn thì nút `+N` mở modal. Ô **không tự cao lên** — cao lên là đẩy hàng dưới xuống, mất đúng tính chất "mẫu khai toạ độ nào thì nằm đúng đó".
+- [x] Trục X của biểu đồ nhiều đường là **hợp** các mốc thời gian: backend bỏ bucket rỗng (`createEmpty: false`) nên hai kênh cùng khoảng vẫn lệch mốc; chỗ thiếu để `null` + `connectNulls`.
+- [x] **Sửa lỗi có sẵn — widget `SWITCH` mất binding khi lưu board.** `WidgetBinding` là record chỉ khai `datastreamId`; đường lưu board là đọc-rồi-ghi-lại nên Jackson nuốt `gatewayId`/`pinId` rồi ghi lại `null`. Đã kiểm chứng: gửi `{gatewayId:34,pinId:9}` → đọc lại `{datastreamId:null}`. Chưa ai gặp vì chưa board nào có widget `SWITCH`.
+- [x] `widgetDatastreamIds()` — một chỗ duy nhất hiểu cả `datastreamId` (cũ) lẫn `datastreamIds` (mới); 6 chỗ đọc binding rải rác đều đi qua nó. Đã verify board cũ giữ nguyên `{"datastreamId": 38}` sau vòng đọc-ghi.
+- [x] `AddWidgetDialog` chọn **nhiều** kênh (danh sách checkbox gom theo site), khoá theo chỉ số của kênh đầu tiên — khác chỉ số là khác đơn vị, chồng chung trục Y thì số đọc ra vô nghĩa.
+- [x] Hộp xác nhận đổi thành cảnh báo phá huỷ, nêu số widget sẽ mất.
+
+**Đợt sau (ô số lấy được giá trị mới nhất):**
+- [x] `GET /datastreams/{id}/telemetry?includeHistory=false` — bỏ **hẳn** truy vấn lịch sử ở tầng Influx, chỉ trả `latestValue`. Đo thật: mặc định 481 điểm, tắt còn 0 điểm mà giá trị vẫn nguyên.
+- [x] `ValueWidget` lấy giá trị mới nhất từ API làm nền, realtime đè lên. Trước đó `readings` khởi tạo rỗng và **chỗ ghi duy nhất** là hàm xử lý STOMP, nên mở trang lên ô số luôn `—` cho tới nhịp realtime kế tiếp — với kênh chạy cron `*/5 * * * *` là tối đa 5 phút, và F5 lại về `—`.
+- [x] Đổi luật mốc thời gian: số đến từ **realtime** thì hiện badge `Live`; số lấy từ **API** thì hiện mốc của chính điểm đó. Trước đây chỉ xét độ tươi nên số cũ từ API cũng có thể bị gắn `Live`.
+- [x] Cỡ chữ số co theo số cột — ba số trong ô rộng 3 cột chỉ còn ~90px mỗi số, cỡ `2xl` bị cắt thành `25...`.
+- [x] Vùng đệm resize: chỉ hai mép — dải liền bo nhẹ vắt qua giữa mép phải (kéo ngang) và mép dưới (kéo dọc), bên trong có vạch nắm vẽ bằng `::after`; **bỏ tay nắm góc** `se` mặc định vì kéo góc luôn đổi đồng thời hai chiều. Nền `--muted`/viền `--border`, hover đổi `--accent`/`--primary` nên tự đảo theo theme. Selector phải bám thêm `.react-grid-layout` để thắng độ ưu tiên: `react-grid-layout` dùng **đúng cùng selector** và nạp sau `index.css`, phải huỷ tay ba thứ của nó — `transform: rotate()` (làm dải thành hình thoi), `::after` (vẽ góc chữ L đen cứng `rgba(0,0,0,.4)`), và `margin: -10px` theo trục (đẩy dải lệch khỏi tâm cạnh). Vỏ widget bỏ `overflow-hidden` để dải nhô nửa ra ngoài mép được.
+
 **Đợt sau (biểu đồ có khoảng thời gian + khung xem lớn):**
 - [x] `GET /api/v1/datastreams/{id}/telemetry` — lịch sử của ĐÚNG một kênh, chung một DTO cho cả hai loại nguồn. Lý do phải thêm: widget biểu đồ chỉ cầm `datastreamId`, mà kênh external trên board đơn vị **không tra ngược ra được nguồn cha** (`datastream.source_id` là id của *job*), nên hai endpoint theo gateway/theo nguồn không phục vụ được nó. Dùng lại `InfluxReadService` + `AggregationWindow` sẵn có; `@nodeScope.canAccessDatastream` cũng đã có sẵn. Test: 3 ca trong `TelemetryServiceImplTest`.
 - [x] `LineWidget` **đổi nguồn vẽ**: trước đó chỉ tích luỹ điểm từ STOMP nên mở trang lên là biểu đồ trống, phải đứng chờ dữ liệu bắn về. Nay lấy lịch sử từ API rồi nối realtime ở đuôi (chỉ nối điểm mới hơn điểm cuối đã tải, tránh đếm hai lần).

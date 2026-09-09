@@ -5,9 +5,14 @@ export interface WidgetLayout {
   h: number
 }
 
-/** VALUE/LINE dùng datastreamId; SWITCH (Phase 7) dùng gatewayId+pinId — pin OUTPUT không có datastream. */
+/**
+ * VALUE/LINE dùng kênh dữ liệu; SWITCH (Phase 7) dùng gatewayId+pinId — pin OUTPUT không có datastream.
+ * `datastreamId` là dạng CŨ (một kênh), `datastreamIds` là dạng mới (nhiều kênh) — luôn đọc qua
+ * `widgetDatastreamIds()` thay vì chạm thẳng vào hai field này.
+ */
 export interface WidgetBinding {
   datastreamId?: number
+  datastreamIds?: number[]
   gatewayId?: number
   pinId?: number
 }
@@ -59,6 +64,8 @@ export interface Datastream {
 export interface DashboardTemplateWidget {
   widgetType: WidgetType
   metric: string
+  /** Vị trí cố định trên lưới 12 cột — áp mẫu lấy thẳng, không tự xếp nữa. */
+  layout: WidgetLayout
   config: Record<string, unknown>
 }
 
