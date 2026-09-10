@@ -132,7 +132,7 @@ export function JobDetailDialog({
 
               <div className="flex flex-col gap-2">
                 <h3 className="text-sm font-medium">Câu truy vấn</h3>
-                <pre className="overflow-x-auto rounded-md border border-border bg-muted/30 p-3 font-mono text-[12px] leading-[1.7]">
+                <pre className="overflow-x-auto rounded-md border border-border bg-surface-sunken p-3 font-mono text-[12px] leading-[1.7]">
                   {job.queryConfig.sql}
                 </pre>
               </div>

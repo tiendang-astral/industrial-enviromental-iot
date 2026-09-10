@@ -1,95 +1,13 @@
-import { useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import {
-  Building,
-  Building2,
-  ChevronDown,
-  ChevronRight,
-  MapPinHouse,
-  Network,
-  Router,
-  Users,
-  Warehouse,
-} from 'lucide-react'
+import { Network, Router, Users } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { DataTable, type DataTableColumn } from '@/components/patterns/DataTable'
 import { EmptyState } from '@/components/patterns/EmptyState'
-import { EnumBadge } from '@/components/patterns/EnumBadge'
 import { PageHeader } from '@/components/patterns/PageHeader'
 import { StatusBadge } from '@/components/patterns/StatusBadge'
-import { cn } from '@/lib/utils'
+import { OrgTree } from '@/components/tenant/OrgTree'
 import { useTenantDetailQuery } from '@/queries/useTenantDetailQuery'
-import type { TenantNodeSummary } from '@/types/tenant'
-
-const NODE_TYPE_LABEL: Record<TenantNodeSummary['nodeType'], string> = {
-  TENANT_ROOT: 'Công ty',
-  BRANCH: 'Chi nhánh',
-  PRODUCTION_AREA: 'Khu sản xuất',
-  SITE: 'Xưởng/Chuồng trại',
-}
-
-const NODE_TYPE_ICON: Record<TenantNodeSummary['nodeType'], typeof Building2> = {
-  TENANT_ROOT: Building2,
-  BRANCH: Building,
-  PRODUCTION_AREA: Warehouse,
-  SITE: MapPinHouse,
-}
-
-interface OrgTreeEntry {
-  node: TenantNodeSummary
-  children: OrgTreeEntry[]
-}
-
-/** Dựng cây thật (children lồng nhau) thay vì danh sách phẳng — cần cho việc vẽ nhánh + accordion. */
-function buildOrgTree(nodes: TenantNodeSummary[]): OrgTreeEntry[] {
-  const byId = new Map<number, OrgTreeEntry>()
-  nodes.forEach((node) => byId.set(node.id, { node, children: [] }))
-
-  const roots: OrgTreeEntry[] = []
-  nodes.forEach((node) => {
-    const entry = byId.get(node.id)!
-    const parent = node.parentId != null ? byId.get(node.parentId) : undefined
-    if (parent) {
-      parent.children.push(entry)
-    } else {
-      roots.push(entry)
-    }
-  })
-
-  function sortRecursive(list: OrgTreeEntry[]) {
-    list.sort((a, b) => a.node.name.localeCompare(b.node.name))
-    list.forEach((entry) => sortRecursive(entry.children))
-  }
-  sortRecursive(roots)
-  return roots
-}
-
-interface OrgFlatRow {
-  node: TenantNodeSummary
-  depth: number
-  hasChildren: boolean
-  childCount: number
-}
-
-/** Làm phẳng cây theo DFS, bỏ qua nhánh đang thu gọn — chỉ giữ những hàng thật sự cần vẽ. */
-function flattenVisibleRows(
-  entries: OrgTreeEntry[],
-  collapsedIds: Set<number>,
-  depth = 0
-): OrgFlatRow[] {
-  const rows: OrgFlatRow[] = []
-  for (const entry of entries) {
-    const hasChildren = entry.children.length > 0
-    rows.push({ node: entry.node, depth, hasChildren, childCount: entry.children.length })
-    if (hasChildren && !collapsedIds.has(entry.node.id)) {
-      rows.push(...flattenVisibleRows(entry.children, collapsedIds, depth + 1))
-    }
-  }
-  return rows
-}
-
-const INDENT_STEP = 20
 
 function formatDate(value: string | null) {
   return value ? new Date(value).toLocaleString('vi-VN') : '—'
@@ -99,21 +17,6 @@ export default function TenantDetailPage() {
   const { id } = useParams<{ id: string }>()
   const tenantId = Number(id)
   const { data, isLoading } = useTenantDetailQuery(tenantId)
-  const treeRoots = useMemo(() => (data ? buildOrgTree(data.nodes) : []), [data])
-  const [collapsedIds, setCollapsedIds] = useState<Set<number>>(new Set())
-  const visibleRows = useMemo(
-    () => flattenVisibleRows(treeRoots, collapsedIds),
-    [treeRoots, collapsedIds]
-  )
-
-  function toggleNode(id: number) {
-    setCollapsedIds((current) => {
-      const next = new Set(current)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }
 
   if (isLoading) {
     return (
@@ -210,78 +113,24 @@ export default function TenantDetailPage() {
         </TabsList>
 
         <TabsContent value="organization">
-          {treeRoots.length === 0 ? (
+          {data.nodes.length === 0 ? (
             <EmptyState
               icon={Network}
               title="Chưa có node tổ chức nào"
               description="Tenant Admin sẽ tạo cây tổ chức từ ứng dụng của họ."
             />
           ) : (
-            <div className="overflow-hidden rounded-lg border">
-              <div className="flex h-9 items-center gap-2 bg-muted px-4">
-                <span className="w-96 shrink-0 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-                  Tổ chức
+            <div className="overflow-hidden rounded-lg border border-border bg-card shadow-panel">
+              <div className="flex h-9 items-center justify-between border-b border-border bg-table-header px-4">
+                <span className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+                  Cây tổ chức
                 </span>
-                <span className="ml-auto shrink-0 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-                  Loại
+                <span className="tabular text-xs text-muted-foreground">
+                  {data.nodes.length} đơn vị
                 </span>
               </div>
-              <div className="flex flex-col divide-y divide-border">
-                {visibleRows.map(({ node, depth, hasChildren, childCount }) => {
-                  const Icon = NODE_TYPE_ICON[node.nodeType]
-                  const isCollapsed = collapsedIds.has(node.id)
-                  return (
-                    <div key={node.id} className="flex h-10 items-center gap-2 bg-card px-4">
-                      <div
-                        className="flex w-96 shrink-0 items-center gap-2"
-                        style={{ paddingLeft: depth * INDENT_STEP }}
-                      >
-                        <span className="flex size-5 shrink-0 items-center justify-center">
-                          {hasChildren ? (
-                            <button
-                              type="button"
-                              onClick={() => toggleNode(node.id)}
-                              className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors duration-[var(--motion-fast)] hover:bg-muted hover:text-foreground"
-                            >
-                              {isCollapsed ? (
-                                <ChevronRight className="size-3.5" />
-                              ) : (
-                                <ChevronDown className="size-3.5" />
-                              )}
-                              <span className="sr-only">{isCollapsed ? 'Mở rộng' : 'Thu gọn'}</span>
-                            </button>
-                          ) : depth > 0 ? (
-                            <span
-                              className="mb-1.5 size-2.5 rounded-bl-[3px] border-b border-l border-border"
-                              aria-hidden
-                            />
-                          ) : null}
-                        </span>
-                        {/* Chỉ cấp SITE mới đeo icon — ba cấp trên chỉ là vỏ tổ chức, còn SITE là
-                            nơi thật sự gắn gateway. Khớp bảng Tổ chức bên x-frontend. */}
-                        {node.nodeType === 'SITE' && (
-                          <Icon className="size-4 shrink-0 text-muted-foreground" />
-                        )}
-                        <span
-                          className={cn(
-                            'truncate text-sm',
-                            depth === 0
-                              ? 'font-semibold text-foreground'
-                              : 'font-normal text-foreground-subtle'
-                          )}
-                        >
-                          {node.name}
-                        </span>
-                        {hasChildren && (
-                          <span className="shrink-0 text-xs tabular text-muted-foreground">
-                            ({childCount})
-                          </span>
-                        )}
-                      </div>
-                      <EnumBadge className="ml-auto shrink-0">{NODE_TYPE_LABEL[node.nodeType]}</EnumBadge>
-                    </div>
-                  )
-                })}
+              <div className="p-3">
+                <OrgTree nodes={data.nodes} gateways={data.gateways} />
               </div>
             </div>
           )}

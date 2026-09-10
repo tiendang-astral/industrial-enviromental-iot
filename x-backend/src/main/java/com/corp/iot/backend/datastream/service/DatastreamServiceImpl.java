@@ -1,5 +1,6 @@
 package com.corp.iot.backend.datastream.service;
 
+import com.corp.iot.backend.alert.repository.AlertRepository;
 import com.corp.iot.backend.common.exception.BusinessException;
 import com.corp.iot.backend.common.influx.InfluxReadService;
 import com.corp.iot.backend.common.influx.ReadingPoint;
@@ -41,6 +42,7 @@ import java.util.function.Function;
 public class DatastreamServiceImpl implements DatastreamService {
 
     private final DatastreamRepository datastreamRepository;
+    private final AlertRepository alertRepository;
     private final GatewayPinRepository gatewayPinRepository;
     private final MetricRepository metricRepository;
     private final ExternalSourceJobRepository externalSourceJobRepository;
@@ -162,7 +164,16 @@ public class DatastreamServiceImpl implements DatastreamService {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "DATASTREAM_DELETE_NOT_ALLOWED",
                     "Chỉ xóa được datastream tạo từ external_source_job");
         }
+        // Cảnh báo của kênh phải đi trước: `fk_alert_datastream` là NO ACTION nên còn một dòng
+        // alert là lệnh xoá dưới chết ở tầng DB. Cảnh báo nói về CHÍNH kênh này, giữ lại thì trang
+        // Cảnh báo và báo cáo sự cố có những dòng không truy ngược được về đâu.
+        alertRepository.deleteByDatastreamId(datastream.getId());
+
+        // Số đo trong InfluxDB CỐ Ý giữ nguyên: point gắn nhãn theo job + tên cột chứ không theo
+        // datastream_id, nên gán lại kênh trên đúng cột là lịch sử hiện lại đủ (xem
+        // `InfluxWriterService.externalPoint`). Dải đó chỉ bị xoá khi chính job chết.
         // Không có cột deleted_at ở bảng này (xem entity Datastream) — hard delete.
+        // `external_source_job_backfill` tự đi theo nhờ fk_backfill_datastream ON DELETE CASCADE.
         datastreamRepository.delete(datastream);
     }
 

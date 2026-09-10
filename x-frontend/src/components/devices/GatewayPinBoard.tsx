@@ -1,3 +1,4 @@
+import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { StatusBadge } from '@/components/patterns/StatusBadge'
@@ -5,6 +6,7 @@ import { RelaySwitch } from '@/components/RelaySwitch'
 import { PinActionsMenu } from '@/components/devices/PinActionsMenu'
 import { PinReadout } from '@/components/devices/PinReadout'
 import { PinStatusDot } from '@/components/devices/PinStatusDot'
+import { metricChipStyle, metricColorVar } from '@/lib/metricColors'
 import { getMetricThreshold } from '@/lib/metricStatus'
 import { pinLabel } from '@/lib/pinLabels'
 import { cn } from '@/lib/utils'
@@ -56,6 +58,10 @@ function PinRow({
   const { pin, telemetry, metric } = view
   const isOutput = pin.direction === 'OUTPUT'
   const threshold = getMetricThreshold(telemetry?.latestValue, metric?.minValue, metric?.maxValue)
+  // Màu nhóm chỉ số nằm ở MÃ CHÂN chứ không ở tên: tên chân do người dùng đặt, mỗi hàng một chuỗi
+  // khác nhau — tô màu cả cột tên thì chín hàng chín màu chữ, đọc mệt. Mã chân là ô nhỏ, cố định
+  // bề ngang, xếp thẳng cột: tô ở đó thì lướt dọc một phát là gom được nhóm.
+  const codeColor = !isOutput && pin.enabled ? metricColorVar(metric?.code) : undefined
 
   return (
     <div className="flex items-center gap-3 border-t px-4 py-2.5 transition-colors duration-(--motion-fast) hover:bg-muted/50">
@@ -63,16 +69,20 @@ function PinRow({
 
       <Tooltip>
         <TooltipTrigger asChild>
-          <span className="w-11 shrink-0 cursor-help font-mono text-xs font-semibold text-muted-foreground">
+          <Badge
+            variant="secondary"
+            style={codeColor ? metricChipStyle(codeColor) : undefined}
+            className="w-12 shrink-0 cursor-help justify-center rounded-md font-mono text-[11px] font-semibold"
+          >
             {pin.type}
             {pin.pinNumber}
-          </span>
+          </Badge>
         </TooltipTrigger>
         <TooltipContent>{pinLabel(pin.type, pin.pinNumber)}</TooltipContent>
       </Tooltip>
 
       <div className="flex min-w-0 flex-1 items-center gap-2">
-        <span className={cn('truncate text-sm', !pin.enabled && 'text-muted-foreground')}>
+        <span className={cn('truncate text-sm font-medium', !pin.enabled && 'text-muted-foreground')}>
           {pin.name}
         </span>
         {/* Chỉ badge khi đã vượt ngưỡng. "Gần ngưỡng" gắn badge thì trên một trại bình thường
@@ -87,7 +97,12 @@ function PinRow({
         {!pin.enabled && <StatusBadge className="shrink-0" status="DISABLED" label="Đã tắt" />}
       </div>
 
-      <PinReadout view={view} className="text-sm font-semibold" />
+      {/* Cột giá trị phải có bề ngang cố định. Để nó co theo nội dung thì "44.7 °C" và
+          "175.2 ppm" rộng khác nhau, và vì nó nằm bên PHẢI nên mọi thứ bên trái — kể cả chip chỉ
+          số — bị đẩy lệch mỗi hàng một ít. */}
+      <div className="flex w-32 shrink-0 justify-end">
+        <PinReadout view={view} className="text-sm font-semibold" />
+      </div>
 
       {isOutput && (
         <RelaySwitch

@@ -1,6 +1,7 @@
 package com.corp.iot.backend.externalsource.service;
 
 import com.corp.iot.backend.common.crypto.CredentialEncryptionService;
+import com.corp.iot.backend.dashboard.repository.DashboardRepository;
 import com.corp.iot.backend.common.exception.BusinessException;
 import com.corp.iot.backend.common.scope.ScopeService;
 import com.corp.iot.backend.common.security.AppUserPrincipal;
@@ -33,6 +34,7 @@ public class ExternalSourceServiceImpl implements ExternalSourceService {
     private static final Set<String> SUPPORTED_CONNECTION_TYPES = Set.of("POSTGRESQL");
 
     private final ExternalSourceRepository externalSourceRepository;
+    private final DashboardRepository dashboardRepository;
     private final ExternalSourceJobRepository externalSourceJobRepository;
     private final TenantNodeRepository tenantNodeRepository;
     private final ExternalSourceMapper externalSourceMapper;
@@ -101,6 +103,13 @@ public class ExternalSourceServiceImpl implements ExternalSourceService {
         if (externalSourceJobRepository.existsByExternalSourceId(id)) {
             throw new BusinessException(HttpStatus.CONFLICT, "SOURCE_HAS_JOBS", "Nguồn còn truy vấn định kỳ, không thể xóa");
         }
+        // Board riêng theo nguồn (dashboard.external_source_id NOT NULL) mất hết ý nghĩa khi nguồn
+        // chết: nguồn không còn job nào nên board chỉ còn là một lưới widget rỗng. FK là NO ACTION
+        // nên không dọn thì nó nằm lại và vẫn hiện trong danh sách board của người dùng.
+        dashboardRepository.deleteByExternalSourceId(id);
+
+        // Không đụng InfluxDB ở đây: nguồn chỉ xoá được khi đã hết job, mà mỗi job lúc bị xoá đã
+        // tự dọn dải số đo của mình rồi.
         source.setDeletedAt(Instant.now());
         externalSourceRepository.save(source);
     }

@@ -9,6 +9,9 @@ import java.util.List;
 
 public interface ExternalSourceJobRunRepository extends JpaRepository<ExternalSourceJobRun, Long> {
 
+    /** Dọn lịch sử chạy khi job bị xoá — FK là NO ACTION, không dọn thì nó nằm lại vĩnh viễn. */
+    void deleteByExternalSourceJobId(Long externalSourceJobId);
+
     List<ExternalSourceJobRun> findByExternalSourceJobIdAndStartedAtAfterOrderByStartedAtDesc(
             Long externalSourceJobId, Instant startedAt);
 

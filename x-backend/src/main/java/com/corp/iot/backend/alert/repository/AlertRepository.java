@@ -27,6 +27,12 @@ public interface AlertRepository extends JpaRepository<Alert, Long> {
     List<Alert> findByStatusInAndTenantNodeIdInOrderByStartedAtDesc(
             Collection<AlertStatus> statuses, Collection<Long> tenantNodeIds, Pageable pageable);
 
+    /**
+     * Dọn cảnh báo của một kênh trước khi xoá kênh. `fk_alert_datastream` là NO ACTION nên không
+     * dọn thì lệnh xoá kênh chết ngay ở tầng DB — kênh nào từng vượt ngưỡng là không xoá nổi.
+     */
+    void deleteByDatastreamId(Long datastreamId);
+
     List<Alert> findByRuleIdInAndStatusIn(Collection<Long> ruleIds, Collection<AlertStatus> statuses);
 
     /**

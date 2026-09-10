@@ -166,7 +166,7 @@ export function BackfillDialog({
         <FieldLabel>Khối lượng phải đọc</FieldLabel>
         {estimateMutation.isPending && <Skeleton className="h-10 w-full rounded-md" />}
         {!estimateMutation.isPending && estimate && (
-          <div className="flex flex-col gap-1 rounded-md border border-border bg-muted/30 px-3 py-2.5">
+          <div className="flex flex-col gap-1 rounded-md border border-border bg-surface-sunken px-3 py-2.5">
             <p className="tabular text-lg font-semibold tracking-tight">
               {estimate.rowCount !== null
                 ? `${estimate.rowCount.toLocaleString('vi-VN')} dòng`
@@ -185,7 +185,7 @@ export function BackfillDialog({
         <FieldError errors={error ? [{ message: error }] : undefined} />
       </Field>
 
-      <div className="flex items-start gap-2.5 rounded-md border border-border bg-muted/30 px-3 py-2.5">
+      <div className="flex items-start gap-2.5 rounded-md border border-border bg-surface-sunken px-3 py-2.5">
         <Info className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
         <p className="text-[12.5px] text-muted-foreground">
           <span className="font-medium text-foreground">Dữ liệu đã có không bị ghi đè.</span> Lượt

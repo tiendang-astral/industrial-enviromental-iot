@@ -39,7 +39,7 @@ export function CursorExplainer({ nextValue }: { nextValue: string }) {
               dòng cuối cùng đã đọc lần trước — nhờ vậy lần sau chỉ lấy dòng mới.
             </p>
 
-            <div className="flex flex-col gap-1 rounded-md border border-border bg-muted/30 p-2.5 font-mono text-[11.5px]">
+            <div className="flex flex-col gap-1 rounded-md border border-border bg-surface-sunken p-2.5 font-mono text-[11.5px]">
               {CYCLES.map((cycle) => (
                 <div key={cycle.run} className="flex items-center gap-2">
                   <span className="w-11 shrink-0 text-muted-foreground">{cycle.run}</span>

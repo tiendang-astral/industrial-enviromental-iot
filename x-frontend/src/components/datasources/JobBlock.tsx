@@ -1,4 +1,4 @@
-import { ArrowRight, Database, Eye, Link2, MoreHorizontal, Trash2 } from 'lucide-react'
+import { ArrowRight, Database, Eye, MoreHorizontal, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -139,17 +139,6 @@ export function JobBlock({
             onSelect={() => onSelectDatastream(datastream)}
           />
         ))}
-
-        {datastreams.length === 0 && (
-          <div className="flex flex-1 items-center gap-2.5 rounded-lg border border-dashed border-border px-4 py-6 text-[12.5px] text-muted-foreground">
-            <Link2 className="size-4 shrink-0" />
-            <span>
-              {job.lastRunAt
-                ? 'Truy vấn đang đọc dữ liệu về nhưng chưa cột nào thành kênh dùng được trên bảng theo dõi.'
-                : 'Truy vấn chưa chạy lần nào. Mở chi tiết để xem dữ liệu và tạo kênh từ cột.'}
-            </span>
-          </div>
-        )}
 
         <AddChannelTile onClick={onAddChannel} />
       </div>

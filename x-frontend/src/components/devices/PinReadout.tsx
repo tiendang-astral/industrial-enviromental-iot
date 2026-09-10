@@ -1,6 +1,7 @@
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { StatusBadge } from '@/components/patterns/StatusBadge'
 import { formatDateTime } from '@/lib/datetime'
+import { metricColorVar } from '@/lib/metricColors'
 import { getMetricThreshold } from '@/lib/metricStatus'
 import { cn } from '@/lib/utils'
 import type { PinView } from '@/lib/gatewayPinView'
@@ -30,15 +31,18 @@ export function PinReadout({ view, className }: { view: PinView; className?: str
   // vàng thì ba chỗ nói ba kiểu về cùng một chân.
   const { status } = getMetricThreshold(telemetry.latestValue, metric?.minValue, metric?.maxValue)
 
+  // Bình thường: số mang màu của chỉ số, để mắt nhận ra "đây là nhiệt độ" trước cả khi đọc đơn vị.
+  // Vượt ngưỡng: đỏ THẮNG màu chỉ số. Trên màn hình vận hành, đỏ chỉ được có một nghĩa.
+  // Chân đã tắt cũng bỏ màu: số còn đó là số cũ, tô màu chỉ số vào nó là nói nó vẫn đang đo.
+  const isCritical = status === 'critical'
+  const color = isCritical || !pin.enabled ? undefined : metricColorVar(metric?.code)
+
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <span
-          className={cn(
-            'whitespace-nowrap tabular',
-            status === 'critical' && 'text-critical',
-            className
-          )}
+          style={color ? { color } : undefined}
+          className={cn('whitespace-nowrap tabular', isCritical && 'text-critical', className)}
         >
           {telemetry.latestValue}
           {unit && <span className="ml-1 text-sm font-medium text-muted-foreground">{unit}</span>}

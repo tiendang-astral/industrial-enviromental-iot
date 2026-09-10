@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { Check, History, Pencil, Trash2, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
+import { Progress } from '@/components/ui/progress'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -15,13 +16,17 @@ import { ConfirmDialog } from '@/components/patterns/ConfirmDialog'
 import { TrendChart } from '@/components/patterns/TrendChart'
 import { BackfillDialog } from '@/components/datasources/BackfillDialog'
 import { getApiErrorMessage } from '@/lib/apiError'
-import { formatDateTime, formatRelativeTime } from '@/lib/datetime'
+import { formatDate, formatDateTime, formatRelativeTime } from '@/lib/datetime'
+import { metricColorVar } from '@/lib/metricColors'
 import { cn } from '@/lib/utils'
 import { useBackfillQuery } from '@/queries/useBackfillQuery'
 import { useDeleteDatastreamMutation } from '@/queries/useDeleteDatastreamMutation'
 import { useRenameDatastreamMutation } from '@/queries/useRenameDatastreamMutation'
 import type { Datastream } from '@/types/dashboard'
 import type { DatastreamTelemetry, ExternalSourceJob } from '@/types/externalSource'
+
+/** Vừa vá xong trong khoảng này thì vẫn hiện panel ở 100% để người dùng kịp thấy nó kết thúc. */
+const JUST_FINISHED_MS = 5 * 60_000
 
 const RANGE_MINUTES = 720
 
@@ -153,10 +158,27 @@ export function DatastreamDetailDialog({
   const { data: backfill } = useBackfillQuery(datastream?.id ?? null)
   const deleteMutation = useDeleteDatastreamMutation(externalSourceId)
 
-  if (!datastream) return null
-
   const running = backfill?.status === 'PENDING' || backfill?.status === 'RUNNING'
+
+  /*
+   * Người dùng phải được thấy lượt vá kết thúc, không phải thấy nó biến mất.
+   *
+   * Tiến độ chỉ được ghi xuống DB MỘT lần sau mỗi lượt chạy (ngân sách 60s, xem
+   * `ExternalBackfillSchedulerService`), nên một dải ngắn vá xong ngay trong lượt đầu sẽ đi thẳng
+   * từ 0% sang SUCCESS. Poll 5s của UI thường không bắt được trạng thái RUNNING nào cả.
+   *
+   * Vì vậy KHÔNG dựa vào "đã từng thấy nó chạy" — cứ nhìn thẳng vào `finishedAt`: vừa xong trong
+   * vài phút gần đây thì hiện panel ở 100%. Cách này đúng cả khi người dùng mở modal sau lúc nó
+   * đã chạy xong, và không cần giữ state nào qua các lần render.
+   */
+  const finishedRecently =
+    backfill?.status === 'SUCCESS' &&
+    backfill.finishedAt != null &&
+    Date.now() - new Date(backfill.finishedAt).getTime() < JUST_FINISHED_MS
+
+  if (!datastream) return null
   const oldest = telemetry?.oldestReadingAt ?? datastream.oldestReadingAt ?? null
+  const metricColor = metricColorVar(datastream.metricCode)
 
   function confirmDelete() {
     if (!datastream) return
@@ -189,11 +211,20 @@ export function DatastreamDetailDialog({
           </DialogHeader>
 
           <div className="flex items-baseline gap-2">
-            <span className="tabular text-4xl font-semibold tracking-tight">
+            {/* Cùng màu chỉ số với thẻ kênh ngoài pipeline và với đường biểu đồ ngay bên dưới. */}
+            <span
+              style={metricColor ? { color: metricColor } : undefined}
+              className="tabular text-4xl font-semibold tracking-tight"
+            >
               {telemetry?.latestValue ?? '—'}
             </span>
             {datastream.metricUnit && (
-              <span className="text-base text-muted-foreground">{datastream.metricUnit}</span>
+              <span
+                style={metricColor ? { color: metricColor } : undefined}
+                className="text-base text-muted-foreground"
+              >
+                {datastream.metricUnit}
+              </span>
             )}
             <span className="ml-auto text-[12.5px] text-muted-foreground">
               {telemetry?.latestMeasuredAt
@@ -207,13 +238,18 @@ export function DatastreamDetailDialog({
               history={telemetry?.history ?? []}
               variant="axis"
               unit={datastream.metricUnit}
+              metricCode={datastream.metricCode}
               rangeMinutes={RANGE_MINUTES}
             />
           </div>
 
           <div className="grid gap-4 sm:grid-cols-3">
             <Fact label="Metric">
-              <Badge variant="secondary" className="font-mono font-normal">
+              <Badge
+                variant="secondary"
+                style={metricColor ? { color: metricColor } : undefined}
+                className="font-mono font-normal"
+              >
                 {datastream.metricCode ?? '—'}
               </Badge>
             </Fact>
@@ -221,17 +257,54 @@ export function DatastreamDetailDialog({
               <span className="truncate font-mono">{datastream.sourceField}</span>
             </Fact>
             <Fact label="Có số đo từ">
-              {running ? (
-                <span className="tabular text-primary">
-                  đang đọc lại {backfill?.progressPercent ?? 0}%
-                </span>
-              ) : backfill?.status === 'FAILED' ? (
+              {backfill?.status === 'FAILED' ? (
                 <span className="text-critical">đọc lại lỗi</span>
               ) : (
                 <span className="tabular">{oldest ? formatDateTime(oldest) : '—'}</span>
               )}
             </Fact>
           </div>
+
+          {/* Chạy nền có thể kéo hàng chục phút với dải nhiều tháng. Không có thanh tiến độ thì
+              người dùng chỉ thấy một nút bị khoá và không biết nên chờ thêm hay đã treo — mà đây
+              đúng là lúc họ hay bấm lại hoặc đóng trang. Backend đã trả sẵn `progressPercent`,
+              `useBackfillQuery` cũng tự poll 5s khi còn chạy rồi dừng. */}
+          {(running || finishedRecently) && backfill && (
+            <div
+              className={cn(
+                'flex flex-col gap-2.5 rounded-lg border p-3',
+                finishedRecently ? 'border-ok/30 bg-ok/5' : 'border-primary/25 bg-primary/5'
+              )}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[12.5px] font-medium">Đọc lại lịch sử</span>
+                <Badge variant={finishedRecently ? 'ok' : 'secondary'} className="rounded-md">
+                  {finishedRecently
+                    ? 'Đã xong'
+                    : backfill.status === 'PENDING'
+                      ? 'Chờ tới lượt'
+                      : 'Đang chạy nền'}
+                </Badge>
+              </div>
+
+              <Progress value={finishedRecently ? 100 : (backfill.progressPercent ?? 0)} className="h-1.5" />
+
+              <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[11.5px] text-muted-foreground">
+                {/* Dải cần vá đọc theo chiều thời gian: từ mốc xa nhất tới nơi dữ liệu hiện có bắt
+                    đầu. Bản thân job chạy ngược (mới → cũ), nhưng đó là chi tiết thực thi. */}
+                <span className="tabular">
+                  {formatDate(backfill.targetFrom)} → {formatDate(backfill.coveredFrom)}
+                </span>
+                <span className="tabular">
+                  <span className={finishedRecently ? 'text-ok' : 'text-primary'}>
+                    {finishedRecently ? 100 : (backfill.progressPercent ?? 0)}%
+                  </span>
+                  {' · '}
+                  {backfill.rowCount.toLocaleString('vi-VN')} dòng
+                </span>
+              </div>
+            </div>
+          )}
 
           {backfill?.status === 'FAILED' && backfill.error && (
             <p className="rounded-md border border-critical/40 bg-critical/10 px-3 py-2.5 font-mono text-[11.5px] break-words text-muted-foreground">
@@ -281,7 +354,7 @@ export function DatastreamDetailDialog({
             Xóa kênh <span className="font-semibold">&ldquo;{datastream.name}&rdquo;</span>?
           </>
         }
-        description="Widget dashboard đang bind kênh này sẽ mất liên kết và cần gắn lại thủ công. Dữ liệu đã ghi vào InfluxDB không bị xóa."
+        description="Lịch sử cảnh báo của kênh này bị xóa theo. Widget dashboard đang bind kênh sẽ mất liên kết và cần gắn lại thủ công. Số đo trong InfluxDB vẫn giữ — gán lại kênh trên đúng cột là lịch sử hiện lại đủ."
         confirmLabel="Xóa kênh"
         destructive
         isPending={deleteMutation.isPending}

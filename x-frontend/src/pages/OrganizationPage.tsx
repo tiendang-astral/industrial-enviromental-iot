@@ -1,85 +1,39 @@
 import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { Network, Pencil, Plus, Trash2 } from 'lucide-react'
+import { Network, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-import { TableCell, TableRow } from '@/components/ui/table'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import {
-  Table,
-  TableBody,
-  TreeTableContainer,
-  TreeTableHead,
-  TreeTableHeader,
-  TreeTableNameCell,
-  TreeTableRow,
-  useTreeTableRows,
-} from '@/components/shared/TreeTable'
 import { ConfirmDialog } from '@/components/patterns/ConfirmDialog'
 import { EmptyState } from '@/components/patterns/EmptyState'
-import { EnumBadge } from '@/components/patterns/EnumBadge'
 import { PageHeader } from '@/components/patterns/PageHeader'
-import { StatusBadge } from '@/components/patterns/StatusBadge'
 import { CreateNodeDialog, EditNodeDialog } from '@/components/organization/NodeDialogs'
+import { OrgTree } from '@/components/organization/OrgTree'
 import { getApiErrorMessage } from '@/lib/apiError'
-import { orderNodesDepthFirst } from '@/lib/tenantNodeTree'
-import { cn } from '@/lib/utils'
-import { NEXT_TYPE, NODE_ICON, NODE_LABEL, NODE_LABEL_SHORT } from '@/lib/tenantNodeLabels'
+import { useAlertsQuery } from '@/queries/useAlertsQuery'
+import { useAllGatewaysQuery } from '@/queries/useGatewaysQuery'
 import { useDeleteTenantNodeMutation } from '@/queries/useDeleteTenantNodeMutation'
 import { useTenantNodesQuery } from '@/queries/useTenantNodesQuery'
 import type { TenantNode } from '@/types/tenantNode'
 
-/**
- * Nút hành động trong hàng cây. `showLabel` cho hai hành động hay dùng nhất (Thêm, Sửa) hiện nhãn
- * ra ngoài — bấm nhầm ở đây là sửa cấu trúc tổ chức thật, không đáng để người dùng phải rê chuột
- * chờ tooltip mới biết nút nào là nút nào. Các nút còn lại giữ dạng icon để hàng không bị vỡ.
- */
-function RowAction({
-  label,
-  icon: Icon,
-  onClick,
-  destructive,
-  disabled,
-  showLabel,
-}: {
-  label: string
-  icon: typeof Plus
-  onClick?: () => void
-  destructive?: boolean
-  disabled?: boolean
-  showLabel?: boolean
-}) {
-  const button = (
-    <Button
-      variant="ghost"
-      size={showLabel ? 'sm' : 'icon'}
-      className={cn(
-        showLabel ? 'h-7 px-2 text-xs whitespace-nowrap' : 'size-7',
-        destructive && 'text-destructive hover:text-destructive'
-      )}
-      disabled={disabled}
-      onClick={onClick}
-    >
-      <Icon data-icon={showLabel ? 'inline-start' : undefined} />
-      {showLabel ? label : <span className="sr-only">{label}</span>}
-    </Button>
-  )
-
-  // Nút đã hiện nhãn thì tooltip chỉ lặp lại đúng chữ đó.
-  if (showLabel) return button
-
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>{button}</TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
-    </Tooltip>
-  )
+/** Đếm số phần tử theo `tenantNodeId` — dùng chung cho cả gateway lẫn cảnh báo. */
+function countByNode(items: { tenantNodeId: number }[] | undefined): Map<number, number> {
+  const result = new Map<number, number>()
+  for (const item of items ?? []) {
+    result.set(item.tenantNodeId, (result.get(item.tenantNodeId) ?? 0) + 1)
+  }
+  return result
 }
 
 export default function OrganizationPage() {
   const { data: nodes, isLoading } = useTenantNodesQuery()
-  const orderedNodes = useMemo(() => (nodes ? orderNodesDepthFirst(nodes) : []), [nodes])
-  const { rows } = useTreeTableRows(orderedNodes)
+
+  // Cây tổ chức mà không nói đơn vị nào đang có thiết bị, đơn vị nào đang có sự cố thì chỉ là sơ đồ
+  // treo tường. Hai truy vấn này đều đã dùng ở nơi khác nên không thêm endpoint mới.
+  const { data: gateways } = useAllGatewaysQuery()
+  const { data: openAlerts } = useAlertsQuery('OPEN')
+
+  const gatewayCountByNode = useMemo(() => countByNode(gateways), [gateways])
+  const openAlertCountByNode = useMemo(() => countByNode(openAlerts), [openAlerts])
 
   // `{ parent: null }` = mở dialog ở chế độ tự chọn đơn vị cha; `null` = dialog đóng.
   const [createState, setCreateState] = useState<{ parent: TenantNode | null } | null>(null)
@@ -116,104 +70,49 @@ export default function OrganizationPage() {
         }
       />
 
-      <TreeTableContainer>
-        <Table>
-          <TreeTableHeader>
-            <TableRow>
-              <TreeTableHead>Tổ chức</TreeTableHead>
-              <TreeTableHead>Loại</TreeTableHead>
-              <TreeTableHead>Trạng thái</TreeTableHead>
-              <TreeTableHead className="w-[20rem] text-right">Hành động</TreeTableHead>
-            </TableRow>
-          </TreeTableHeader>
-          <TableBody>
-            {isLoading &&
-              Array.from({ length: 5 }).map((_, index) => (
-                <TableRow key={index} className="h-11">
-                  <TableCell>
-                    <Skeleton className="h-4 w-40" style={{ marginLeft: `${(index % 3) * 16}px` }} />
-                  </TableCell>
-                  <TableCell>
-                    <Skeleton className="h-4 w-20" />
-                  </TableCell>
-                  <TableCell>
-                    <Skeleton className="h-5 w-16 rounded-4xl" />
-                  </TableCell>
-                  <TableCell>
-                    <Skeleton className="ml-auto h-7 w-32" />
-                  </TableCell>
-                </TableRow>
-              ))}
-            {!isLoading && rows.length === 0 && (
-              <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={4} className="py-10">
-                  <EmptyState
-                    icon={Network}
-                    title="Chưa có đơn vị nào"
-                    description="Cây tổ chức bắt đầu từ đơn vị gốc của tenant. Liên hệ quản trị viên nếu bạn không thấy đơn vị gốc."
-                  />
-                </TableCell>
-              </TableRow>
-            )}
-            {rows.map(({ node, depth, hasChildren, isExpanded, childCount, toggle }) => {
-              const childType = NEXT_TYPE[node.nodeType]
-              return (
-                <TreeTableRow key={node.id} isActive={node.enabled}>
-                  <TreeTableNameCell
-                    depth={depth}
-                    hasChildren={hasChildren}
-                    isExpanded={isExpanded}
-                    onToggle={toggle}
-                    // Chỉ cấp SITE mới đeo icon — ba cấp trên chỉ là vỏ tổ chức, còn SITE là
-                    // nơi thật sự gắn gateway và kênh dữ liệu.
-                    icon={node.nodeType === 'SITE' ? NODE_ICON.SITE : undefined}
-                    childCount={childCount}
-                    isActive={node.enabled}
-                  >
-                    {node.name}
-                  </TreeTableNameCell>
-                  <TableCell>
-                    <EnumBadge>{NODE_LABEL[node.nodeType]}</EnumBadge>
-                  </TableCell>
-                  <TableCell>
-                    <StatusBadge
-                      status={node.enabled ? 'ENABLED' : 'DISABLED'}
-                      label={node.enabled ? 'Đang hoạt động' : 'Đã tắt'}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center justify-end gap-1">
-                      {childType && (
-                        <RowAction
-                          showLabel
-                          label={`Thêm ${NODE_LABEL_SHORT[childType].toLowerCase()}`}
-                          icon={Plus}
-                          disabled={!node.enabled}
-                          onClick={() => setCreateState({ parent: node })}
-                        />
-                      )}
-                      <RowAction
-                        showLabel
-                        label="Sửa"
-                        icon={Pencil}
-                        onClick={() => setEditTarget(node)}
-                      />
-                      {node.nodeType !== 'TENANT_ROOT' && (
-                        <RowAction
-                          label="Xóa đơn vị"
-                          icon={Trash2}
-                          destructive
-                          onClick={() => setDeleteTarget(node)}
-                        />
-                      )}
-                    </div>
-                  </TableCell>
-                </TreeTableRow>
-              )
-            })}
-          </TableBody>
-        </Table>
-      </TreeTableContainer>
+      <div className="overflow-hidden rounded-lg border border-border bg-card shadow-panel">
+        <div className="flex h-9 items-center justify-between border-b border-border bg-table-header px-4">
+          <span className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+            Cây tổ chức
+          </span>
+          {!isLoading && nodes && nodes.length > 0 && (
+            <span className="tabular text-xs text-muted-foreground">{nodes.length} đơn vị</span>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-2 p-3">
+          {isLoading &&
+            Array.from({ length: 5 }).map((_, index) => (
+              <Skeleton
+                key={index}
+                className="h-9 rounded-lg"
+                // Thụt lề tăng dần để khung chờ có đúng dáng cây, không phải năm thanh bằng nhau.
+                style={{ marginLeft: `${Math.min(index, 3) * 24}px` }}
+              />
+            ))}
+
+          {!isLoading && (!nodes || nodes.length === 0) && (
+            <div className="py-10">
+              <EmptyState
+                icon={Network}
+                title="Chưa có đơn vị nào"
+                description="Cây tổ chức bắt đầu từ đơn vị gốc của tenant. Liên hệ quản trị viên nếu bạn không thấy đơn vị gốc."
+              />
+            </div>
+          )}
+
+          {!isLoading && nodes && nodes.length > 0 && (
+            <OrgTree
+              nodes={nodes}
+              gatewayCountByNode={gatewayCountByNode}
+              openAlertCountByNode={openAlertCountByNode}
+              onAddChild={(parent) => setCreateState({ parent })}
+              onEdit={setEditTarget}
+              onDelete={setDeleteTarget}
+            />
+          )}
+        </div>
+      </div>
 
       <CreateNodeDialog
         open={!!createState}

@@ -46,6 +46,12 @@
     --color-card-foreground: var(--card-foreground);
     --color-popover: var(--popover);
     --color-popover-foreground: var(--popover-foreground);
+    /* Nền hộp thoại tách khỏi --popover: hộp thoại luôn nằm trên overlay tối 62% nên không cần
+       sáng bằng menu/dropdown (thứ nằm trực tiếp trên thẻ, chỉ có viền + bóng để tự tách). */
+    --color-dialog: var(--dialog);
+    /* Mặt LÕM dưới mặt nền chứa nó — khối mã SQL, ô tóm tắt, panel chỉ-đọc. Trước đây các khối này
+       dùng `bg-muted/30`; ở chế độ tối --muted trùng luôn nền hộp thoại nên chúng biến mất. */
+    --color-surface-sunken: var(--surface-sunken);
     --color-primary: var(--primary);
     --color-primary-foreground: var(--primary-foreground);
     --color-secondary: var(--secondary);
@@ -156,6 +162,8 @@
     --card-foreground: var(--n-11);
     --popover: var(--n-0);
     --popover-foreground: var(--n-11);
+    --dialog: var(--n-0);
+    --surface-sunken: var(--n-2);
 
     --primary: oklch(0.49 0.135 232);
     --primary-foreground: oklch(0.985 0.006 232);
@@ -262,6 +270,11 @@
        vào nền ở chế độ tối. */
     --popover: var(--n-3);
     --popover-foreground: var(--n-11);
+    /* Hộp thoại TỐI HƠN popover hẳn một bậc rưỡi. Overlay đã tối 62% nên hộp thoại chỉ cần nhỉnh
+       hơn nền app là đã nổi; để nó ở n-3 như popover thì nó thành mảng sáng lớn nhất màn hình,
+       mà mọi thứ bên trong (bảng, khối mã, ô nhập) đều phải tối hơn nó nên chẳng còn chỗ tụt. */
+    --dialog: oklch(0.242 0.035 257);
+    --surface-sunken: oklch(0.182 0.040 258);
 
     --primary: oklch(0.77 0.125 218);
     --primary-foreground: oklch(0.17 0.030 225);
@@ -278,7 +291,8 @@
     --border: var(--n-4);
     /* Viền đậm hơn n-4 một bậc: ở chế độ tối viền là thứ duy nhất vẽ ra hình ô nhập. */
     --input: oklch(0.400 0.030 256);
-    --field: oklch(0.212 0.032 257);
+    /* Tối hơn nền hộp thoại 0.046 và nền thẻ 0.056 — đủ để đọc ra "ô lõm" mà không cần viền. */
+    --field: oklch(0.196 0.034 257);
     --ring: oklch(0.77 0.125 218);
 
     /* Dải tiêu đề bảng: thấp hơn popover nửa bậc, cao hơn card 0.040 — bảng có mép
@@ -442,6 +456,13 @@
     backdrop-filter: none;
 }
 
+/* Nền hộp thoại: --dialog chứ không phải --popover (xem @theme). Ghi đè ở đây thay vì sửa
+   `ui/dialog.tsx`/`ui/alert-dialog.tsx` — cùng cách đã dùng cho input, overlay, table-header. */
+[data-slot="dialog-content"],
+[data-slot="alert-dialog-content"] {
+    background-color: var(--dialog);
+}
+
 @media (prefers-reduced-motion: reduce) {
 
     *,
@@ -523,6 +544,8 @@
         --card: #ffffff;
         --card-foreground: #111111;
         --popover: #ffffff;
+        --dialog: #ffffff;
+        --surface-sunken: #f4f4f5;
         --muted: #f4f4f5;
         --muted-foreground: #52525b;
         --border: #d4d4d8;

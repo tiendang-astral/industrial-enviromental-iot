@@ -17,4 +17,7 @@ public interface DashboardRepository extends JpaRepository<Dashboard, Long> {
     Optional<Dashboard> findByUserIdAndTenantNodeIdAndExternalSourceIdIsNull(Long userId, Long tenantNodeId);
 
     Optional<Dashboard> findByUserIdAndExternalSourceId(Long userId, Long externalSourceId);
+
+    /** Board riêng theo nguồn — mỗi người dùng một board, nên xoá nguồn phải quét hết chứ không một. */
+    void deleteByExternalSourceId(Long externalSourceId);
 }

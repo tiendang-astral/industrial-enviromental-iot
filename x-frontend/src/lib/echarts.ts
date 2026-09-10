@@ -106,7 +106,9 @@ export function buildPinTrendOption(
   history: ReadingPoint[],
   palette: ChartPalette,
   rangeMinutes: number,
-  now: number
+  now: number,
+  /** Màu của chỉ số kênh này (xem `lib/metricColors.ts`). Bỏ trống thì dùng màu mặc định. */
+  color?: string
 ) {
   // Cửa sổ đầy đủ là TRẦN chứ không phải khung cứng. Kênh mới bật chỉ có 1 giờ số đo mà vẫn trải
   // trục 12 giờ thì toàn bộ dữ liệu dồn vào ~8% bề ngang, thành một vệt dựng đứng đọc không ra.
@@ -152,7 +154,7 @@ export function buildPinTrendOption(
     },
     series: [
       {
-        ...lineSeries(history, palette, false),
+        ...lineSeries(history, palette, false, color),
         // Trục thời gian cần cặp [mốc, giá trị]; mảng giá trị đơn thuần chỉ hợp với trục category.
         data: history.map((point) => [new Date(point.measuredAt).getTime(), point.value]),
       },
@@ -175,7 +177,9 @@ export function buildAxisLineOption(
   history: ReadingPoint[],
   unit: string | null | undefined,
   palette: ChartPalette,
-  zoomable = false
+  zoomable = false,
+  /** Màu của chỉ số kênh này (xem `lib/metricColors.ts`). Bỏ trống thì dùng màu mặc định. */
+  color?: string
 ) {
   const multiDay = spansMultipleDays(history)
 
@@ -257,7 +261,7 @@ export function buildAxisLineOption(
         return `${when}<br/><strong>${point.data}${unit ? ' ' + unit : ''}</strong>`
       },
     },
-    series: [lineSeries(history, palette, history.length <= 30)],
+    series: [lineSeries(history, palette, history.length <= 30, color)],
   }
 }
 

@@ -1,5 +1,6 @@
 import { Plus } from 'lucide-react'
 import { formatRelativeTime } from '@/lib/datetime'
+import { metricColorVar } from '@/lib/metricColors'
 import { cn } from '@/lib/utils'
 import type { Datastream } from '@/types/dashboard'
 import type { DatastreamTelemetry } from '@/types/externalSource'
@@ -33,6 +34,9 @@ export function DatastreamTile({
 }) {
   const state = staleness(telemetry?.latestMeasuredAt)
   const hasValue = telemetry?.latestValue !== null && telemetry?.latestValue !== undefined
+  // Màu của chỉ số: gắn cho con số, đơn vị và chip mã — ba thứ cùng nói "kênh này đo cái gì".
+  // Kênh chưa có số đo thì bỏ màu, để "chưa có dữ liệu" vẫn đọc ra là trạng thái xám bình thường.
+  const color = hasValue ? metricColorVar(datastream.metricCode) : undefined
 
   return (
     <button
@@ -42,13 +46,17 @@ export function DatastreamTile({
     >
       <div className="flex min-w-0 items-start justify-between gap-2">
         <span className="min-w-0 flex-1 truncate text-sm font-medium">{datastream.name}</span>
-        <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+        <span
+          style={color ? { color } : undefined}
+          className="shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
+        >
           {datastream.metricCode ?? '—'}
         </span>
       </div>
 
       <div className="flex items-baseline gap-1.5">
         <span
+          style={color ? { color } : undefined}
           className={cn(
             'tabular text-[32px] leading-none font-semibold tracking-tight',
             !hasValue && 'text-muted-foreground'
@@ -57,7 +65,9 @@ export function DatastreamTile({
           {hasValue ? telemetry?.latestValue : '—'}
         </span>
         {datastream.metricUnit && (
-          <span className="text-sm text-muted-foreground">{datastream.metricUnit}</span>
+          <span style={color ? { color } : undefined} className="text-sm text-muted-foreground">
+            {datastream.metricUnit}
+          </span>
         )}
       </div>
 

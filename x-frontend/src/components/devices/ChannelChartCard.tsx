@@ -5,6 +5,7 @@ import { EnumBadge } from '@/components/patterns/EnumBadge'
 import { StatusBadge } from '@/components/patterns/StatusBadge'
 import { TrendChart } from '@/components/patterns/TrendChart'
 import { useInViewOnce } from '@/hooks/useInViewOnce'
+import { metricChipStyle, metricColorVar } from '@/lib/metricColors'
 import { pinLabel } from '@/lib/pinLabels'
 import type { PinView } from '@/lib/gatewayPinView'
 
@@ -29,6 +30,8 @@ export function ChannelChartCard({ view }: { view: PinView }) {
   // Chỉ thống kê khi biểu đồ thật sự vẽ được (TrendChart cần >1 điểm) — hiện "nhỏ nhất/lớn nhất"
   // bên dưới một khung báo "chưa đủ số đo" là hai câu đá nhau trên cùng một card.
   const summary = history.length > 1 ? stats(history.map((point) => point.value)) : null
+  // Cùng màu với nhãn và con số của chân này ở tab Tổng quan.
+  const color = pin.enabled ? metricColorVar(metric?.code) : undefined
 
   return (
     <Card ref={ref}>
@@ -46,7 +49,11 @@ export function ChannelChartCard({ view }: { view: PinView }) {
           )}
           <Tooltip>
             <TooltipTrigger asChild>
-              <EnumBadge className="shrink-0 cursor-help font-mono">
+              {/* Khớp bảng ở tab Tổng quan: màu nhóm chỉ số nằm trên mã chân. */}
+              <EnumBadge
+                style={color ? metricChipStyle(color) : undefined}
+                className="shrink-0 cursor-help rounded-md font-mono"
+              >
                 {pin.type}
                 {pin.pinNumber}
               </EnumBadge>
@@ -61,6 +68,7 @@ export function ChannelChartCard({ view }: { view: PinView }) {
               history={history}
               variant="axis"
               unit={unit}
+              metricCode={pin.enabled ? metric?.code : undefined}
               emptyLabel="Chưa đủ số đo trong khoảng này"
             />
           ) : (

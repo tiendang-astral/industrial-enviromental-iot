@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from 'react'
 import { ResizableChart } from '@/components/widgets/ResizableChart'
 import { useChartPalette } from '@/hooks/useChartPalette'
 import { downsampleReadings } from '@/lib/downsample'
+import { metricSeriesColor } from '@/lib/metricColors'
 import { buildAxisLineOption, buildMultiLineOption, buildPinTrendOption, type ChartSeries } from '@/lib/echarts'
 import { cn } from '@/lib/utils'
 import type { ReadingPoint } from '@/types/telemetry'
@@ -34,6 +35,7 @@ export function TrendChart({
   rangeMinutes,
   now,
   zoomable = false,
+  metricCode,
   className,
   emptyLabel = 'Chưa đủ số đo để vẽ biểu đồ',
 }: {
@@ -48,6 +50,16 @@ export function TrendChart({
    * đã gộp mẫu xuống ≤500 điểm/khoảng), nó chỉ giãn chuỗi đang có ra cho dễ đọc.
    */
   zoomable?: boolean
+  /**
+   * Mã chỉ số của kênh — biểu đồ MỘT chuỗi lấy theo đó ra màu riêng của chỉ số (xem
+   * `lib/metricColors.ts`). Biểu đồ nhiều chuỗi bỏ qua: các chuỗi ở đó cùng một chỉ số nên tô
+   * cùng màu là mất luôn khả năng phân biệt chúng.
+   *
+   * Nhận mã chứ không nhận màu: màu phải là hex đã resolve theo theme mới vẽ được lên canvas, mà
+   * bảng màu đó chỉ có ở đây. Bắt mỗi nơi gọi tự đi lấy `useChartPalette` là nhân bản việc đó ra
+   * khắp nơi.
+   */
+  metricCode?: string | null
   unit?: string | null
   /** Bắt buộc với `sparkline`: trục X cố định theo khoảng đang xem, không co theo dữ liệu. */
   rangeMinutes?: number
@@ -57,6 +69,7 @@ export function TrendChart({
   emptyLabel?: string
 }) {
   const palette = useChartPalette()
+  const color = metricSeriesColor(metricCode, palette)
   const [width, setWidth] = useState(INITIAL_WIDTH)
 
   // Làm tròn xuống bội số 40px: kéo giãn widget không dựng lại option ở từng pixel một.
@@ -82,11 +95,11 @@ export function TrendChart({
     }
     const points = downsampleReadings(history, budget)
     return variant === 'sparkline'
-      ? buildPinTrendOption(points, palette, rangeMinutes ?? 60, now ?? Date.now())
-      : buildAxisLineOption(points, unit, palette, zoomable)
+      ? buildPinTrendOption(points, palette, rangeMinutes ?? 60, now ?? Date.now(), color)
+      : buildAxisLineOption(points, unit, palette, zoomable, color)
     // `now` cố tình không nằm trong deps: nó đổi mỗi lần render và sẽ dựng lại option liên tục.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [history, series, palette, variant, unit, rangeMinutes, width, zoomable])
+  }, [history, series, palette, variant, unit, rangeMinutes, width, zoomable, color])
 
   const hasData = series ? series.some((item) => item.points.length > 1) : history.length > 1
   if (!hasData) {

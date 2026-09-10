@@ -13,12 +13,15 @@ import { Badge } from '@/components/ui/badge'
 export function EnumBadge({
   children,
   className,
+  style,
 }: {
   children: React.ReactNode
   className?: string
+  /** Chỉ để tô màu nhóm chỉ số (`metricChipStyle`) — enum phân loại khác vẫn giữ neutral. */
+  style?: React.CSSProperties
 }) {
   return (
-    <Badge variant="secondary" className={className}>
+    <Badge variant="secondary" className={className} style={style}>
       {children}
     </Badge>
   )

@@ -214,7 +214,7 @@ export function SourcePipeline({
             <span className="font-semibold">&ldquo;{deletingJob?.name}&rdquo;</span>?
           </>
         }
-        description="Cần xóa các kênh dữ liệu của truy vấn này trước."
+        description="Cần xóa các kênh dữ liệu của truy vấn này trước. Xóa xong, toàn bộ số đo và lịch sử chạy của truy vấn này bị xóa vĩnh viễn, không khôi phục được."
         confirmLabel="Xóa truy vấn"
         destructive
         isPending={deleteJobMutation.isPending}

@@ -7,15 +7,7 @@ import type { TenantNode } from '@/types/tenantNode'
  * cây sẽ hiện sai thứ tự ngay khi tenant có quá 9 node.
  */
 export function orderNodesDepthFirst(nodes: TenantNode[]): TenantNode[] {
-  const byParent = new Map<number | null, TenantNode[]>()
-  for (const node of nodes) {
-    const list = byParent.get(node.parentId) ?? []
-    list.push(node)
-    byParent.set(node.parentId, list)
-  }
-  for (const list of byParent.values()) {
-    list.sort((a, b) => a.name.localeCompare(b.name, 'vi'))
-  }
+  const byParent = sortedChildrenByParentOf(nodes)
 
   const result: TenantNode[] = []
   function visit(parentId: number | null) {
@@ -26,6 +18,25 @@ export function orderNodesDepthFirst(nodes: TenantNode[]): TenantNode[] {
   }
   visit(null)
   return result
+}
+
+/**
+ * Con trực tiếp theo `parentId`, mỗi danh sách đã sắp theo tên — khóa `null` là các node gốc.
+ *
+ * Khác `childrenByParentOf` ở hai điểm: có sắp xếp, và giữ luôn khóa `null`. Cây render lồng nhau
+ * (trang Tổ chức) cần cả hai để đệ quy từ gốc xuống mà không phải sắp lại ở mỗi cấp.
+ */
+export function sortedChildrenByParentOf(nodes: TenantNode[]): Map<number | null, TenantNode[]> {
+  const byParent = new Map<number | null, TenantNode[]>()
+  for (const node of nodes) {
+    const list = byParent.get(node.parentId) ?? []
+    list.push(node)
+    byParent.set(node.parentId, list)
+  }
+  for (const list of byParent.values()) {
+    list.sort((a, b) => a.name.localeCompare(b.name, 'vi'))
+  }
+  return byParent
 }
 
 /** Chuỗi id từ node lên tới gốc (không gồm chính nó). */

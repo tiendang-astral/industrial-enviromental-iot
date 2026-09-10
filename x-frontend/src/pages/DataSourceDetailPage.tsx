@@ -124,7 +124,7 @@ export default function DataSourceDetailPage() {
             <span className="font-semibold">&ldquo;{source.name}&rdquo;</span>?
           </>
         }
-        description="Cần xóa các truy vấn và kênh dữ liệu của nguồn này trước."
+        description="Cần xóa các truy vấn và kênh dữ liệu của nguồn này trước. Bảng theo dõi riêng của nguồn cũng bị xóa theo."
         confirmLabel="Xóa nguồn"
         destructive
         isPending={deleteSourceMutation.isPending}

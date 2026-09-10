@@ -83,7 +83,7 @@ export const ValueWidget = memo(function ValueWidget({
     <Tooltip>
       <TooltipTrigger asChild>
         <Badge variant="destructive" className="shrink-0">
-          Ngoài phạm vi
+          Đã xoá
         </Badge>
       </TooltipTrigger>
       <TooltipContent>

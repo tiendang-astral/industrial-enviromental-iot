@@ -1,5 +1,6 @@
 package com.corp.iot.backend.externalsourcejob.service;
 
+import com.corp.iot.backend.common.influx.InfluxDeleteService;
 import com.corp.iot.backend.common.exception.BusinessException;
 import com.corp.iot.backend.datastream.entity.Datastream;
 import com.corp.iot.backend.datastream.entity.SourceType;
@@ -41,6 +42,7 @@ public class ExternalSourceJobServiceImpl implements ExternalSourceJobService {
 
     private final ExternalSourceJobRepository externalSourceJobRepository;
     private final ExternalSourceJobRunRepository externalSourceJobRunRepository;
+    private final InfluxDeleteService influxDeleteService;
     private final ExternalSourceRepository externalSourceRepository;
     private final DatastreamRepository datastreamRepository;
     private final ExternalSourceJobMapper externalSourceJobMapper;
@@ -123,6 +125,14 @@ public class ExternalSourceJobServiceImpl implements ExternalSourceJobService {
         if (datastreamRepository.existsBySourceTypeAndSourceId(SourceType.EXTERNAL_SOURCE_JOB, id)) {
             throw new BusinessException(HttpStatus.CONFLICT, "JOB_HAS_DATASTREAMS", "Job còn datastream gắn vào, không thể xóa");
         }
+        // Lịch sử chạy: FK là NO ACTION nên phải tự dọn, không thì nó sống lâu hơn cả job.
+        externalSourceJobRunRepository.deleteByExternalSourceJobId(id);
+
+        // Tới đây job không còn kênh nào (đã chặn ở trên) và id của nó sắp chết — không đường nào
+        // đọc lại dải số đo đó nữa, giữ trong bucket chỉ tốn dung lượng. Đây là mức DUY NHẤT được
+        // phép xoá point: xoá ở mức kênh sẽ phá tính chất "gán lại kênh không mất lịch sử".
+        influxDeleteService.deleteExternalJob(job.getTenantId(), id);
+
         job.setDeletedAt(Instant.now());
         externalSourceJobRepository.save(job);
     }
