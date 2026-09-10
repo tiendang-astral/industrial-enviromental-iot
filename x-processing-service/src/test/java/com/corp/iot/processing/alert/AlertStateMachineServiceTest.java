@@ -44,7 +44,7 @@ class AlertStateMachineServiceTest {
 
     private ResolvedRule rule(int durationSeconds) {
         return new ResolvedRule(7L, "Nhiệt độ cao", "CRITICAL", durationSeconds,
-                new AlertConditionGroup("OR", List.of(new AlertCondition(">", 35.0))), null);
+                new AlertConditionGroup("OR", List.of(new AlertCondition(">", 35.0))), null, null, null);
     }
 
     private AlertStateMachineService.Result apply(ResolvedRule rule, boolean violated) {

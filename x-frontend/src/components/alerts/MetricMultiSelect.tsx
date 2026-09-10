@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Input } from '@/components/ui/input'
+import { ignoreOwnLabelOutside } from '@/lib/popoverLabel'
 import { cn } from '@/lib/utils'
 import type { Metric } from '@/types/metric'
 
@@ -63,7 +64,7 @@ export function MetricMultiSelect({
             !summary && 'text-muted-foreground'
           )}
         >
-          <span className="truncate">{summary || 'Chọn chỉ số'}</span>
+          <span className="min-w-0 truncate">{summary || 'Chọn chỉ số'}</span>
           <ChevronDown className="pointer-events-none size-4 shrink-0 text-muted-foreground" />
         </Button>
       </PopoverTrigger>
@@ -73,6 +74,8 @@ export function MetricMultiSelect({
         // Khoá hẳn xuống dưới: mỗi lần tick một chỉ số là danh sách bên dưới dài thêm, ô trigger
         // tụt xuống và Radix lật popover lên trên — nội dung nhảy ngay dưới con trỏ.
         avoidCollisions={false}
+        // Nhãn phía trên trỏ vào nút này — bấm nhãn khi đang mở phải ĐÓNG, không được mở lại.
+        onInteractOutside={ignoreOwnLabelOutside(id)}
         className="flex max-h-56 w-(--radix-popover-trigger-width) flex-col overflow-hidden p-0"
       >
         {metrics.length > SEARCH_THRESHOLD && (

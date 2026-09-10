@@ -33,9 +33,10 @@ import {
 import { LoadingButton } from '@/components/patterns/LoadingButton'
 import { TenantNodePicker } from '@/components/patterns/TenantNodePicker'
 import { MetricMultiSelect } from '@/components/alerts/MetricMultiSelect'
+import { ScopeMultiSelect, type ScopeOption } from '@/components/alerts/ScopeMultiSelect'
 import { RecipientChipsField } from '@/components/alerts/RecipientChipsField'
 import { getApiErrorMessage } from '@/lib/apiError'
-import { topMostNodeIds } from '@/lib/tenantNodeTree'
+import { expandToDescendants, topMostNodeIds } from '@/lib/tenantNodeTree'
 import {
   CONDITION_PRESETS,
   DURATION_UNITS,
@@ -46,11 +47,16 @@ import {
   splitDuration,
   type ConditionPreset,
 } from '@/lib/alertPresets'
+import { useAllGatewaysQuery } from '@/queries/useGatewaysQuery'
+import { useExternalSourcesQuery } from '@/queries/useExternalSourcesQuery'
 import { useSaveAlertRuleGroupMutation } from '@/queries/useAlertRuleGroupMutations'
 import { useTenantUsersQuery } from '@/queries/useTenantUsersQuery'
-import type { AlertRuleGroup, AlertSeverity, AlertSourceType, MetricRuleInput } from '@/types/alert'
+import type { AlertRuleGroup, AlertSeverity, MetricRuleInput } from '@/types/alert'
 import type { Metric } from '@/types/metric'
 import type { TenantNode } from '@/types/tenantNode'
+
+/** Hai loại phạm vi; bỏ hẳn "mọi nguồn" của bản trước (xem `SOURCE_TYPE_OPTIONS`). */
+type ScopeType = 'GATEWAY_PIN' | 'EXTERNAL_SOURCE_JOB'
 
 /** Cấu hình một chỉ số trong lúc điền form — chuyển sang `conditions_json` khi bấm Lưu. */
 interface MetricDraft {
@@ -92,11 +98,15 @@ export function AlertRuleWizardDialog({
 }) {
   const saveMutation = useSaveAlertRuleGroupMutation()
   const { data: tenantUsers } = useTenantUsersQuery()
+  const { data: gateways } = useAllGatewaysQuery()
+  const { data: externalSources } = useExternalSourcesQuery()
 
   const [step, setStep] = useState<1 | 2>(1)
   const [name, setName] = useState('')
   const [severity, setSeverity] = useState<AlertSeverity>('WARNING')
-  const [sourceType, setSourceType] = useState<string>('ALL')
+  const [sourceType, setSourceType] = useState<ScopeType>('GATEWAY_PIN')
+  const [gatewayIds, setGatewayIds] = useState<number[]>([])
+  const [externalSourceIds, setExternalSourceIds] = useState<number[]>([])
   const [nodeIds, setNodeIds] = useState<number[]>([])
   const [metricIds, setMetricIds] = useState<number[]>([])
   const [drafts, setDrafts] = useState<Record<number, MetricDraft>>({})
@@ -120,7 +130,11 @@ export function AlertRuleWizardDialog({
     if (group) {
       setName(group.name)
       setSeverity(group.severity)
-      setSourceType(group.sourceType ?? 'ALL')
+      // Quy tắc tạo trước V24 mang sourceType null ("mọi nguồn") — form không diễn tả được nữa,
+      // rơi về Thiết bị và để trống phạm vi, người dùng buộc phải chọn lại trước khi lưu.
+      setSourceType(group.sourceType ?? 'GATEWAY_PIN')
+      setGatewayIds(group.gatewayIds ?? [])
+      setExternalSourceIds(group.externalSourceIds ?? [])
       setNodeIds(group.tenantNodeIds)
       setMetricIds(group.metricIds)
       // Mọi rule con của cùng một chỉ số có cấu hình giống nhau — lấy dòng đầu là đủ.
@@ -150,7 +164,9 @@ export function AlertRuleWizardDialog({
     } else {
       setName('')
       setSeverity('WARNING')
-      setSourceType('ALL')
+      setSourceType('GATEWAY_PIN')
+      setGatewayIds([])
+      setExternalSourceIds([])
       setNodeIds([])
       setMetricIds([])
       setDrafts({})
@@ -177,6 +193,52 @@ export function AlertRuleWizardDialog({
 
   const metricById = useMemo(() => new Map(metrics.map((metric) => [metric.id, metric])), [metrics])
 
+  /**
+   * Thiết bị / nguồn nằm trong phạm vi các đơn vị đã tick, kể cả đơn vị con — quy tắc ở node cha
+   * phủ toàn bộ subtree nên danh sách cũng phải mở theo đúng như vậy.
+   */
+  const inScopeNodeIds = useMemo(
+    () => new Set(expandToDescendants(nodeIds, nodes)),
+    [nodeIds, nodes]
+  )
+  const nodeNameById = useMemo(() => new Map(nodes.map((node) => [node.id, node.name])), [nodes])
+
+  const gatewayOptions: ScopeOption[] = useMemo(
+    () =>
+      (gateways ?? [])
+        .filter((gateway) => inScopeNodeIds.has(gateway.tenantNodeId))
+        .map((gateway) => ({
+          id: gateway.id,
+          label: gateway.name,
+          hint: nodeNameById.get(gateway.tenantNodeId),
+        })),
+    [gateways, inScopeNodeIds, nodeNameById]
+  )
+
+  const sourceOptions: ScopeOption[] = useMemo(
+    () =>
+      (externalSources ?? [])
+        .filter((source) => inScopeNodeIds.has(source.tenantNodeId))
+        .map((source) => ({
+          id: source.id,
+          label: source.name,
+          hint: nodeNameById.get(source.tenantNodeId),
+        })),
+    [externalSources, inScopeNodeIds, nodeNameById]
+  )
+
+  const scopeOptions = sourceType === 'GATEWAY_PIN' ? gatewayOptions : sourceOptions
+  const scopeValue = sourceType === 'GATEWAY_PIN' ? gatewayIds : externalSourceIds
+  const setScopeValue = sourceType === 'GATEWAY_PIN' ? setGatewayIds : setExternalSourceIds
+
+  // Bỏ tick một đơn vị là thiết bị/nguồn của nó rơi ra ngoài phạm vi — giữ lại thì quy tắc lưu
+  // xuống mang id mà chính nó không bao giờ khớp tới, chết im lặng.
+  useEffect(() => {
+    const allowed = new Set(scopeOptions.map((option) => option.id))
+    if (scopeValue.every((id) => allowed.has(id))) return
+    setScopeValue(scopeValue.filter((id) => allowed.has(id)))
+  }, [scopeOptions, scopeValue, setScopeValue])
+
   // Quy tắc đã phủ toàn bộ đơn vị con, nên node có tổ tiên cũng được chọn là thừa — backend thu
   // gọn y hệt trước khi ghi. Đếm ở đây theo con số thật sẽ tạo ra, không theo số ô đã tick.
   const effectiveNodeIds = useMemo(() => topMostNodeIds(nodeIds, nodes), [nodeIds, nodes])
@@ -196,6 +258,12 @@ export function AlertRuleWizardDialog({
     name: !name.trim() ? 'Nhập tên quy tắc' : null,
     nodes: nodeIds.length === 0 ? 'Chọn ít nhất một tổ chức' : null,
     metrics: metricIds.length === 0 ? 'Chọn ít nhất một chỉ số' : null,
+    scope:
+      scopeValue.length === 0
+        ? sourceType === 'GATEWAY_PIN'
+          ? 'Chọn ít nhất một thiết bị'
+          : 'Chọn ít nhất một nguồn dữ liệu'
+        : null,
     thresholds: metricIds.some((metricId) => {
       const draft = drafts[metricId] ?? DEFAULT_DRAFT
       if (draft.low.trim() === '' || Number.isNaN(Number(draft.low))) return true
@@ -242,7 +310,10 @@ export function AlertRuleWizardDialog({
     const payload = {
       name: name.trim(),
       severity,
-      sourceType: (sourceType === 'ALL' ? null : sourceType) as AlertSourceType,
+      sourceType,
+      // Chỉ gửi danh sách khớp loại; danh sách kia để trống vì ck_alert_rule_scope chặn ghi cả hai.
+      gatewayIds: sourceType === 'GATEWAY_PIN' ? gatewayIds : [],
+      externalSourceIds: sourceType === 'EXTERNAL_SOURCE_JOB' ? externalSourceIds : [],
       tenantNodeIds: nodeIds,
       metrics: metricInputs,
       channels,
@@ -326,27 +397,60 @@ export function AlertRuleWizardDialog({
               {submitted && step1Errors.nodes && <FieldError>{step1Errors.nodes}</FieldError>}
             </Field>
 
-            <Field>
-              <FieldLabel htmlFor="group-source">Áp cho nguồn</FieldLabel>
-              <Select value={sourceType} onValueChange={setSourceType}>
-                <SelectTrigger id="group-source">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    {SOURCE_TYPE_OPTIONS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-              <FieldDescription>
-                Một đơn vị có thể vừa có cảm biến trong chuồng vừa có dữ liệu thời tiết từ database
-                ngoài — cùng chỉ số nhưng khác bản chất. Chọn nguồn để quy tắc không bắn nhầm sang loại kia.
-              </FieldDescription>
-            </Field>
+            {/* Loại và danh sách đứng cùng một hàng: chúng là MỘT quyết định — "áp cho cái gì" —
+                tách hai hàng thì ô bên phải trông như một bộ lọc rời. */}
+            {/* minmax(0,1fr) chứ không phải 1fr: `1fr` có sàn = min-content, mà ô tóm tắt để chữ
+                nowrap nên chọn 9 thiết bị là cột phình ra ~1000px, đè ô bên trái còn 20px và tràn
+                khỏi dialog. */}
+            <div className="grid gap-4 sm:grid-cols-[minmax(0,14rem)_minmax(0,1fr)]">
+              <Field>
+                <FieldLabel htmlFor="group-source" data-required>Áp dụng cho</FieldLabel>
+                <Select value={sourceType} onValueChange={(value) => setSourceType(value as ScopeType)}>
+                  <SelectTrigger id="group-source">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      {SOURCE_TYPE_OPTIONS.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </Field>
+
+              <Field data-invalid={(submitted && !!step1Errors.scope) || undefined}>
+                <FieldLabel htmlFor="group-scope" data-required>
+                  {sourceType === 'GATEWAY_PIN' ? 'Thiết bị' : 'Nguồn dữ liệu'}
+                </FieldLabel>
+                <ScopeMultiSelect
+                  id="group-scope"
+                  options={scopeOptions}
+                  value={scopeValue}
+                  onChange={setScopeValue}
+                  invalid={submitted && !!step1Errors.scope}
+                  placeholder={
+                    nodeIds.length === 0
+                      ? 'Chọn tổ chức trước'
+                      : scopeOptions.length === 0
+                        ? sourceType === 'GATEWAY_PIN'
+                          ? 'Tổ chức đã chọn chưa có thiết bị nào'
+                          : 'Tổ chức đã chọn chưa có nguồn nào'
+                        : sourceType === 'GATEWAY_PIN'
+                          ? 'Chọn thiết bị'
+                          : 'Chọn nguồn dữ liệu'
+                  }
+                  noun={sourceType === 'GATEWAY_PIN' ? 'thiết bị' : 'nguồn dữ liệu'}
+                  searchLabel={sourceType === 'GATEWAY_PIN' ? 'Tìm thiết bị' : 'Tìm nguồn'}
+                  emptyText={
+                    sourceType === 'GATEWAY_PIN' ? 'Không có thiết bị nào khớp.' : 'Không có nguồn nào khớp.'
+                  }
+                />
+                {submitted && step1Errors.scope && <FieldError>{step1Errors.scope}</FieldError>}
+              </Field>
+            </div>
 
             <Field data-invalid={(submitted && !!step1Errors.metrics) || undefined}>
               <FieldLabel htmlFor="group-metrics" data-required>

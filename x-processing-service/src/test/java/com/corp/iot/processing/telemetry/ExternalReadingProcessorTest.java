@@ -8,6 +8,7 @@ import com.corp.iot.processing.entity.SourceType;
 import com.corp.iot.processing.influx.InfluxWriterService;
 import com.corp.iot.processing.realtime.RealtimePublisher;
 import com.corp.iot.processing.repository.DatastreamRepository;
+import com.corp.iot.processing.repository.ExternalSourceJobRepository;
 import com.corp.iot.processing.repository.MetricRepository;
 import com.influxdb.client.write.Point;
 import org.junit.jupiter.api.BeforeEach;
@@ -34,6 +35,7 @@ class ExternalReadingProcessorTest {
 
     private TelemetryDedupService dedupService;
     private DatastreamRepository datastreamRepository;
+    private ExternalSourceJobRepository externalSourceJobRepository;
     private MetricRepository metricRepository;
     private InfluxWriterService influxWriterService;
     private RealtimePublisher realtimePublisher;
@@ -48,8 +50,10 @@ class ExternalReadingProcessorTest {
         influxWriterService = mock(InfluxWriterService.class);
         realtimePublisher = mock(RealtimePublisher.class);
         alertEvaluationService = mock(AlertEvaluationService.class);
+        externalSourceJobRepository = mock(ExternalSourceJobRepository.class);
+        when(externalSourceJobRepository.findByIdIn(anyList())).thenReturn(List.of());
         processor = new ExternalReadingProcessor(dedupService, datastreamRepository, metricRepository,
-                influxWriterService, realtimePublisher, alertEvaluationService);
+                externalSourceJobRepository, influxWriterService, realtimePublisher, alertEvaluationService);
 
         Datastream datastream = new Datastream();
         datastream.setId(99L);

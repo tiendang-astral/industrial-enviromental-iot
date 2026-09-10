@@ -129,7 +129,10 @@ public class SensorReadingProcessor {
         // Tuần tự, giữ nguyên thứ tự lô.
         for (Prepared p : withChannel) {
             alertEvaluationService.evaluateWith(
-                    p.event().tenantId(), p.event().tenantNodeId(), p.pin().toChannelRef(), p.pin().metricCode(),
+                    // gatewayId lấy thẳng từ message, không phải tra gì: nó đã là khoá của chính
+                    // lượt resolve pin ở trên (và là tag `gateway_id` trong InfluxDB).
+                    p.event().tenantId(), p.event().tenantNodeId(),
+                    p.pin().toChannelRef(p.event().gatewayId()), p.pin().metricCode(),
                     p.event().value(), p.event().measuredAt(), rules.get(ruleKey(p)));
         }
     }

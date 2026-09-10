@@ -19,6 +19,9 @@ import com.corp.iot.backend.alertrulegroup.repository.AlertRuleGroupRepository;
 import com.corp.iot.backend.common.exception.BusinessException;
 import com.corp.iot.backend.common.scope.ScopeService;
 import com.corp.iot.backend.common.security.AppUserPrincipal;
+import com.corp.iot.backend.datastream.entity.SourceType;
+import com.corp.iot.backend.externalsource.repository.ExternalSourceRepository;
+import com.corp.iot.backend.gateway.repository.GatewayRepository;
 import com.corp.iot.backend.metric.entity.Metric;
 import com.corp.iot.backend.metric.repository.MetricRepository;
 import com.corp.iot.backend.tenantnode.entity.TenantNode;
@@ -35,6 +38,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -56,6 +60,8 @@ public class AlertRuleGroupServiceImpl implements AlertRuleGroupService {
     private final AlertRuleCacheEvictor alertRuleCacheEvictor;
     private final AlertConditionValidator alertConditionValidator;
     private final AlertClosingService alertClosingService;
+    private final ExternalSourceRepository externalSourceRepository;
+    private final GatewayRepository gatewayRepository;
     private final ScopeService scopeService;
 
     @Override
@@ -87,6 +93,8 @@ public class AlertRuleGroupServiceImpl implements AlertRuleGroupService {
         group.setName(request.name());
         group.setSeverity(request.severity());
         group.setSourceType(request.sourceType());
+        group.setGatewayIds(scopeIds(request, SourceType.GATEWAY_PIN));
+        group.setExternalSourceIds(scopeIds(request, SourceType.EXTERNAL_SOURCE_JOB));
         alertRuleGroupRepository.save(group);
 
         List<AlertRule> created = new ArrayList<>();
@@ -113,6 +121,8 @@ public class AlertRuleGroupServiceImpl implements AlertRuleGroupService {
         group.setName(request.name());
         group.setSeverity(request.severity());
         group.setSourceType(request.sourceType());
+        group.setGatewayIds(scopeIds(request, SourceType.GATEWAY_PIN));
+        group.setExternalSourceIds(scopeIds(request, SourceType.EXTERNAL_SOURCE_JOB));
         alertRuleGroupRepository.save(group);
 
         Map<String, AlertRule> existing = alertRuleRepository.findByGroupId(id).stream()
@@ -184,6 +194,8 @@ public class AlertRuleGroupServiceImpl implements AlertRuleGroupService {
         rule.setName(group.getName());
         rule.setSeverity(group.getSeverity());
         rule.setSourceType(group.getSourceType());
+        rule.setGatewayIds(group.getGatewayIds());
+        rule.setExternalSourceIds(group.getExternalSourceIds());
         rule.setConditions(metric.conditions());
         rule.setDurationSeconds(metric.durationSeconds());
         if (rule.getId() == null) {
@@ -194,6 +206,7 @@ public class AlertRuleGroupServiceImpl implements AlertRuleGroupService {
     }
 
     private void validate(SaveAlertRuleGroupRequest request) {
+        validateScope(request);
         Set<Long> accessible = accessibleNodeIds();
         for (Long nodeId : distinct(request.tenantNodeIds())) {
             if (!tenantNodeRepository.existsById(nodeId)) {
@@ -215,6 +228,48 @@ public class AlertRuleGroupServiceImpl implements AlertRuleGroupService {
             }
             alertConditionValidator.validate(metric.conditions());
         }
+    }
+
+    /**
+     * Phạm vi đích danh của quy tắc. Danh sách rỗng bị coi là KHÔNG hợp lệ chứ không phải "tất cả":
+     * form bắt chọn ít nhất một, còn `null` (không giới hạn) chỉ tồn tại ở quy tắc tạo trước V24.
+     */
+    private void validateScope(SaveAlertRuleGroupRequest request) {
+        List<Long> gateways = distinct(request.gatewayIds());
+        List<Long> sources = distinct(request.externalSourceIds());
+
+        // Danh sách chỉ có nghĩa với đúng loại của nó. Chặn ở đây thay vì để DB ném ck_*: lỗi check
+        // constraint không nói được cho người dùng là sai chỗ nào.
+        boolean gatewayScope = request.sourceType() == SourceType.GATEWAY_PIN;
+        if (gatewayScope ? !sources.isEmpty() : !gateways.isEmpty()) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "SCOPE_TYPE_MISMATCH",
+                    "Phạm vi đã chọn không khớp loại nguồn của quy tắc");
+        }
+        if (gatewayScope ? gateways.isEmpty() : sources.isEmpty()) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "SCOPE_REQUIRED",
+                    gatewayScope ? "Chọn ít nhất một thiết bị" : "Chọn ít nhất một nguồn dữ liệu");
+        }
+
+        // existsById đi qua @TenantId nên bản ghi của tenant khác ra false — không cần so tenant tay.
+        for (Long gatewayId : gateways) {
+            if (!gatewayRepository.existsById(gatewayId)) {
+                throw new BusinessException(HttpStatus.NOT_FOUND, "GATEWAY_NOT_FOUND", "Không tìm thấy thiết bị");
+            }
+        }
+        for (Long sourceId : sources) {
+            if (!externalSourceRepository.existsById(sourceId)) {
+                throw new BusinessException(HttpStatus.NOT_FOUND, "EXTERNAL_SOURCE_NOT_FOUND",
+                        "Không tìm thấy nguồn dữ liệu");
+            }
+        }
+    }
+
+    /** Danh sách của đúng loại đang chọn, đã bỏ trùng; loại còn lại luôn null để giữ ck_* của DB. */
+    private List<Long> scopeIds(SaveAlertRuleGroupRequest request, SourceType forType) {
+        if (request.sourceType() != forType) {
+            return null;
+        }
+        return distinct(forType == SourceType.GATEWAY_PIN ? request.gatewayIds() : request.externalSourceIds());
     }
 
     private void replaceChannels(Long ruleId, List<AlertChannelRequest> requests) {
@@ -254,6 +309,7 @@ public class AlertRuleGroupServiceImpl implements AlertRuleGroupService {
                             metric != null ? metric.getCode() : null,
                             metric != null ? metric.getUnit() : null,
                             rule.getSourceType() != null ? rule.getSourceType().name() : null,
+                            rule.getGatewayIds(), rule.getExternalSourceIds(),
                             rule.getConditions(), rule.getDurationSeconds(), rule.isEnabled());
                 })
                 .toList();
@@ -268,6 +324,7 @@ public class AlertRuleGroupServiceImpl implements AlertRuleGroupService {
                 group.getName(),
                 group.getSeverity().name(),
                 group.getSourceType() != null ? group.getSourceType().name() : null,
+                group.getGatewayIds(), group.getExternalSourceIds(),
                 rules.stream().map(AlertRule::getTenantNodeId).distinct().toList(),
                 rules.stream().map(AlertRule::getMetricId).distinct().toList(),
                 !rules.isEmpty() && rules.stream().allMatch(AlertRule::isEnabled),
@@ -306,8 +363,9 @@ public class AlertRuleGroupServiceImpl implements AlertRuleGroupService {
                 .toList();
     }
 
+    /** null-safe: `tenantNodeIds` luôn có, còn danh sách phạm vi thì vắng mặt khi không dùng tới. */
     private List<Long> distinct(List<Long> ids) {
-        return ids.stream().distinct().toList();
+        return ids == null ? List.of() : ids.stream().filter(Objects::nonNull).distinct().toList();
     }
 
     private String key(Long nodeId, Long metricId) {

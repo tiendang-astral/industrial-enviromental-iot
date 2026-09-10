@@ -22,7 +22,12 @@ public record ResolvedPin(
         return datastreamId != null;
     }
 
-    public ChannelRef toChannelRef() {
-        return new ChannelRef(datastreamId, datastreamName, metricId, SourceType.GATEWAY_PIN);
+    /**
+     * {@code gatewayId} truyền từ ngoài vào chứ không nằm trong record: bản ghi này được cache theo
+     * khoá (gateway, loại chân, số chân) nên gateway đã có sẵn ở nơi gọi, nhét thêm vào giá trị
+     * cache chỉ làm mọi bản ghi cũ hỏng mà không được gì.
+     */
+    public ChannelRef toChannelRef(Long gatewayId) {
+        return new ChannelRef(datastreamId, datastreamName, metricId, SourceType.GATEWAY_PIN, gatewayId);
     }
 }

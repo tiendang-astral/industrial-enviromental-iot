@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils'
 import { useDatastreamsLatestQueries } from '@/queries/useDatastreamTelemetryQuery'
 import { formatDateTime, formatTime } from '@/lib/datetime'
 import { isReadingLive } from '@/lib/gatewayStatus'
+import { metricColorVar } from '@/lib/metricColors'
 import { getMetricThreshold, METRIC_STATUS_VALUE_CLASS } from '@/lib/metricStatus'
 import type { Datastream, DatastreamReading, Widget as WidgetT } from '@/types/dashboard'
 import type { Metric } from '@/types/metric'
@@ -34,6 +35,28 @@ type ChannelRow = {
   threshold: ReturnType<typeof getMetricThreshold>
   /** Số vừa về qua STOMP và còn tươi. Số lấy từ API thì hiện mốc thời gian của chính điểm đó. */
   live: boolean
+}
+
+/**
+ * Màu con số: màu nhóm chỉ số (`lib/metricColors.ts`, dùng chung với ô kênh và biểu đồ) khi bình
+ * thường, màu ngưỡng khi đã cảnh báo.
+ *
+ * Ngưỡng LUÔN thắng: màu nhóm chỉ để nhận dạng "ô này đo cái gì", còn vàng/đỏ là cảnh báo — để màu
+ * nhận dạng đè lên thì một số đang vượt ngưỡng lại hiện màu bình thường.
+ *
+ * Trả về class cho ngưỡng nhưng `style` cho màu nhóm: Tailwind sinh class theo chuỗi tĩnh nên
+ * `text-chart-${n}` không tồn tại sau khi build, biến CSS là đường duy nhất truyền được màu động
+ * mà vẫn đổi theo theme.
+ */
+function valueColor(row: Pick<ChannelRow, 'threshold' | 'datastream'>): {
+  className: string
+  style?: { color: string }
+} {
+  if (row.threshold.status !== 'ok') {
+    return { className: METRIC_STATUS_VALUE_CLASS[row.threshold.status] }
+  }
+  const color = metricColorVar(row.datastream.metricCode)
+  return { className: '', style: color ? { color } : undefined }
 }
 
 // memo — DashboardPage re-render liên tục lúc kéo/resize 1 widget (track liveMaxRow),
@@ -116,8 +139,9 @@ export const ValueWidget = memo(function ValueWidget({
             className={cn(
               // Chỉ transition màu — số nhảy phải đổi tức thì, người trực ca cần thấy đúng giá trị hiện tại.
               'min-w-0 truncate text-3xl font-semibold tabular transition-colors duration-(--motion-base)',
-              threshold && METRIC_STATUS_VALUE_CLASS[threshold.status]
+              single && valueColor(single).className
             )}
+            style={single && valueColor(single).style}
           >
             {single?.value != null ? single.value : '—'}
             {unit && single?.value != null && (
@@ -218,35 +242,36 @@ function ChannelValues({
         wrap && 'flex-wrap divide-x-0'
       )}
     >
-      {rows.map(({ datastream, value, measuredAt, threshold, live }) => (
+      {rows.map((row) => (
         <div
-          key={datastream.id}
+          key={row.datastream.id}
           className={cn(
             'flex min-w-0 flex-1 flex-col items-center justify-center gap-1',
             wrap ? 'min-w-32 border-b border-border px-2 py-3' : rows.length > 2 ? 'px-1' : 'px-2'
           )}
         >
-          <p className="min-w-0 max-w-full truncate text-[11px] text-muted-foreground">{datastream.name}</p>
+          <p className="min-w-0 max-w-full truncate text-[11px] text-muted-foreground">{row.datastream.name}</p>
           <p
             className={cn(
               'min-w-0 max-w-full truncate font-semibold tabular transition-colors duration-(--motion-base)',
               valueSize,
-              METRIC_STATUS_VALUE_CLASS[threshold.status]
+              valueColor(row).className
             )}
+            style={valueColor(row).style}
           >
-            {value ?? '—'}
-            {unit && value != null && (
+            {row.value ?? '—'}
+            {unit && row.value != null && (
               <span className={cn('ml-0.5 font-normal text-muted-foreground', valueSize === 'text-2xl' ? 'text-xs' : 'text-[10px]')}>
                 {unit}
               </span>
             )}
           </p>
           {/* Vừa về qua realtime thì badge; số lấy từ API thì nói mốc của chính điểm đó. */}
-          {live ? (
+          {row.live ? (
             <LiveBadge />
           ) : (
             <span className="min-w-0 max-w-full truncate text-[10px] tabular text-muted-foreground/70">
-              {measuredAt ? formatTime(measuredAt) : '—'}
+              {row.measuredAt ? formatTime(row.measuredAt) : '—'}
             </span>
           )}
         </div>

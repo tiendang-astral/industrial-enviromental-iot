@@ -19,7 +19,11 @@ import type { ReadingPoint } from '@/types/telemetry'
 const PX_PER_POINT = { sparkline: 9, axis: 4 } as const
 const MIN_POINTS = { sparkline: 12, axis: 30 } as const
 const MAX_POINTS = 400
-/** Trước lần đo đầu tiên: đủ thưa để lần vẽ đầu không chi chít, rồi ResizeObserver chỉnh lại. */
+/**
+ * Chỉ dùng cho lượt render đầu tiên, trước khi `ResizableChart` đo được khung — lượt đó KHÔNG vẽ
+ * lên màn hình: biểu đồ chỉ được tạo sau khi có bề ngang thật, nên option đầu tiên ECharts nhận đã
+ * đúng số điểm và không phải dựng lại ngay sau mount.
+ */
 const INITIAL_WIDTH = 240
 
 /**

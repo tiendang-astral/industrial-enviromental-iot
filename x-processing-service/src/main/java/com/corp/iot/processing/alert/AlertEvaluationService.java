@@ -70,9 +70,10 @@ public class AlertEvaluationService {
         try {
             for (ResolvedRule rule : rules) {
                 // Cùng metric ở cùng node nhưng khác nguồn là hai thứ khác nhau: nhiệt độ trong
-                // chuồng (gateway) và nhiệt độ thời tiết (database ngoài). Lọc ở đây chứ không
-                // trong SQL để khỏi phải nhét source_type vào key cache.
-                if (!rule.appliesTo(channel.sourceType())) {
+                // chuồng (gateway) và nhiệt độ thời tiết (database ngoài). Từ `V24` còn lọc tiếp
+                // theo đúng thiết bị/nguồn người dùng đã chọn. Lọc ở đây chứ không trong SQL để
+                // khỏi phải nhét phạm vi vào key cache.
+                if (!rule.appliesTo(channel.sourceType(), channel.ownerId())) {
                     continue;
                 }
                 boolean violated = alertConditionEvaluator.isViolated(rule.conditions(), value);

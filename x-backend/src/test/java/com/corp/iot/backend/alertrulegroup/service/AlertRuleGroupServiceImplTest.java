@@ -21,6 +21,9 @@ import com.corp.iot.backend.common.exception.BusinessException;
 import com.corp.iot.backend.common.scope.ScopeService;
 import com.corp.iot.backend.common.security.AppUserPrincipal;
 import com.corp.iot.backend.common.security.UserType;
+import com.corp.iot.backend.datastream.entity.SourceType;
+import com.corp.iot.backend.externalsource.repository.ExternalSourceRepository;
+import com.corp.iot.backend.gateway.repository.GatewayRepository;
 import com.corp.iot.backend.metric.repository.MetricRepository;
 import com.corp.iot.backend.tenantnode.entity.TenantNode;
 import com.corp.iot.backend.tenantnode.repository.TenantNodeRepository;
@@ -51,6 +54,8 @@ class AlertRuleGroupServiceImplTest {
     private AlertChannelRepository channelRepository;
     private AlertRuleCacheEvictor cacheEvictor;
     private AlertClosingService alertClosingService;
+    private GatewayRepository gatewayRepository;
+    private ExternalSourceRepository externalSourceRepository;
     private AlertRuleGroupServiceImpl service;
 
     private final List<AlertRule> saved = new ArrayList<>();
@@ -65,10 +70,17 @@ class AlertRuleGroupServiceImplTest {
         cacheEvictor = mock(AlertRuleCacheEvictor.class);
         alertClosingService = mock(AlertClosingService.class);
         ScopeService scopeService = mock(ScopeService.class);
+        gatewayRepository = mock(GatewayRepository.class);
+        externalSourceRepository = mock(ExternalSourceRepository.class);
+        // Gateway 10, 11 và nguồn 3 tồn tại trong tenant; mọi id khác coi như không có.
+        when(gatewayRepository.existsById(10L)).thenReturn(true);
+        when(gatewayRepository.existsById(11L)).thenReturn(true);
+        when(externalSourceRepository.existsById(3L)).thenReturn(true);
 
         service = new AlertRuleGroupServiceImpl(groupRepository, ruleRepository, channelRepository,
                 metricRepository, tenantNodeRepository, new AlertRuleMapper(), cacheEvictor,
-                new AlertConditionValidator(), alertClosingService, scopeService);
+                new AlertConditionValidator(), alertClosingService, externalSourceRepository,
+                gatewayRepository, scopeService);
 
         SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
                 new AppUserPrincipal(1L, 12L, "u", UserType.TENANT, List.of()), null, List.of()));
@@ -120,7 +132,14 @@ class AlertRuleGroupServiceImplTest {
     }
 
     private SaveAlertRuleGroupRequest request(List<Long> nodeIds, List<MetricRuleInput> metrics) {
-        return new SaveAlertRuleGroupRequest("Giám sát chuồng", AlertSeverity.CRITICAL, null, nodeIds, metrics,
+        return scoped(SourceType.GATEWAY_PIN, List.of(10L), null, nodeIds, metrics);
+    }
+
+    private SaveAlertRuleGroupRequest scoped(SourceType sourceType, List<Long> gatewayIds,
+                                             List<Long> externalSourceIds, List<Long> nodeIds,
+                                             List<MetricRuleInput> metrics) {
+        return new SaveAlertRuleGroupRequest("Giám sát chuồng", AlertSeverity.CRITICAL, sourceType,
+                gatewayIds, externalSourceIds, nodeIds, metrics,
                 List.of(new AlertChannelRequest(ChannelType.EMAIL, "Trực ca", "truc@corp.vn", null)));
     }
 
@@ -159,15 +178,52 @@ class AlertRuleGroupServiceImplTest {
     }
 
     @Test
-    void sourceTypeCuaNhomChepXuongMoiRuleCon() {
-        service.create(new SaveAlertRuleGroupRequest("Chỉ cảm biến", AlertSeverity.WARNING,
-                com.corp.iot.backend.datastream.entity.SourceType.GATEWAY_PIN, List.of(4L, 8L),
-                List.of(metric(1L)),
-                List.of(new AlertChannelRequest(ChannelType.EMAIL, null, "truc@corp.vn", null))));
+    void sourceTypeVaPhamViCuaNhomChepXuongMoiRuleCon() {
+        // Engine chỉ đọc alert_rule — phạm vi không chép xuống thì rule con hiểu thành "mọi thiết bị".
+        service.create(scoped(SourceType.GATEWAY_PIN, List.of(10L, 11L, 10L), null,
+                List.of(4L, 8L), List.of(metric(1L))));
 
         assertThat(saved).hasSize(2);
-        assertThat(saved).allSatisfy(rule -> assertThat(rule.getSourceType())
-                .isEqualTo(com.corp.iot.backend.datastream.entity.SourceType.GATEWAY_PIN));
+        assertThat(saved).allSatisfy(rule -> {
+            assertThat(rule.getSourceType()).isEqualTo(SourceType.GATEWAY_PIN);
+            assertThat(rule.getGatewayIds()).containsExactly(10L, 11L);
+            assertThat(rule.getExternalSourceIds()).isNull();
+        });
+    }
+
+    @Test
+    void nguonDuLieuNgoaiChepDanhSachNguonVaBoTrongDanhSachThietBi() {
+        service.create(scoped(SourceType.EXTERNAL_SOURCE_JOB, null, List.of(3L), List.of(4L), List.of(metric(1L))));
+
+        // Loại còn lại phải NULL chứ không phải [] — ck_alert_rule_scope ở DB chặn cả hai cùng có giá trị.
+        assertThat(saved.getFirst().getExternalSourceIds()).containsExactly(3L);
+        assertThat(saved.getFirst().getGatewayIds()).isNull();
+    }
+
+    @Test
+    void phamViRongBiChan() {
+        assertThatThrownBy(() -> service.create(scoped(SourceType.GATEWAY_PIN, List.of(), null,
+                List.of(4L), List.of(metric(1L)))))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("code", "SCOPE_REQUIRED");
+    }
+
+    @Test
+    void danhSachKhongKhopLoaiNguonBiChan() {
+        // Áp cho thiết bị mà lại gửi kèm danh sách nguồn: cấu hình vô nghĩa, không được lặng lẽ bỏ qua.
+        assertThatThrownBy(() -> service.create(scoped(SourceType.GATEWAY_PIN, List.of(10L), List.of(3L),
+                List.of(4L), List.of(metric(1L)))))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("code", "SCOPE_TYPE_MISMATCH");
+    }
+
+    @Test
+    void thietBiKhongTonTaiBiChan() {
+        // existsById đi qua @TenantId nên gateway của tenant khác cũng rơi vào nhánh này.
+        assertThatThrownBy(() -> service.create(scoped(SourceType.GATEWAY_PIN, List.of(10L, 777L), null,
+                List.of(4L), List.of(metric(1L)))))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("code", "GATEWAY_NOT_FOUND");
     }
 
     @Test
@@ -194,7 +250,8 @@ class AlertRuleGroupServiceImplTest {
         when(metrics.existsById(anyLong())).thenReturn(true);
         AlertRuleGroupServiceImpl scopedService = new AlertRuleGroupServiceImpl(groupRepository, ruleRepository,
                 channelRepository, metrics, nodes, new AlertRuleMapper(), cacheEvictor,
-                new AlertConditionValidator(), alertClosingService, scoped);
+                new AlertConditionValidator(), alertClosingService, externalSourceRepository,
+                gatewayRepository, scoped);
 
         stubNode(nodes, 4L, "1.2.5.4");
         stubNode(nodes, 99L, "1.99");
@@ -216,7 +273,8 @@ class AlertRuleGroupServiceImplTest {
         when(ruleRepository.findByGroupId(1L)).thenReturn(List.of(keep, drop));
 
         // Bỏ đơn vị 8, giữ đơn vị 4 và đổi ngưỡng.
-        service.update(1L, new SaveAlertRuleGroupRequest("Giám sát chuồng", AlertSeverity.WARNING, null, List.of(4L),
+        service.update(1L, new SaveAlertRuleGroupRequest("Giám sát chuồng", AlertSeverity.WARNING,
+                SourceType.GATEWAY_PIN, List.of(10L), null, List.of(4L),
                 List.of(new MetricRuleInput(5L, new AlertConditionGroup("AND",
                         List.of(new AlertCondition(">=", 20.0), new AlertCondition("<=", 30.0))), 60)),
                 List.of(new AlertChannelRequest(ChannelType.EMAIL, null, "truc@corp.vn", null))));

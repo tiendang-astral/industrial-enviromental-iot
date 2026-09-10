@@ -94,14 +94,14 @@ class AlertRuleResolverTest {
 
         // Rơi mất field này thì rule bị hiểu thành "mọi nguồn" — mất hẳn tác dụng của V18.
         assertThat(resolved.sourceType()).isEqualTo(com.corp.iot.processing.entity.SourceType.GATEWAY_PIN);
-        assertThat(resolved.appliesTo(com.corp.iot.processing.entity.SourceType.EXTERNAL_SOURCE_JOB)).isFalse();
+        assertThat(resolved.appliesTo(com.corp.iot.processing.entity.SourceType.EXTERNAL_SOURCE_JOB, null)).isFalse();
     }
 
     @Test
     void cacheHitThiKhongChamPostgres() throws Exception {
         String cached = objectMapper.writeValueAsString(
                 List.of(new ResolvedRule(7L, "Nhiệt độ cao", "CRITICAL", 300,
-                        new AlertConditionGroup("OR", List.of(new AlertCondition(">", 35.0))), null)));
+                        new AlertConditionGroup("OR", List.of(new AlertCondition(">", 35.0))), null, null, null)));
         when(valueOps.multiGet(List.of(CACHE_KEY))).thenReturn(List.of(cached));
 
         List<ResolvedRule> resolved = resolver.resolve(TENANT_ID, SITE_ID, METRIC_ID, "temperature");

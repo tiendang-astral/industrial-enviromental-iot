@@ -56,8 +56,13 @@ class AlertEvaluationServiceTest {
     }
 
     private ResolvedRule rule(SourceType sourceType) {
+        return rule(sourceType, null, null);
+    }
+
+    private ResolvedRule rule(SourceType sourceType, List<Long> gatewayIds, List<Long> externalSourceIds) {
         return new ResolvedRule(7L, "Nhiệt độ cao", "CRITICAL", 0,
-                new AlertConditionGroup("OR", List.of(new AlertCondition(">", 32.0))), sourceType);
+                new AlertConditionGroup("OR", List.of(new AlertCondition(">", 32.0))),
+                sourceType, gatewayIds, externalSourceIds);
     }
 
     private Datastream datastream(SourceType sourceType) {
@@ -72,7 +77,7 @@ class AlertEvaluationServiceTest {
     private void evaluate(SourceType ruleSource, SourceType datastreamSource) {
         when(resolver.resolve(anyLong(), anyLong(), anyLong(), anyString()))
                 .thenReturn(List.of(rule(ruleSource)));
-        service.evaluate(TENANT_ID, NODE_ID, ChannelRef.of(datastream(datastreamSource)), "temperature", 34.7, MEASURED_AT);
+        service.evaluate(TENANT_ID, NODE_ID, ChannelRef.of(datastream(datastreamSource), null), "temperature", 34.7, MEASURED_AT);
     }
 
     @Test
@@ -108,6 +113,65 @@ class AlertEvaluationServiceTest {
         verify(stateMachine).apply(anyLong(), anyLong(), anyLong(), any(), eq(true), any(), any());
     }
 
+    // --- Phạm vi đích danh (V24): rule chỉ áp cho đúng thiết bị / nguồn người dùng đã chọn ---
+
+    private void evaluateScoped(ResolvedRule rule, SourceType datastreamSource, Long ownerId) {
+        when(resolver.resolve(anyLong(), anyLong(), anyLong(), anyString())).thenReturn(List.of(rule));
+        service.evaluate(TENANT_ID, NODE_ID, ChannelRef.of(datastream(datastreamSource), ownerId),
+                "temperature", 34.7, MEASURED_AT);
+    }
+
+    @Test
+    void ruleGioiHanThietBiThiBoQuaGatewayNgoaiDanhSach() {
+        // Ca thật: quy tắc chỉ theo dõi GW-TRAI-C4 (id 10) mà số đo đến từ GW-KHO-A2 (id 11).
+        evaluateScoped(rule(SourceType.GATEWAY_PIN, List.of(10L), null), SourceType.GATEWAY_PIN, 11L);
+
+        verify(stateMachine, never()).apply(anyLong(), anyLong(), anyLong(), any(), anyBoolean(), any(), any());
+        verify(dispatcher, never()).dispatch(any());
+    }
+
+    @Test
+    void ruleGioiHanThietBiThiVanChayVoiGatewayTrongDanhSach() {
+        evaluateScoped(rule(SourceType.GATEWAY_PIN, List.of(10L, 11L), null), SourceType.GATEWAY_PIN, 11L);
+
+        verify(stateMachine).apply(anyLong(), anyLong(), anyLong(), any(), eq(true), any(), any());
+    }
+
+    @Test
+    void ruleGioiHanNguonThiBoQuaNguonKhac() {
+        evaluateScoped(rule(SourceType.EXTERNAL_SOURCE_JOB, null, List.of(3L)),
+                SourceType.EXTERNAL_SOURCE_JOB, 7L);
+
+        verify(stateMachine, never()).apply(anyLong(), anyLong(), anyLong(), any(), anyBoolean(), any(), any());
+    }
+
+    @Test
+    void ruleGioiHanNguonThiVanChayVoiDungNguon() {
+        evaluateScoped(rule(SourceType.EXTERNAL_SOURCE_JOB, null, List.of(3L)),
+                SourceType.EXTERNAL_SOURCE_JOB, 3L);
+
+        verify(stateMachine).apply(anyLong(), anyLong(), anyLong(), any(), eq(true), any(), any());
+    }
+
+    @Test
+    void khongTraDuocChuSoHuuThiRuleCoGioiHanPhaiBoQua() {
+        // ownerId null = job vừa bị xoá nên không suy ra được nguồn. Không có cơ sở khẳng định kênh
+        // nằm trong phạm vi, mà bắn nhầm ra ngoài phạm vi còn khó lần ra hơn là thiếu.
+        evaluateScoped(rule(SourceType.EXTERNAL_SOURCE_JOB, null, List.of(3L)),
+                SourceType.EXTERNAL_SOURCE_JOB, null);
+
+        verify(stateMachine, never()).apply(anyLong(), anyLong(), anyLong(), any(), anyBoolean(), any(), any());
+    }
+
+    @Test
+    void ruleCuKhongCoPhamViThiVanApChoMoiThietBi() {
+        // Quy tắc tạo trước V24: hai cột phạm vi là NULL. Đổi nghĩa chúng thành "không khớp ai" là
+        // làm câm lặng toàn bộ cảnh báo đang chạy ngoài production.
+        evaluateScoped(rule(SourceType.GATEWAY_PIN, null, null), SourceType.GATEWAY_PIN, 11L);
+
+        verify(stateMachine).apply(anyLong(), anyLong(), anyLong(), any(), eq(true), any(), any());
+    }
+
     @Test
     void loiKhiDanhGiaKhongDuocLamHongLuongGhiTelemetry() {
         when(resolver.resolve(anyLong(), anyLong(), anyLong(), anyString()))
@@ -115,6 +179,6 @@ class AlertEvaluationServiceTest {
 
         // Không ném ra ngoài: bước này chạy SAU khi số đo đã ghi InfluxDB, ném lên sẽ làm
         // Kafka listener log lỗi cho một message vốn đã xử lý xong phần quan trọng.
-        service.evaluate(TENANT_ID, NODE_ID, ChannelRef.of(datastream(SourceType.GATEWAY_PIN)), "temperature", 34.7, MEASURED_AT);
+        service.evaluate(TENANT_ID, NODE_ID, ChannelRef.of(datastream(SourceType.GATEWAY_PIN), null), "temperature", 34.7, MEASURED_AT);
     }
 }

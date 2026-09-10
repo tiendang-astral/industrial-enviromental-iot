@@ -7,11 +7,14 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.SQLRestriction;
 import org.hibernate.annotations.TenantId;
 import org.hibernate.annotations.UpdateTimestamp;
+import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
+import java.util.List;
 
 /**
  * Ý định của người dùng: "theo dõi các chỉ số này ở các đơn vị này". Engine lại cần mỗi
@@ -45,6 +48,18 @@ public class AlertRuleGroup {
     @Enumerated(EnumType.STRING)
     @Column(name = "source_type")
     private SourceType sourceType;
+
+    /**
+     * Phạm vi đích danh; NULL = không giới hạn. Mỗi danh sách chỉ có nghĩa với đúng loại của nó,
+     * {@code ck_alert_rule_group_scope} chặn phần còn lại.
+     */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "gateway_ids", columnDefinition = "jsonb")
+    private List<Long> gatewayIds;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "external_source_ids", columnDefinition = "jsonb")
+    private List<Long> externalSourceIds;
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)

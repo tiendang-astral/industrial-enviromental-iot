@@ -1,4 +1,4 @@
-import type { AlertConditionGroup } from '@/types/alert'
+import type { AlertConditionGroup, AlertSourceType } from '@/types/alert'
 
 export type ConditionPreset = 'GT' | 'LT' | 'OUTSIDE' | 'INSIDE'
 
@@ -71,13 +71,17 @@ export function splitDuration(seconds: number): { amount: number; unit: number }
   return { amount: seconds, unit: 1 }
 }
 
-/** Nhãn cho `alert_rule.source_type` — null = không giới hạn. */
-export const SOURCE_TYPE_OPTIONS: { value: string; label: string }[] = [
-  { value: 'ALL', label: 'Mọi nguồn' },
-  { value: 'GATEWAY_PIN', label: 'Cảm biến gateway' },
-  { value: 'EXTERNAL_SOURCE_JOB', label: 'Database ngoài' },
+/**
+ * Hai loại phạm vi của quy tắc. Không còn lựa chọn "mọi nguồn": từ `V24` người dùng phải chọn loại,
+ * rồi chọn tiếp đích danh thiết bị / nguồn nào.
+ */
+export const SOURCE_TYPE_OPTIONS: { value: Exclude<AlertSourceType, null>; label: string }[] = [
+  { value: 'GATEWAY_PIN', label: 'Thiết bị' },
+  { value: 'EXTERNAL_SOURCE_JOB', label: 'Nguồn dữ liệu ngoài' },
 ]
 
-export function sourceTypeLabel(sourceType: string | null) {
-  return SOURCE_TYPE_OPTIONS.find((option) => option.value === (sourceType ?? 'ALL'))?.label ?? 'Mọi nguồn'
+/** `null` = quy tắc tạo trước `V24`, khi đó chưa phải chọn loại nào. */
+export function sourceTypeLabel(sourceType: AlertSourceType) {
+  if (sourceType === null) return 'Mọi nguồn'
+  return SOURCE_TYPE_OPTIONS.find((option) => option.value === sourceType)?.label ?? 'Mọi nguồn'
 }

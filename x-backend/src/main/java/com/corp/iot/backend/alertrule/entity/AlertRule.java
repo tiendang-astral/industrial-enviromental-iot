@@ -14,6 +14,7 @@ import org.hibernate.annotations.UpdateTimestamp;
 import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
+import java.util.List;
 
 /**
  * Rule cảnh báo theo metric tại một node. Rule ở node cha phủ toàn bộ subtree bên dưới —
@@ -52,6 +53,15 @@ public class AlertRule {
     @Enumerated(EnumType.STRING)
     @Column(name = "source_type")
     private SourceType sourceType;
+
+    /** Chép từ nhóm. NULL = không giới hạn — engine đọc thẳng cột này, không biết nhóm tồn tại. */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "gateway_ids", columnDefinition = "jsonb")
+    private List<Long> gatewayIds;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "external_source_ids", columnDefinition = "jsonb")
+    private List<Long> externalSourceIds;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)

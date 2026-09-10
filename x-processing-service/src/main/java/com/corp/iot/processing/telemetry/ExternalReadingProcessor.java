@@ -4,11 +4,13 @@ import com.corp.iot.processing.alert.AlertEvaluationService;
 import com.corp.iot.processing.alert.ChannelRef;
 import com.corp.iot.processing.dto.ExternalReadingEvent;
 import com.corp.iot.processing.entity.Datastream;
+import com.corp.iot.processing.entity.ExternalSourceJob;
 import com.corp.iot.processing.entity.Metric;
 import com.corp.iot.processing.entity.SourceType;
 import com.corp.iot.processing.influx.InfluxWriterService;
 import com.corp.iot.processing.realtime.RealtimePublisher;
 import com.corp.iot.processing.repository.DatastreamRepository;
+import com.corp.iot.processing.repository.ExternalSourceJobRepository;
 import com.corp.iot.processing.repository.MetricRepository;
 import com.corp.iot.processing.telemetry.TelemetryDedupService.DedupKey;
 import com.influxdb.client.write.Point;
@@ -18,8 +20,11 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Xử lý một LÔ external reading. Song song {@link SensorReadingProcessor} nhưng resolve theo
@@ -37,6 +42,7 @@ public class ExternalReadingProcessor {
     private final TelemetryDedupService telemetryDedupService;
     private final DatastreamRepository datastreamRepository;
     private final MetricRepository metricRepository;
+    private final ExternalSourceJobRepository externalSourceJobRepository;
     private final InfluxWriterService influxWriterService;
     private final RealtimePublisher realtimePublisher;
     private final AlertEvaluationService alertEvaluationService;
@@ -80,6 +86,10 @@ public class ExternalReadingProcessor {
 
         influxWriterService.writePoints(points);
 
+        // Số đo chỉ mang id TRUY VẤN; quy tắc cảnh báo lại cho chọn theo NGUỒN. Tra một lượt cho cả
+        // lô rồi dùng chung — một lô thường chỉ đến từ vài job.
+        Map<Long, Long> sourceIdByJobId = resolveSourceIds(prepared);
+
         realtimePublisher.publishExternalReadings(prepared.stream()
                 .map(p -> new RealtimePublisher.ExternalReading(
                         p.event().tenantId(), p.event().tenantNodeId(), p.datastream().getId(),
@@ -92,8 +102,9 @@ public class ExternalReadingProcessor {
             // cảnh báo cho sự cố đã qua từ lâu.
             if (!event.backfill()) {
                 alertEvaluationService.evaluate(
-                        event.tenantId(), event.tenantNodeId(), ChannelRef.of(p.datastream()), p.metricCode(),
-                        event.value(), event.measuredAt());
+                        event.tenantId(), event.tenantNodeId(),
+                        ChannelRef.of(p.datastream(), sourceIdByJobId.get(event.externalSourceJobId())),
+                        p.metricCode(), event.value(), event.measuredAt());
             }
         }
 
@@ -101,6 +112,24 @@ public class ExternalReadingProcessor {
                 .filter(p -> !p.event().backfill())
                 .map(p -> new DedupKey(p.event().tenantId(), p.event().messageId()))
                 .toList());
+    }
+
+    /**
+     * Nguồn của từng truy vấn trong lô. Job không tra được (vừa bị xoá) thì vắng mặt trong map và
+     * {@code ChannelRef.ownerId} thành null — quy tắc có giới hạn phạm vi sẽ bỏ qua kênh đó, còn
+     * quy tắc không giới hạn vẫn chạy bình thường.
+     */
+    private Map<Long, Long> resolveSourceIds(List<Prepared> prepared) {
+        List<Long> jobIds = prepared.stream()
+                .map(p -> p.event().externalSourceJobId())
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        if (jobIds.isEmpty()) {
+            return Map.of();
+        }
+        return externalSourceJobRepository.findByIdIn(jobIds).stream()
+                .collect(Collectors.toMap(ExternalSourceJob::getId, ExternalSourceJob::getExternalSourceId));
     }
 
     private String resolveMetricCode(Long metricId) {

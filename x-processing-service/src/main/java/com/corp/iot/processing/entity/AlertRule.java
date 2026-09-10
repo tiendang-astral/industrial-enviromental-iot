@@ -13,6 +13,8 @@ import lombok.Setter;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
+import java.util.List;
+
 
 // Entity riêng của Processing Service — chỉ đọc, x-backend là nơi ghi cấu hình rule.
 @Entity
@@ -41,6 +43,15 @@ public class AlertRule {
     @Enumerated(EnumType.STRING)
     @Column(name = "source_type")
     private SourceType sourceType;
+
+    /** Phạm vi đích danh (`V24`); NULL = không giới hạn, tức quy tắc tạo trước bản đó. */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "gateway_ids", columnDefinition = "jsonb")
+    private List<Long> gatewayIds;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "external_source_ids", columnDefinition = "jsonb")
+    private List<Long> externalSourceIds;
 
     @Column(nullable = false)
     private String severity;

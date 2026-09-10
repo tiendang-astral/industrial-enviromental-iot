@@ -6,7 +6,10 @@ export type AlertStatus = 'PENDING' | 'ACTIVE' | 'RECOVERED' | 'STALE'
 
 export type ChannelType = 'EMAIL' | 'TELEGRAM'
 
-/** null = quy tắc áp cho mọi loại nguồn. */
+/**
+ * Loại nguồn quy tắc áp vào. `null` chỉ còn ở quy tắc tạo TRƯỚC `V24` ("mọi loại nguồn") — form
+ * nay bắt buộc chọn một loại, backend nhận `@NotNull`.
+ */
 export type AlertSourceType = 'GATEWAY_PIN' | 'EXTERNAL_SOURCE_JOB' | null
 
 export interface AlertCondition {
@@ -93,7 +96,10 @@ export interface MetricRuleInput {
 export interface SaveAlertRuleGroupRequest {
   name: string
   severity: AlertSeverity
-  sourceType: AlertSourceType
+  sourceType: Exclude<AlertSourceType, null>
+  /** Phạm vi đích danh — gửi đúng danh sách khớp `sourceType`, danh sách kia bỏ trống. */
+  gatewayIds?: number[]
+  externalSourceIds?: number[]
   tenantNodeIds: number[]
   metrics: MetricRuleInput[]
   channels: AlertChannelInput[]
@@ -106,6 +112,8 @@ export interface GroupRule {
   metricCode: string | null
   metricUnit: string | null
   sourceType: AlertSourceType
+  gatewayIds: number[] | null
+  externalSourceIds: number[] | null
   conditions: AlertConditionGroup
   durationSeconds: number
   enabled: boolean
@@ -116,6 +124,9 @@ export interface AlertRuleGroup {
   name: string
   severity: AlertSeverity
   sourceType: AlertSourceType
+  /** null = quy tắc cũ, không giới hạn thiết bị/nguồn nào. */
+  gatewayIds: number[] | null
+  externalSourceIds: number[] | null
   tenantNodeIds: number[]
   metricIds: number[]
   enabled: boolean

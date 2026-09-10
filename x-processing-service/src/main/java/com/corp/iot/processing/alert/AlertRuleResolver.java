@@ -121,22 +121,34 @@ public class AlertRuleResolver {
     }
 
     /**
-     * {@code sourceType} null = rule áp cho mọi loại nguồn. Bản ghi cache ghi trước `V18` không có
-     * field này, Jackson map thành null — đúng ngữ nghĩa lúc nó được ghi, nên không cần xoá cache.
+     * {@code sourceType} null = rule áp cho mọi loại nguồn; {@code scope} null = mọi thiết bị/nguồn
+     * của loại đó. Bản ghi cache ghi trước `V18`/`V24` thiếu các field này, Jackson map thành null —
+     * đúng ngữ nghĩa lúc nó được ghi, nên không cần xoá cache khi deploy.
      */
     public record ResolvedRule(
             Long id, String name, String severity, int durationSeconds, AlertConditionGroup conditions,
-            SourceType sourceType) {
+            SourceType sourceType, List<Long> gatewayIds, List<Long> externalSourceIds) {
 
         static ResolvedRule from(AlertRule rule) {
             return new ResolvedRule(
                     rule.getId(), rule.getName(), rule.getSeverity(), rule.getDurationSeconds(),
-                    rule.getConditions(), rule.getSourceType());
+                    rule.getConditions(), rule.getSourceType(), rule.getGatewayIds(), rule.getExternalSourceIds());
         }
 
-        /** Rule không giới hạn nguồn thì nhận mọi kênh; có giới hạn thì phải khớp đúng loại. */
-        public boolean appliesTo(SourceType datastreamSourceType) {
-            return sourceType == null || sourceType == datastreamSourceType;
+        /**
+         * Hai tầng lọc, theo đúng thứ tự người dùng khai trên form: đúng LOẠI nguồn trước, rồi mới
+         * tới đúng thiết bị/nguồn cụ thể.
+         *
+         * {@code ownerId} null mà rule có giới hạn phạm vi thì LOẠI kênh đó ra: không xác định được
+         * kênh thuộc thiết bị/nguồn nào thì không có cơ sở khẳng định nó nằm trong phạm vi, mà bắn
+         * nhầm một cảnh báo ra ngoài phạm vi còn khó lần ra hơn là thiếu.
+         */
+        public boolean appliesTo(SourceType datastreamSourceType, Long ownerId) {
+            if (sourceType != null && sourceType != datastreamSourceType) {
+                return false;
+            }
+            List<Long> scope = datastreamSourceType == SourceType.GATEWAY_PIN ? gatewayIds : externalSourceIds;
+            return scope == null || scope.isEmpty() || (ownerId != null && scope.contains(ownerId));
         }
     }
 }

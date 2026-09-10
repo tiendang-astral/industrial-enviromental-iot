@@ -30,8 +30,10 @@ public final class AlertRuleGroupDtos {
     public record SaveAlertRuleGroupRequest(
             @NotBlank String name,
             @NotNull AlertSeverity severity,
-            /** null = áp cho mọi loại nguồn. */
-            SourceType sourceType,
+            @NotNull SourceType sourceType,
+            /** Phạm vi đích danh; chỉ nhận danh sách khớp `sourceType`, null = không giới hạn. */
+            List<Long> gatewayIds,
+            List<Long> externalSourceIds,
             @NotEmpty List<Long> tenantNodeIds,
             @NotEmpty @Valid List<MetricRuleInput> metrics,
             @NotEmpty @Valid List<AlertChannelRequest> channels
@@ -46,6 +48,8 @@ public final class AlertRuleGroupDtos {
             String metricCode,
             String metricUnit,
             String sourceType,
+            List<Long> gatewayIds,
+            List<Long> externalSourceIds,
             AlertConditionGroup conditions,
             int durationSeconds,
             boolean enabled
@@ -57,6 +61,8 @@ public final class AlertRuleGroupDtos {
             String name,
             String severity,
             String sourceType,
+            List<Long> gatewayIds,
+            List<Long> externalSourceIds,
             List<Long> tenantNodeIds,
             List<Long> metricIds,
             /** Tất cả rule con đang bật; nhóm tắt khi mọi rule con đều tắt. */

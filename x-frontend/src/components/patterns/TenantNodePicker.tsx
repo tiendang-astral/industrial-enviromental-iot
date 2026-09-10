@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { ignoreOwnLabelOutside } from '@/lib/popoverLabel'
 import {
   ancestorIdsOf,
   childrenByParentOf,
@@ -131,6 +132,8 @@ export function TenantNodePicker(props: TenantNodePickerProps) {
           sâu trong cây (đã thụt lề) bị cắt mất, mà đó lại là thứ để phân biệt các node trùng tên. */}
       <PopoverContent
         align="start"
+        // Nhãn phía trên trỏ vào nút này — bấm nhãn khi đang mở phải ĐÓNG, không được mở lại.
+        onInteractOutside={ignoreOwnLabelOutside(id)}
         className="w-auto min-w-(--radix-popover-trigger-width) max-w-[min(92vw,32rem)] p-1"
       >
         <div className="max-h-64 overflow-y-auto">

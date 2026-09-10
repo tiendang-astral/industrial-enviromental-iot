@@ -36,6 +36,12 @@ export function AlertRuleGroupsTable({
   onToggle: (group: AlertRuleGroup) => void
   onDelete: (group: AlertRuleGroup) => void
 }) {
+  /** null = quy tắc cũ, không giới hạn thiết bị/nguồn nào — khác hẳn "giới hạn về 0 cái". */
+  const scopeCount = (group: AlertRuleGroup) => {
+    const ids = group.sourceType === 'GATEWAY_PIN' ? group.gatewayIds : group.externalSourceIds
+    return ids?.length ?? null
+  }
+
   const nodeName = (id: number) => nodes.find((node) => node.id === id)?.name ?? `#${id}`
   const metricName = (id: number) => metrics.find((metric) => metric.id === id)?.name ?? `#${id}`
 
@@ -47,8 +53,11 @@ export function AlertRuleGroupsTable({
       cell: (group) => (
         <div className="flex flex-col gap-0.5">
           <span className="font-medium">{group.name}</span>
+          {/* Nêu luôn phạm vi đã thu hẹp tới đâu: "Thiết bị" một mình không nói được quy tắc đang
+              theo dõi 2 gateway hay cả 9. */}
           <span className="text-[12.5px] text-muted-foreground">
             {group.ruleCount} theo dõi · {sourceTypeLabel(group.sourceType)}
+            {scopeCount(group) !== null && ` (${scopeCount(group)})`}
           </span>
         </div>
       ),
