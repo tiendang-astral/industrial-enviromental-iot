@@ -3,6 +3,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { Controller, useForm } from 'react-hook-form'
 import { toast } from 'sonner'
 import { AlertTriangle, ChevronLeft, ChevronRight, PlugZap } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -11,7 +12,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
+import {
+  Field,
+  FieldDescription,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+} from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import {
   Select,
@@ -26,14 +33,19 @@ import { LoadingButton } from '@/components/patterns/LoadingButton'
 import { StepBar } from '@/components/datasources/StepBar'
 import { getApiErrorMessage } from '@/lib/apiError'
 import {
+  connectionTypeLabel,
+  ENCRYPTION_OFF,
+  ENCRYPTION_ON,
+  ENCRYPTION_OPTIONS,
+  isEncryptionOn,
+} from '@/lib/connectionTypes'
+import {
   updateExternalSourceSchema,
   type UpdateExternalSourceFormValues,
 } from '@/lib/externalSourceSchema'
 import { useTestSavedConnectionMutation } from '@/queries/useTestSavedConnectionMutation'
 import { useUpdateExternalSourceMutation } from '@/queries/useUpdateExternalSourceMutation'
 import type { ExternalSource } from '@/types/externalSource'
-
-const SSL_MODES = ['disable', 'require', 'prefer']
 
 const CONNECTION_FIELDS = ['host', 'port', 'database', 'password'] as const
 
@@ -186,7 +198,13 @@ export function EditSourceDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Sửa nguồn dữ liệu</DialogTitle>
+          {/* Loại database không đổi được sau khi tạo: câu SQL của các truy vấn viết theo đúng loại đó. */}
+          <DialogTitle className="flex items-center gap-2">
+            Sửa nguồn dữ liệu
+            <Badge variant="secondary" className="font-mono text-[11px] font-normal">
+              {connectionTypeLabel(source.connectionType)}
+            </Badge>
+          </DialogTitle>
         </DialogHeader>
 
         <StepBar steps={STEPS} step={step} />
@@ -247,28 +265,31 @@ export function EditSourceDialog({
                   <FieldError errors={[errors.database]} />
                 </Field>
                 <Field>
-                  <FieldLabel htmlFor="edit-source-ssl">SSL mode</FieldLabel>
+                  <FieldLabel htmlFor="edit-source-encryption">Mã hoá kết nối</FieldLabel>
                   <Controller
                     control={control}
                     name="sslMode"
                     render={({ field }) => (
-                      <Select value={field.value || 'disable'} onValueChange={field.onChange}>
-                        <SelectTrigger id="edit-source-ssl" className="w-full">
+                      // Chọn lại đúng mục đang hiện không phát sự kiện, nên nguồn cũ lưu `prefer` giữ nguyên nếu không đổi.
+                      <Select
+                        value={isEncryptionOn(field.value) ? ENCRYPTION_ON : ENCRYPTION_OFF}
+                        onValueChange={field.onChange}
+                      >
+                        <SelectTrigger id="edit-source-encryption" className="w-full">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
                           <SelectGroup>
-                            {SSL_MODES.map((mode) => (
-                              <SelectItem key={mode} value={mode}>
-                                {mode}
+                            {ENCRYPTION_OPTIONS.map((option) => (
+                              <SelectItem key={option.value} value={option.value}>
+                                {option.label}
                               </SelectItem>
                             ))}
                           </SelectGroup>
                         </SelectContent>
                       </Select>
                     )}
-                  />
-                </Field>
+                  />                </Field>
               </div>
 
               <div className="grid gap-5 sm:grid-cols-2">
@@ -291,7 +312,6 @@ export function EditSourceDialog({
                   Bỏ trống để giữ nguyên tài khoản đang dùng.
                 </FieldDescription>
               </div>
-
               {pointsElsewhere && jobCount > 0 && (
                 <p className="flex items-start gap-2 text-sm text-warning">
                   <AlertTriangle className="mt-0.5 size-4 shrink-0" />

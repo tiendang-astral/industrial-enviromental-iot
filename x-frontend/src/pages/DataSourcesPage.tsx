@@ -9,15 +9,12 @@ import { EnumBadge } from '@/components/patterns/EnumBadge'
 import { PageHeader } from '@/components/patterns/PageHeader'
 import { StatusBadge } from '@/components/patterns/StatusBadge'
 import { ExternalSourceFormDialog } from '@/components/datasources/ExternalSourceFormDialog'
+import { CONNECTION_TYPE_OPTIONS, CONNECTION_TYPES, connectionTypeLabel } from '@/lib/connectionTypes'
 import { formatDateTime } from '@/lib/datetime'
 import { connectionString } from '@/lib/externalSource'
 import { useExternalSourcesQuery } from '@/queries/useExternalSourcesQuery'
 import { useTenantNodesQuery } from '@/queries/useTenantNodesQuery'
 import type { ExternalSource } from '@/types/externalSource'
-
-const CONNECTION_TYPE_LABEL: Record<string, string> = {
-  POSTGRESQL: 'PostgreSQL',
-}
 
 /** `null` = chưa chạy lần nào — khác hẳn "đã chạy và đang chờ", nên không gộp vào PENDING. */
 function syncStatusOf(source: ExternalSource) {
@@ -58,11 +55,9 @@ export default function DataSourcesPage() {
         type: 'select',
         placeholder: 'Loại',
         getValue: (row) => row.connectionType,
-        options: Object.entries(CONNECTION_TYPE_LABEL).map(([value, label]) => ({ value, label })),
+        options: CONNECTION_TYPE_OPTIONS.map((value) => ({ value, label: CONNECTION_TYPES[value].label })),
       },
-      cell: (row) => (
-        <EnumBadge>{CONNECTION_TYPE_LABEL[row.connectionType] ?? row.connectionType}</EnumBadge>
-      ),
+      cell: (row) => <EnumBadge>{connectionTypeLabel(row.connectionType)}</EnumBadge>,
     },
     {
       key: 'node',
@@ -141,7 +136,7 @@ export default function DataSourcesPage() {
           <EmptyState
             icon={Database}
             title="Chưa có nguồn dữ liệu nào"
-            description="Kết nối một PostgreSQL ngoài để lấy dữ liệu về cùng chỗ với dữ liệu cảm biến."
+            description="Kết nối một PostgreSQL hoặc SQL Server ngoài để lấy dữ liệu về cùng chỗ với dữ liệu cảm biến."
           />
         }
       />

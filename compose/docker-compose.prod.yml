@@ -93,12 +93,16 @@ services:
     restart: unless-stopped
     environment:
       EMQX_DASHBOARD__DEFAULT_PASSWORD: ${EMQX_DASHBOARD_PASSWORD}
+      # Vi phạm quyền topic thì ngắt kết nối — mặc định EMQX lặng lẽ bỏ message, gateway điền sai
+      # Client ID sẽ tưởng vẫn gửi được.
+      EMQX_AUTHORIZATION__DENY_ACTION: disconnect
     ports:
       - "${MQTT_PORT}:1883"
       - "${EMQX_DASHBOARD_PORT}:18083"
     volumes:
       - emqx_data:/opt/emqx/data
       - emqx_log:/opt/emqx/log
+      - ../docker/emqx/acl.conf:/opt/emqx/etc/acl.conf:ro
     healthcheck:
       test: ["CMD", "/opt/emqx/bin/emqx", "ctl", "status"]
       interval: 10s
@@ -153,46 +157,23 @@ services:
         create gateway-commands  ${KAFKA_COMMAND_PARTITIONS}
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --list
 
-  # Bật xác thực MQTT và tạo user cho 2 service.
-  #
-  # EMQX 5 KHÔNG có biến EMQX_ALLOW_ANONYMOUS (đó là cú pháp 4.x, đặt vào không có tác dụng gì —
-  # đã kiểm chứng: client vẫn vào được với username=undefined). Bản 5 chặn ẩn danh bằng cách khai
-  # một authenticator; hễ có authenticator thì kết nối không có credential hợp lệ bị từ chối.
-  # Không có bước này thì bất kỳ ai chạm được cổng MQTT đều publish được dữ liệu giả và nghe trộm
-  # topic lệnh điều khiển thiết bị.
+  # Bật xác thực MQTT, tạo tài khoản service + iiot-gateway (docker/emqx/init.sh — dùng chung với DEV).
+  # Không có bước này thì ai chạm được cổng MQTT cũng publish được dữ liệu giả và nghe trộm lệnh relay.
+  # Lỗi thật thì thoát khác 0, ingestion/processing không khởi động trên một broker còn mở ẩn danh.
   emqx-init:
     image: curlimages/curl:8.10.1
     depends_on:
       emqx:
         condition: service_healthy
     restart: "no"
-    entrypoint: ["/bin/sh", "-c"]
+    entrypoint: ["/bin/sh", "/init.sh"]
     environment:
       EMQX_DASHBOARD_PASSWORD: ${EMQX_DASHBOARD_PASSWORD}
       MQTT_SERVICE_USERNAME: ${MQTT_SERVICE_USERNAME}
       MQTT_SERVICE_PASSWORD: ${MQTT_SERVICE_PASSWORD}
-    command:
-      - |
-        set -e
-        API=http://emqx:18083/api/v5
-        TOKEN=$$(curl -sf -X POST $$API/login -H 'Content-Type: application/json' \
-          -d "{\"username\":\"admin\",\"password\":\"$$EMQX_DASHBOARD_PASSWORD\"}" \
-          | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
-        [ -n "$$TOKEN" ] || { echo "Không đăng nhập được EMQX API"; exit 1; }
-
-        # Cả 2 lệnh dưới đây idempotent: chạy lại trên hệ thống đã cấu hình thì EMQX trả 409/400,
-        # bỏ qua là đúng.
-        curl -s -X POST $$API/authentication -H "Authorization: Bearer $$TOKEN" \
-          -H 'Content-Type: application/json' \
-          -d '{"mechanism":"password_based","backend":"built_in_database","user_id_type":"username"}' \
-          -o /dev/null -w 'authenticator: %{http_code}\n' || true
-
-        curl -s -X POST "$$API/authentication/password_based%3Abuilt_in_database/users" \
-          -H "Authorization: Bearer $$TOKEN" -H 'Content-Type: application/json' \
-          -d "{\"user_id\":\"$$MQTT_SERVICE_USERNAME\",\"password\":\"$$MQTT_SERVICE_PASSWORD\"}" \
-          -o /dev/null -w 'service user: %{http_code}\n' || true
-
-        echo "EMQX: đã bật xác thực. Gateway thật cần tài khoản RIÊNG + ACL, tạo trong Dashboard."
+      MQTT_GATEWAY_PASSWORD: ${MQTT_GATEWAY_PASSWORD}
+    volumes:
+      - ../docker/emqx/init.sh:/init.sh:ro
 
   # ---------------------------------------------------------------- backend
 
@@ -209,6 +190,9 @@ services:
       # trong .env.production. Để mặc định thì production KHÔNG có tài khoản test.
       SPRING_FLYWAY_LOCATIONS: ${FLYWAY_LOCATIONS}
       APP_CORS_ALLOWED_ORIGINS: ${APP_CORS_ALLOWED_ORIGINS}
+      # Hiện ở nút "Thông tin kết nối" của trang chi tiết thiết bị để người dùng điền lên gateway.
+      APP_MQTT_PUBLIC_URL: ${APP_MQTT_PUBLIC_URL}
+      MQTT_GATEWAY_PASSWORD: ${MQTT_GATEWAY_PASSWORD}
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }

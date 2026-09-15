@@ -1,6 +1,8 @@
 package com.corp.iot.backend.externaldb.service;
 
 import com.corp.iot.backend.common.exception.BusinessException;
+import com.corp.iot.backend.externaldb.dialect.ExternalDbDialect;
+import com.corp.iot.backend.externaldb.dialect.ExternalDbDialects;
 import com.corp.iot.backend.externaldb.dto.ExternalDbDtos.BackfillEstimateResponse;
 import com.corp.iot.backend.externaldb.dto.ExternalDbDtos.PreviewColumn;
 import com.corp.iot.backend.externaldb.dto.ExternalDbDtos.PreviewResponse;
@@ -17,7 +19,6 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
 import java.sql.Connection;
-import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
@@ -26,7 +27,6 @@ import java.sql.Statement;
 import java.sql.Timestamp;
 import java.sql.Types;
 import java.time.Instant;
-import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -36,8 +36,8 @@ import java.util.Map;
 // trúc bảng, chạy thử truy vấn. x-ingestion-service có lớp tương đương cho luồng chạy nền —
 // chấp nhận trùng, mỗi service độc lập hoàn toàn (CONVENTIONS.md § Backend).
 //
-// Mọi kết nối đều đặt READ ONLY: driver Postgres gửi default_transaction_read_only nên chính
-// máy chủ bên kia từ chối mọi lệnh ghi, không phụ thuộc việc rà chuỗi SQL.
+// File này không chứa cú pháp riêng của loại database nào: chuỗi kết nối, cách khoá chỉ-đọc, SQL
+// đọc cấu trúc bảng và mã lỗi đều nằm trong ExternalDbDialect.
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -46,6 +46,7 @@ public class ExternalDbGateway {
     private static final Instant PREVIEW_CURSOR = Instant.EPOCH;
 
     private final SqlQueryValidator sqlQueryValidator;
+    private final ExternalDbDialects dialects;
 
     @Value("${app.external.query-timeout-seconds}")
     private int queryTimeoutSeconds;
@@ -56,38 +57,29 @@ public class ExternalDbGateway {
     @Value("${app.external.sample-max-rows}")
     private int sampleMaxRows;
 
-    public TestConnectionResponse test(ExternalSourceConnectionConfig config, ExternalSourceCredential credential) {
+    public TestConnectionResponse test(String connectionType, ExternalSourceConnectionConfig config,
+                                       ExternalSourceCredential credential) {
+        ExternalDbDialect dialect = dialects.of(connectionType);
         long start = System.nanoTime();
-        try (Connection connection = open(config, credential)) {
+        try (Connection connection = dialect.open(config, credential)) {
             int latencyMs = (int) ((System.nanoTime() - start) / 1_000_000);
             String version = connection.getMetaData().getDatabaseProductVersion();
-            return new TestConnectionResponse(true, version, latencyMs, countTables(connection),
-                    hasWriteAccess(connection), null, null);
+            return new TestConnectionResponse(true, version, latencyMs, countTables(dialect, connection),
+                    hasWriteAccess(dialect, connection), null, null);
         } catch (SQLException e) {
             return new TestConnectionResponse(false, null, null, null, false,
-                    e.getSQLState(), explain(e));
+                    e.getSQLState(), dialect.explain(e, queryTimeoutSeconds));
         }
     }
 
-    public List<SchemaTable> listSchema(ExternalSourceConnectionConfig config, ExternalSourceCredential credential) {
-        String sql = """
-                SELECT c.table_schema,
-                       c.table_name,
-                       c.column_name,
-                       c.data_type,
-                       cls.reltuples::bigint AS estimated_rows
-                FROM   information_schema.columns c
-                JOIN   pg_class cls ON cls.relname = c.table_name
-                JOIN   pg_namespace ns ON ns.oid = cls.relnamespace AND ns.nspname = c.table_schema
-                WHERE  c.table_schema NOT IN ('pg_catalog', 'information_schema')
-                  AND  cls.relkind IN ('r', 'v', 'm', 'p')
-                ORDER  BY c.table_schema, c.table_name, c.ordinal_position
-                """;
+    public List<SchemaTable> listSchema(String connectionType, ExternalSourceConnectionConfig config,
+                                        ExternalSourceCredential credential) {
+        ExternalDbDialect dialect = dialects.of(connectionType);
         Map<String, SchemaTableBuilder> tables = new LinkedHashMap<>();
-        try (Connection connection = open(config, credential);
+        try (Connection connection = dialect.open(config, credential);
              Statement statement = connection.createStatement()) {
             statement.setQueryTimeout(queryTimeoutSeconds);
-            try (ResultSet rs = statement.executeQuery(sql)) {
+            try (ResultSet rs = statement.executeQuery(dialect.schemaSql())) {
                 while (rs.next()) {
                     String schema = rs.getString("table_schema");
                     String name = rs.getString("table_name");
@@ -95,61 +87,54 @@ public class ExternalDbGateway {
                     tables.computeIfAbsent(schema + "." + name,
                                     key -> new SchemaTableBuilder(schema, name, rs2Long(rs)))
                             .columns.add(new SchemaColumn(rs.getString("column_name"), dataType,
-                                    isTimestampType(dataType), isNumericType(dataType)));
+                                    dialect.isTimestampType(dataType), dialect.isNumericType(dataType)));
                 }
             }
         } catch (SQLException e) {
-            throw connectionFailure(e);
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "CONNECTION_FAILED", dialect.explain(e, queryTimeoutSeconds));
         }
         return tables.values().stream()
                 .map(t -> new SchemaTable(t.schema, t.name, t.estimatedRows, t.columns))
                 .toList();
     }
 
-    public PreviewResponse preview(ExternalSourceConnectionConfig config, ExternalSourceCredential credential,
-                                   String sql, String timestampColumn) {
+    public PreviewResponse preview(String connectionType, ExternalSourceConnectionConfig config,
+                                   ExternalSourceCredential credential, String sql, String timestampColumn) {
+        ExternalDbDialect dialect = dialects.of(connectionType);
         SqlQueryValidator.PreparedSql prepared = sqlQueryValidator.toPreparedSql(sql);
         long start = System.nanoTime();
 
-        try (Connection connection = open(config, credential);
+        try (Connection connection = dialect.open(config, credential);
              PreparedStatement statement = connection.prepareStatement(prepared.sql())) {
             statement.setQueryTimeout(queryTimeoutSeconds);
             statement.setMaxRows(previewMaxRows);
             // Chạy thử luôn bind cursor = epoch: đúng bằng những dòng đầu tiên job sẽ đọc về.
-            for (int i = 1; i <= prepared.cursorParamCount(); i++) {
-                statement.setTimestamp(i, Timestamp.from(PREVIEW_CURSOR));
-            }
+            bindCursor(statement, prepared.cursorParamCount(), PREVIEW_CURSOR);
 
             try (ResultSet rs = statement.executeQuery()) {
                 List<PreviewColumn> columns = readColumns(rs.getMetaData());
-                List<List<Object>> rows = new ArrayList<>();
-                while (rs.next()) {
-                    List<Object> row = new ArrayList<>(columns.size());
-                    for (int i = 1; i <= columns.size(); i++) {
-                        row.add(normalize(rs.getObject(i)));
-                    }
-                    rows.add(row);
-                }
-                long elapsedMs = (System.nanoTime() - start) / 1_000_000;
+                List<List<Object>> rows = readRows(dialect, rs, columns.size());
+                long elapsedMs = elapsedMs(start);
                 requireTimestampColumn(columns, timestampColumn);
                 return new PreviewResponse(columns, rows, rows.size(), elapsedMs);
             }
         } catch (SQLException e) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "QUERY_FAILED", explain(e));
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "QUERY_FAILED", dialect.explain(e, queryTimeoutSeconds));
         }
     }
 
     // Mẫu dữ liệu MỚI NHẤT của một job đã lưu. Khác preview ở chỗ preview bind cursor = epoch và
     // trả về những dòng ĐẦU TIÊN job sẽ đọc — đúng cho lúc soạn câu, sai cho lúc quan sát job đang
     // chạy. Ở đây bọc câu người dùng thành bảng con rồi ORDER BY cột thời gian giảm dần.
-    public PreviewResponse sample(ExternalSourceConnectionConfig config, ExternalSourceCredential credential,
-                                  String sql, String timestampColumn, int limit) {
+    public PreviewResponse sample(String connectionType, ExternalSourceConnectionConfig config,
+                                  ExternalSourceCredential credential, String sql, String timestampColumn, int limit) {
+        ExternalDbDialect dialect = dialects.of(connectionType);
         long start = System.nanoTime();
-        SqlQueryValidator.PreparedSql inner = sqlQueryValidator.toPreparedSql(sqlQueryValidator.toInnerSql(sql));
+        SqlQueryValidator.PreparedSql inner = sqlQueryValidator.toPreparedSql(dialect.toInnerSql(sql));
 
-        try (Connection connection = open(config, credential)) {
-            String column = quote(resolveColumnLabel(connection, inner.sql(), timestampColumn));
-            String sampleSql = "SELECT * FROM (%s) t ORDER BY t.%s DESC".formatted(inner.sql(), column);
+        try (Connection connection = dialect.open(config, credential)) {
+            String column = dialect.quoteIdentifier(resolveColumnLabel(connection, inner.sql(), timestampColumn));
+            String sampleSql = dialect.wrapDerived(inner.sql(), "*", "ORDER BY t." + column + " DESC");
 
             try (PreparedStatement statement = connection.prepareStatement(sampleSql)) {
                 statement.setQueryTimeout(queryTimeoutSeconds);
@@ -158,33 +143,28 @@ public class ExternalDbGateway {
 
                 try (ResultSet rs = statement.executeQuery()) {
                     List<PreviewColumn> columns = readColumns(rs.getMetaData());
-                    List<List<Object>> rows = new ArrayList<>();
-                    while (rs.next()) {
-                        List<Object> row = new ArrayList<>(columns.size());
-                        for (int i = 1; i <= columns.size(); i++) {
-                            row.add(normalize(rs.getObject(i)));
-                        }
-                        rows.add(row);
-                    }
+                    List<List<Object>> rows = readRows(dialect, rs, columns.size());
                     return new PreviewResponse(columns, rows, rows.size(), elapsedMs(start));
                 }
             }
         } catch (SQLException e) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "QUERY_FAILED", explain(e));
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "QUERY_FAILED", dialect.explain(e, queryTimeoutSeconds));
         }
     }
 
     // Ước lượng khối lượng backfill: đếm dòng trong khoảng (targetFrom, coveredFrom) bằng chính
     // câu SQL của job, bọc thành bảng con. Đếm quá lâu thì trả rowCount null thay vì để người
     // dùng chờ — con số là để họ quyết định, không phải điều kiện để chạy.
-    public BackfillEstimateResponse estimate(ExternalSourceConnectionConfig config, ExternalSourceCredential credential,
-                                             String sql, String timestampColumn, Instant targetFrom, Instant coveredFrom) {
+    public BackfillEstimateResponse estimate(String connectionType, ExternalSourceConnectionConfig config,
+                                             ExternalSourceCredential credential, String sql, String timestampColumn,
+                                             Instant targetFrom, Instant coveredFrom) {
+        ExternalDbDialect dialect = dialects.of(connectionType);
         long start = System.nanoTime();
-        SqlQueryValidator.PreparedSql inner = sqlQueryValidator.toPreparedSql(sqlQueryValidator.toInnerSql(sql));
+        SqlQueryValidator.PreparedSql inner = sqlQueryValidator.toPreparedSql(dialect.toInnerSql(sql));
 
-        try (Connection connection = open(config, credential)) {
-            String column = quote(resolveColumnLabel(connection, inner.sql(), timestampColumn));
-            String countSql = "SELECT count(*) FROM (%s) t WHERE t.%s < ?".formatted(inner.sql(), column);
+        try (Connection connection = dialect.open(config, credential)) {
+            String column = dialect.quoteIdentifier(resolveColumnLabel(connection, inner.sql(), timestampColumn));
+            String countSql = dialect.wrapDerived(inner.sql(), "count(*)", "WHERE t." + column + " < ?");
 
             try (PreparedStatement statement = connection.prepareStatement(countSql)) {
                 statement.setQueryTimeout(queryTimeoutSeconds);
@@ -197,11 +177,11 @@ public class ExternalDbGateway {
                 }
             }
         } catch (SQLException e) {
-            // 57014 = statement_timeout: câu đếm quá nặng, không phải câu hỏng.
-            if ("57014".equals(e.getSQLState())) {
+            // Hết thời gian = câu đếm quá nặng, không phải câu hỏng.
+            if (dialect.isTimeout(e)) {
                 return new BackfillEstimateResponse(null, targetFrom, coveredFrom, elapsedMs(start));
             }
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "QUERY_FAILED", explain(e));
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "QUERY_FAILED", dialect.explain(e, queryTimeoutSeconds));
         }
     }
 
@@ -232,10 +212,6 @@ public class ExternalDbGateway {
         return index;
     }
 
-    private String quote(String identifier) {
-        return "\"" + identifier.replace("\"", "\"\"") + "\"";
-    }
-
     private long elapsedMs(long startNanos) {
         return (System.nanoTime() - startNanos) / 1_000_000;
     }
@@ -251,57 +227,19 @@ public class ExternalDbGateway {
         }
     }
 
-    private Connection open(ExternalSourceConnectionConfig config, ExternalSourceCredential credential)
-            throws SQLException {
-        Connection connection = DriverManager.getConnection(jdbcUrl(config), credential.username(), credential.password());
-        connection.setReadOnly(true);
-        return connection;
-    }
-
-    // readOnlyMode=always là thứ thực sự cưỡng chế chỉ-đọc: driver gửi
-    // SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY ngay khi mở kết nối.
-    // KHÔNG bỏ tham số này — với mặc định (readOnlyMode=transaction) thì setReadOnly(true)
-    // chỉ có tác dụng khi autocommit tắt, tức là no-op ở đây, và một câu
-    // "WITH x AS (DELETE ... RETURNING ...) SELECT * FROM x" sẽ xoá thật dữ liệu khách hàng.
-    private String jdbcUrl(ExternalSourceConnectionConfig config) {
-        String sslMode = config.sslMode() != null ? config.sslMode() : "disable";
-        return "jdbc:postgresql://%s:%d/%s?sslmode=%s&readOnlyMode=always"
-                .formatted(config.host(), config.port(), config.database(), sslMode);
-    }
-
-    private Integer countTables(Connection connection) {
-        String sql = """
-                SELECT count(*)
-                FROM   information_schema.tables
-                WHERE  table_schema NOT IN ('pg_catalog', 'information_schema')
-                """;
+    private Integer countTables(ExternalDbDialect dialect, Connection connection) {
         try (Statement statement = connection.createStatement();
-             ResultSet rs = statement.executeQuery(sql)) {
+             ResultSet rs = statement.executeQuery(dialect.countTablesSql())) {
             return rs.next() ? rs.getInt(1) : 0;
         } catch (SQLException e) {
             return null;
         }
     }
 
-    // Cảnh báo mềm ở form kết nối: tài khoản chỉ đọc là lớp bảo vệ thứ hai sau phiên READ ONLY.
-    //
-    // Phải hỏi quyền Ở CẤP BẢNG, không phải has_database_privilege(..., 'CREATE') — quyền CREATE
-    // chỉ nói "tạo được schema mới", nên một tài khoản có đủ INSERT/UPDATE/DELETE trên mọi bảng
-    // vẫn trả về false và bị báo nhầm là chỉ-đọc (đã kiểm chứng bằng role thật trên mock DB).
-    // has_table_privilege tính cả quyền thừa kế qua role, khác information_schema.table_privileges.
-    private boolean hasWriteAccess(Connection connection) {
-        String sql = """
-                SELECT EXISTS (
-                    SELECT 1
-                    FROM   pg_class c
-                    JOIN   pg_namespace n ON n.oid = c.relnamespace
-                    WHERE  c.relkind IN ('r', 'p')
-                      AND  n.nspname NOT IN ('pg_catalog', 'information_schema')
-                      AND  has_table_privilege(current_user, c.oid, 'INSERT,UPDATE,DELETE')
-                )
-                """;
+    // Cảnh báo mềm ở form kết nối: tài khoản chỉ đọc là lớp bảo vệ thứ hai sau phiên chỉ-đọc.
+    private boolean hasWriteAccess(ExternalDbDialect dialect, Connection connection) {
         try (Statement statement = connection.createStatement();
-             ResultSet rs = statement.executeQuery(sql)) {
+             ResultSet rs = statement.executeQuery(dialect.writeAccessSql())) {
             return rs.next() && rs.getBoolean(1);
         } catch (SQLException e) {
             return false;
@@ -319,58 +257,37 @@ public class ExternalDbGateway {
         return columns;
     }
 
-    private Object normalize(Object value) {
-        if (value instanceof Timestamp ts) {
-            return ts.toInstant();
+    private List<List<Object>> readRows(ExternalDbDialect dialect, ResultSet rs, int columnCount) throws SQLException {
+        List<List<Object>> rows = new ArrayList<>();
+        while (rs.next()) {
+            List<Object> row = new ArrayList<>(columnCount);
+            for (int i = 1; i <= columnCount; i++) {
+                row.add(normalize(dialect, rs.getObject(i)));
+            }
+            rows.add(row);
         }
-        if (value instanceof OffsetDateTime odt) {
-            return odt.toInstant();
+        return rows;
+    }
+
+    private Object normalize(ExternalDbDialect dialect, Object value) {
+        Instant instant = dialect.toInstant(value);
+        if (instant != null) {
+            return instant;
         }
-        if (value == null || value instanceof Number || value instanceof Boolean || value instanceof String
-                || value instanceof Instant) {
+        if (value == null || value instanceof Number || value instanceof Boolean || value instanceof String) {
             return value;
         }
         return value.toString();
     }
 
-    private BusinessException connectionFailure(SQLException e) {
-        return new BusinessException(HttpStatus.BAD_REQUEST, "CONNECTION_FAILED", explain(e));
-    }
-
-    // Thông báo nói rõ hỏng ở đâu thay vì "kết nối thất bại" — SQLState của Postgres đủ phân biệt.
-    private String explain(SQLException e) {
-        String state = e.getSQLState();
-        if (state == null) {
-            return e.getMessage();
-        }
-        return switch (state) {
-            case "28P01" -> "Sai mật khẩu cho tài khoản này";
-            case "28000" -> "Tài khoản không có quyền đăng nhập vào database này";
-            case "3D000" -> "Database không tồn tại trên máy chủ";
-            case "08001", "08006" -> "Không kết nối được tới máy chủ — kiểm tra host, cổng và tường lửa";
-            case "57014" -> "Truy vấn chạy quá lâu và đã bị dừng (giới hạn " + queryTimeoutSeconds + " giây)";
-            default -> e.getMessage();
-        };
-    }
-
+    // NULL (SQL Server: view không có partition) khác 0 dòng — không được hiện thành "0".
     private Long rs2Long(ResultSet rs) {
         try {
             long value = rs.getLong("estimated_rows");
-            return value < 0 ? null : value;
+            return rs.wasNull() || value < 0 ? null : value;
         } catch (SQLException e) {
             return null;
         }
-    }
-
-    private boolean isTimestampType(String dataType) {
-        return dataType != null && dataType.startsWith("timestamp");
-    }
-
-    private boolean isNumericType(String dataType) {
-        return dataType != null && switch (dataType) {
-            case "smallint", "integer", "bigint", "numeric", "real", "double precision" -> true;
-            default -> false;
-        };
     }
 
     private boolean isNumericSqlType(int sqlType) {

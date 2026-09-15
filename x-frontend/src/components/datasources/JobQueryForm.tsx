@@ -23,6 +23,7 @@ import { getApiErrorMessage } from '@/lib/apiError'
 import { formatDateTime } from '@/lib/datetime'
 import { CURSOR_TOKEN, externalSourceJobSchema } from '@/lib/externalSourceJobSchema'
 import { buildStarterSql, CRON_PRESETS } from '@/lib/sqlTemplate'
+import { useExternalSourcesQuery } from '@/queries/useExternalSourcesQuery'
 import { cn } from '@/lib/utils'
 import { useCreateExternalSourceJobMutation } from '@/queries/useCreateExternalSourceJobMutation'
 import { useExternalSourceSchemaQuery } from '@/queries/useExternalSourceSchemaQuery'
@@ -89,6 +90,11 @@ export function JobQueryForm({
   const [errors, setErrors] = useState<Record<string, string>>({})
   const sqlRef = useRef<HTMLTextAreaElement>(null)
 
+  // Danh sách nguồn đã nằm sẵn trong cache — trang chi tiết nguồn tải nó trước khi mở form này.
+  const { data: sources } = useExternalSourcesQuery()
+  const connectionType =
+    sources?.find((source) => source.id === externalSourceId)?.connectionType ?? 'POSTGRESQL'
+
   const {
     data: tables,
     isLoading: schemaLoading,
@@ -150,7 +156,7 @@ export function JobQueryForm({
     // Chỉ tự sinh khi ô còn trống — không đạp lên câu người dùng đang viết dở.
     if (sql.trim()) return
 
-    const starter = buildStarterSql(table)
+    const starter = buildStarterSql(table, connectionType)
     if (!starter) {
       toast.error(`Bảng ${table.name} không có cột thời gian nào để làm mốc đọc`)
       return

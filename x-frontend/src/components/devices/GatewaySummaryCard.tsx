@@ -1,3 +1,4 @@
+import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { CopyButton } from '@/components/patterns/CopyButton'
@@ -30,9 +31,12 @@ function Stat({ label, children }: { label: string; children: React.ReactNode })
 export function GatewaySummaryCard({
   gateway,
   views,
+  onShowConnection,
 }: {
   gateway: Gateway | undefined
   views: GatewayPinViews
+  /** Có thì gateway chưa từng kết nối hiện lối tắt mở "Thông tin kết nối" — gateway mới tạo cần nó nhất. */
+  onShowConnection?: () => void
 }) {
   if (!gateway) {
     return (
@@ -86,7 +90,14 @@ export function GatewaySummaryCard({
                 <TooltipContent>{formatDateTime(gateway.lastSeenAt)}</TooltipContent>
               </Tooltip>
             ) : (
-              <span className="text-muted-foreground">Chưa từng kết nối</span>
+              <>
+                <span className="text-muted-foreground">Chưa từng kết nối</span>
+                {onShowConnection && (
+                  <Button variant="link" size="sm" className="h-auto px-1" onClick={onShowConnection}>
+                    Xem cách kết nối
+                  </Button>
+                )}
+              </>
             )}
           </Stat>
         )}

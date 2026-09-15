@@ -1,24 +1,33 @@
-import type { SchemaTable } from '@/types/externalSource'
+import type { ConnectionType, SchemaTable } from '@/types/externalSource'
+import { CONNECTION_TYPES } from '@/lib/connectionTypes'
 import { CURSOR_TOKEN } from '@/lib/externalSourceJobSchema'
 
 /**
  * Sinh câu SQL đầu tiên khi người dùng bấm vào một bảng — mục tiêu là họ thấy dữ liệu thật
  * mà không phải gõ chữ nào. Ưu tiên cột thời gian đầu tiên làm mốc, lấy tối đa 6 cột số.
  */
-export function buildStarterSql(table: SchemaTable): { sql: string; timestampColumn: string } | null {
+export function buildStarterSql(
+  table: SchemaTable,
+  connectionType: ConnectionType
+): { sql: string; timestampColumn: string } | null {
   const timestampColumn = table.columns.find((column) => column.timestamp)
   if (!timestampColumn) return null
 
+  const spec = CONNECTION_TYPES[connectionType]
   const valueColumns = table.columns.filter((column) => column.numeric).slice(0, 6)
   const selected = [timestampColumn.name, ...valueColumns.map((column) => column.name)]
-  const qualifiedTable = table.schema === 'public' ? table.name : `${table.schema}.${table.name}`
+  const qualifiedTable =
+    spec.defaultSchema === null || table.schema === spec.defaultSchema
+      ? table.name
+      : `${table.schema}.${table.name}`
+  const top = spec.rowLimit === 'TOP' ? 'TOP (500) ' : ''
 
   const sql = [
-    `SELECT ${selected.join(',\n       ')}`,
+    `SELECT ${top}${selected.join(',\n       ')}`,
     `FROM   ${qualifiedTable}`,
     `WHERE  ${timestampColumn.name} > ${CURSOR_TOKEN}`,
     `ORDER  BY ${timestampColumn.name}`,
-    `LIMIT  500`,
+    ...(spec.rowLimit === 'LIMIT' ? ['LIMIT  500'] : []),
   ].join('\n')
 
   return { sql, timestampColumn: timestampColumn.name }

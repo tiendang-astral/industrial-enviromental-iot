@@ -6,11 +6,14 @@ Subscribe gateway/{mac}/command, sau --delay giây publish ACK lên gateway/{mac
 Dùng paho.mqtt.client (subscribe + publish) thay vì mosquitto_pub/sub — nhất quán với
 simulate_full_gateway.py, tránh phải parse JSON bằng jq trong bash.
 
+Đăng nhập như gateway thật: tài khoản iiot-gateway, Client ID = MAC (docker/emqx/acl.conf).
+
 Usage:
   python3 scripts/simulate-gateway-command-ack.py --mac AA:BB:CC:DD:EE:FF
   python3 scripts/simulate-gateway-command-ack.py --mac AA:BB:CC:DD:EE:FF --delay 3
   python3 scripts/simulate-gateway-command-ack.py --mac AA:BB:CC:DD:EE:FF --nack   # test NACK
   python3 scripts/simulate-gateway-command-ack.py --mac AA:BB:CC:DD:EE:FF --no-ack # test timeout (im lặng)
+  python3 scripts/simulate-gateway-command-ack.py --mac AA:BB:CC:DD:EE:FF --host <VPS> --port 31883 --password <MQTT_GATEWAY_PASSWORD>  # prod
 """
 import argparse
 import json
@@ -25,6 +28,8 @@ def main():
     parser.add_argument("--mac", required=True)
     parser.add_argument("--host", default="localhost")
     parser.add_argument("--port", type=int, default=1883)
+    parser.add_argument("--username", default="iiot-gateway")
+    parser.add_argument("--password", default="iiot-gateway-dev")
     parser.add_argument("--delay", type=float, default=1.5, help="Giây chờ trước khi ACK (mô phỏng relay thật)")
     parser.add_argument("--nack", action="store_true", help="Trả NACK thay vì ACK")
     parser.add_argument("--no-ack", action="store_true", help="Không trả ACK gì cả (test timeout worker)")
@@ -65,9 +70,10 @@ def main():
 
     # Tương thích cả paho-mqtt 1.x (client=... quen thuộc) lẫn 2.x (bắt buộc callback_api_version).
     try:
-        client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
+        client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2, client_id=args.mac)
     except AttributeError:
-        client = mqtt.Client()
+        client = mqtt.Client(client_id=args.mac)
+    client.username_pw_set(args.username, args.password)
     client.on_connect = on_connect
     client.on_message = on_message
     client.connect(args.host, args.port)

@@ -13,7 +13,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
+import {
+  Field,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+} from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import {
   Select,
@@ -29,18 +34,21 @@ import { TenantNodePicker } from '@/components/patterns/TenantNodePicker'
 import { StepBar } from '@/components/datasources/StepBar'
 import { getApiErrorMessage } from '@/lib/apiError'
 import {
+  CONNECTION_TYPE_OPTIONS,
+  CONNECTION_TYPES,
+  ENCRYPTION_OFF,
+  ENCRYPTION_ON,
+  ENCRYPTION_OPTIONS,
+  isEncryptionOn,
+} from '@/lib/connectionTypes'
+import {
   createExternalSourceSchema,
   type CreateExternalSourceFormValues,
 } from '@/lib/externalSourceSchema'
 import { useCreateExternalSourceMutation } from '@/queries/useCreateExternalSourceMutation'
 import { useTenantNodesQuery } from '@/queries/useTenantNodesQuery'
 import { useTestConnectionMutation } from '@/queries/useTestConnectionMutation'
-
-const SSL_MODES = [
-  { value: 'disable', label: 'disable' },
-  { value: 'require', label: 'require' },
-  { value: 'prefer', label: 'prefer' },
-]
+import type { ConnectionType } from '@/types/externalSource'
 
 const CONNECTION_FIELDS = ['host', 'port', 'database', 'username', 'password'] as const
 
@@ -73,15 +81,17 @@ export function ExternalSourceFormDialog({
     reset,
     control,
     getValues,
+    setValue,
     trigger,
     formState: { errors },
   } = useForm<CreateExternalSourceFormValues>({
     resolver: zodResolver(createExternalSourceSchema),
     defaultValues: {
+      connectionType: 'POSTGRESQL',
       tenantNodeId: '',
       name: '',
       host: '',
-      port: '5432',
+      port: String(CONNECTION_TYPES.POSTGRESQL.defaultPort),
       database: '',
       sslMode: '',
       username: '',
@@ -95,9 +105,19 @@ export function ExternalSourceFormDialog({
     setStep(0)
   }, [open, reset])
 
+  // Cổng đi theo loại database, nhưng chỉ khi người dùng chưa gõ cổng khác — đè lên cổng đã sửa là mất công.
+  function changeConnectionType(next: ConnectionType) {
+    const current = getValues('connectionType')
+    if (getValues('port') === String(CONNECTION_TYPES[current].defaultPort)) {
+      setValue('port', String(CONNECTION_TYPES[next].defaultPort), { shouldValidate: true })
+    }
+    setValue('connectionType', next)
+  }
+
   function connectionPayload() {
     const values = getValues()
     return {
+      connectionType: values.connectionType,
       connectionConfig: {
         host: values.host,
         port: Number(values.port),
@@ -136,7 +156,6 @@ export function ExternalSourceFormDialog({
         tenantNodeId: Number(values.tenantNodeId),
         payload: {
           name: values.name,
-          connectionType: 'POSTGRESQL',
           ...connectionPayload(),
         },
       },
@@ -177,6 +196,33 @@ export function ExternalSourceFormDialog({
         >
           {step === 0 ? (
             <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="source-type">Cơ sở dữ liệu</FieldLabel>
+                <Controller
+                  control={control}
+                  name="connectionType"
+                  render={({ field }) => (
+                    <Select
+                      value={field.value}
+                      onValueChange={(next) => changeConnectionType(next as ConnectionType)}
+                    >
+                      <SelectTrigger id="source-type" className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          {CONNECTION_TYPE_OPTIONS.map((type) => (
+                            <SelectItem key={type} value={type}>
+                              {CONNECTION_TYPES[type].label}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+              </Field>
+
               <div className="grid gap-5 sm:grid-cols-3">
                 <Field className="sm:col-span-2" data-invalid={!!errors.host}>
                   <FieldLabel htmlFor="source-host" data-required>
@@ -218,28 +264,30 @@ export function ExternalSourceFormDialog({
                   <FieldError errors={[errors.database]} />
                 </Field>
                 <Field>
-                  <FieldLabel htmlFor="source-ssl">SSL mode</FieldLabel>
+                  <FieldLabel htmlFor="source-encryption">Mã hoá kết nối</FieldLabel>
                   <Controller
                     control={control}
                     name="sslMode"
                     render={({ field }) => (
-                      <Select value={field.value || 'disable'} onValueChange={field.onChange}>
-                        <SelectTrigger id="source-ssl" className="w-full">
+                      <Select
+                        value={isEncryptionOn(field.value) ? ENCRYPTION_ON : ENCRYPTION_OFF}
+                        onValueChange={field.onChange}
+                      >
+                        <SelectTrigger id="source-encryption" className="w-full">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
                           <SelectGroup>
-                            {SSL_MODES.map((mode) => (
-                              <SelectItem key={mode.value} value={mode.value}>
-                                {mode.label}
+                            {ENCRYPTION_OPTIONS.map((option) => (
+                              <SelectItem key={option.value} value={option.value}>
+                                {option.label}
                               </SelectItem>
                             ))}
                           </SelectGroup>
                         </SelectContent>
                       </Select>
                     )}
-                  />
-                </Field>
+                  />                </Field>
               </div>
 
               <div className="grid gap-5 sm:grid-cols-2">
@@ -266,8 +314,7 @@ export function ExternalSourceFormDialog({
                   />
                   <FieldError errors={[errors.password]} />
                 </Field>
-              </div>
-            </FieldGroup>
+              </div>            </FieldGroup>
           ) : (
             <FieldGroup>
               <Field data-invalid={!!errors.tenantNodeId}>

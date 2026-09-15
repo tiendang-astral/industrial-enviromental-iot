@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { CircuitBoard, Plus } from 'lucide-react'
+import { CircuitBoard, Plug, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { EmptyState } from '@/components/patterns/EmptyState'
 import { PageHeader } from '@/components/patterns/PageHeader'
+import { GatewayConnectionDialog } from '@/components/devices/GatewayConnectionDialog'
 import { GatewayPinFormDialog } from '@/components/devices/GatewayPinFormDialog'
 import { GatewaySummaryCard } from '@/components/devices/GatewaySummaryCard'
 import { GatewayPinBoard, GatewayPinBoardSkeleton } from '@/components/devices/GatewayPinBoard'
@@ -22,7 +23,11 @@ import { useAllGatewaysQuery } from '@/queries/useGatewaysQuery'
 import { useGatewayPinsQuery } from '@/queries/useGatewayPinsQuery'
 import { useGatewayTelemetryQuery } from '@/queries/useGatewayTelemetryQuery'
 import { useMetricsQuery } from '@/queries/useMetricsQuery'
+import { useAuthStore } from '@/stores/useAuthStore'
 import type { PinTelemetry } from '@/types/telemetry'
+
+// Khớp @PreAuthorize của GET /gateways/{id}/connection-info: response có mật khẩu MQTT dùng chung.
+const CONNECTION_INFO_ROLES = ['TENANT_ADMIN', 'MANAGER', 'OPERATOR']
 
 /**
  * Trang chi tiết thiết bị, hai tab.
@@ -38,9 +43,13 @@ export default function GatewayDetailPage() {
 
   const [rangeMinutes, setRangeMinutes] = useState(DEFAULT_RANGE_MINUTES)
   const [isAddPinOpen, setIsAddPinOpen] = useState(false)
+  const [isConnectionOpen, setIsConnectionOpen] = useState(false)
   // Tab điều khiển từ state vì bộ chọn khoảng nằm trên hàng tab: để nó hiện ở tab Tổng quan thì
   // đó là một ô điều khiển không điều khiển gì trên màn hình đang xem.
   const [tab, setTab] = useState('overview')
+
+  const authorities = useAuthStore((state) => state.user?.authorities)
+  const canViewConnection = !!authorities?.some((role) => CONNECTION_INFO_ROLES.includes(role))
 
   const { data: gateways } = useAllGatewaysQuery()
   const gateway = gateways?.find((item) => item.id === id)
@@ -94,6 +103,7 @@ export default function GatewayDetailPage() {
   const isLoading = isPinsLoading || isTelemetryLoading
   const hasPins = views.inputs.length > 0 || views.outputs.length > 0
   const gatewayOnline = isGatewayOnline(gateway?.lastSeenAt)
+  const showConnection = canViewConnection && !!gateway
 
   return (
     <div className="flex flex-col gap-6">
@@ -101,9 +111,21 @@ export default function GatewayDetailPage() {
         title={gateway ? `Thiết bị ${gateway.name}` : 'Thiết bị'}
         backTo="/devices"
         backLabel="Thiết bị"
+        actions={
+          showConnection && (
+            <Button variant="outline" onClick={() => setIsConnectionOpen(true)}>
+              <Plug data-icon="inline-start" />
+              Thông tin kết nối
+            </Button>
+          )
+        }
       />
 
-      <GatewaySummaryCard gateway={gateway} views={views} />
+      <GatewaySummaryCard
+        gateway={gateway}
+        views={views}
+        onShowConnection={showConnection ? () => setIsConnectionOpen(true) : undefined}
+      />
 
       {/* Tab luôn hiện kể cả khi chưa có pin: nút "Thêm pin" nằm trên hàng tab nên ẩn tab đi là
           mất luôn đường tạo pin đầu tiên. Trạng thái rỗng vì vậy nằm trong tab. */}
@@ -159,6 +181,14 @@ export default function GatewayDetailPage() {
       </Tabs>
 
       <GatewayPinFormDialog gatewayId={id} open={isAddPinOpen} onOpenChange={setIsAddPinOpen} />
+      {showConnection && (
+        <GatewayConnectionDialog
+          gateway={gateway}
+          pins={gatewayPins}
+          open={isConnectionOpen}
+          onOpenChange={setIsConnectionOpen}
+        />
+      )}
     </div>
   )
 }

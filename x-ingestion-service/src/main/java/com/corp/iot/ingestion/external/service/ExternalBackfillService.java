@@ -1,6 +1,8 @@
 package com.corp.iot.ingestion.external.service;
 
 import com.corp.iot.ingestion.external.crypto.CredentialDecryptionService;
+import com.corp.iot.ingestion.external.dialect.ExternalDbDialect;
+import com.corp.iot.ingestion.external.dialect.ExternalDbDialects;
 import com.corp.iot.ingestion.external.dto.ExternalReadingEvent;
 import com.corp.iot.ingestion.external.dto.ExternalSourceCredential;
 import com.corp.iot.ingestion.external.dto.ExternalSourceQueryConfig;
@@ -19,7 +21,6 @@ import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 
 import java.sql.Connection;
-import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -34,8 +35,8 @@ import java.util.UUID;
 // hết ngân sách thời gian, lỗi kết nối — làm dải ngắn đi chứ không bao giờ thủng ở giữa.
 //
 // Câu SQL của người dùng chỉ có cận dưới (:cursor), nên để có cận trên phải bọc nó thành bảng
-// con. Mỗi lô chặn cả hai đầu để Postgres đẩy được điều kiện xuống bảng con thay vì quét lại
-// từ đích mỗi lần.
+// con. Mỗi lô chặn cả hai đầu để database bên kia đẩy được điều kiện xuống bảng con thay vì quét
+// lại từ đích mỗi lần.
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -45,6 +46,7 @@ public class ExternalBackfillService {
     private final ExternalMessageIdGenerator messageIdGenerator;
     private final ExternalDataRawProducer externalDataRawProducer;
     private final ExternalSqlSupport sqlSupport;
+    private final ExternalDbDialects dialects;
     private final ObjectMapper objectMapper;
 
     @Value("${app.external.query-timeout-seconds}")
@@ -77,27 +79,27 @@ public class ExternalBackfillService {
             return SliceResult.failed("Failed to decrypt credential: " + e.getMessage());
         }
 
-        ExternalSqlSupport.PreparedSql inner = sqlSupport.toPreparedSql(sqlSupport.toInnerSql(queryConfig.sql()));
-        String column = sqlSupport.quoteIdentifier(queryConfig.timestampColumn());
-        String batchSql = "SELECT * FROM (%s) t WHERE t.%s < ? ORDER BY t.%s DESC"
-                .formatted(inner.sql(), column, column);
-
         String correlationId = UUID.randomUUID().toString();
         Instant deadline = Instant.now().plusMillis(timeBudgetMs);
         Instant cursor = task.getCursorAt();
         long rows = 0;
 
-        try (Connection connection = DriverManager.getConnection(
-                sqlSupport.buildJdbcUrl(source.getConnectionConfig()), credential.username(), credential.password())) {
-            connection.setReadOnly(true);
+        try {
+            ExternalDbDialect dialect = dialects.of(source.getConnectionType());
+            ExternalSqlSupport.PreparedSql inner = sqlSupport.toPreparedSql(dialect.toInnerSql(queryConfig.sql()));
+            String column = dialect.quoteIdentifier(queryConfig.timestampColumn());
+            String batchSql = dialect.wrapDerived(inner.sql(), "*",
+                    "WHERE t." + column + " < ? ORDER BY t." + column + " DESC");
 
-            while (!BackfillCursorPlanner.reachedTarget(cursor, task.getTargetFrom())
-                    && Instant.now().isBefore(deadline)) {
-                Instant windowStart = BackfillCursorPlanner.windowStart(cursor, task.getTargetFrom(), windowHours);
-                BatchResult batch = readBatch(connection, batchSql, inner.cursorParamCount(),
-                        windowStart, cursor, queryConfig.timestampColumn(), datastream, job, source, correlationId);
-                rows += batch.rows();
-                cursor = BackfillCursorPlanner.nextCursor(windowStart, batch.rows(), batchRows, batch.oldest());
+            try (Connection connection = dialect.open(source.getConnectionConfig(), credential)) {
+                while (!BackfillCursorPlanner.reachedTarget(cursor, task.getTargetFrom())
+                        && Instant.now().isBefore(deadline)) {
+                    Instant windowStart = BackfillCursorPlanner.windowStart(cursor, task.getTargetFrom(), windowHours);
+                    BatchResult batch = readBatch(dialect, connection, batchSql, inner.cursorParamCount(),
+                            windowStart, cursor, queryConfig.timestampColumn(), datastream, job, source, correlationId);
+                    rows += batch.rows();
+                    cursor = BackfillCursorPlanner.nextCursor(windowStart, batch.rows(), batchRows, batch.oldest());
+                }
             }
         } catch (Exception e) {
             log.error("Backfill failed taskId={}", task.getId(), e);
@@ -108,8 +110,8 @@ public class ExternalBackfillService {
                 BackfillCursorPlanner.reachedTarget(cursor, task.getTargetFrom()), null);
     }
 
-    private BatchResult readBatch(Connection connection, String batchSql, int cursorParamCount,
-                                  Instant windowStart, Instant cursor, String timestampColumn,
+    private BatchResult readBatch(ExternalDbDialect dialect, Connection connection, String batchSql,
+                                  int cursorParamCount, Instant windowStart, Instant cursor, String timestampColumn,
                                   Datastream datastream, ExternalSourceJob job, ExternalSource source,
                                   String correlationId) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(batchSql)) {
@@ -125,7 +127,7 @@ public class ExternalBackfillService {
             Instant oldest = null;
             try (ResultSet rs = statement.executeQuery()) {
                 while (rs.next()) {
-                    Instant measuredAt = sqlSupport.toInstant(rs.getObject(timestampColumn));
+                    Instant measuredAt = dialect.toInstant(rs.getObject(timestampColumn));
                     if (measuredAt == null) {
                         continue;
                     }

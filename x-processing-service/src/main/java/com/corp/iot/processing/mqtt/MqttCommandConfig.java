@@ -45,7 +45,7 @@ public class MqttCommandConfig {
         options.setServerURIs(new String[]{brokerUrl});
         options.setAutomaticReconnect(true);
         options.setCleanSession(true);
-        // Bỏ trống thì không gửi gì -> nối ẩn danh, giữ nguyên hành vi local dev.
+        // Bỏ trống thì nối ẩn danh — EMQX của dự án bật xác thực nên sẽ từ chối.
         if (!username.isBlank()) {
             options.setUserName(username);
             options.setPassword(password.toCharArray());

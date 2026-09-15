@@ -1,5 +1,6 @@
 package com.corp.iot.backend.externaldb.dto;
 
+import com.corp.iot.backend.externaldb.dialect.PostgresDialect;
 import com.corp.iot.backend.externalsource.dto.ExternalSourceConnectionConfig;
 import com.corp.iot.backend.externalsource.dto.ExternalSourceCredential;
 import jakarta.validation.Valid;
@@ -16,10 +17,17 @@ public final class ExternalDbDtos {
     }
 
     // credential bỏ trống khi thử lại nguồn đã lưu — service lấy credential đã mã hoá trong DB.
+    // connectionType bỏ trống = POSTGRESQL, để nơi gọi có từ trước khi hỗ trợ nhiều loại database chạy y nguyên.
     public record TestConnectionRequest(
+            String connectionType,
             @NotNull @Valid ExternalSourceConnectionConfig connectionConfig,
             @Valid ExternalSourceCredential credential
     ) {
+        public TestConnectionRequest {
+            if (connectionType == null || connectionType.isBlank()) {
+                connectionType = PostgresDialect.TYPE;
+            }
+        }
     }
 
     // Thử nguồn ĐÃ LƯU, cho phép ghi đè từng phần: sửa host mà không nhập lại mật khẩu thì

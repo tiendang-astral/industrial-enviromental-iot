@@ -8,9 +8,11 @@
 # Usage:
 #   ./scripts/simulate-gateway.sh --mac AA:BB:CC:DD:EE:FF
 #   ./scripts/simulate-gateway.sh --mac AA:BB:CC:DD:EE:FF --interval 10
-#   ./scripts/simulate-gateway.sh --mac AA:BB:CC:DD:EE:FF --port 31883 --user iiot-service --pass '...'   # prod
+#   ./scripts/simulate-gateway.sh --mac AA:BB:CC:DD:EE:FF --host <VPS> --port 31883 --pass '<MQTT_GATEWAY_PASSWORD>'   # prod
 #   ./scripts/simulate-gateway.sh --mac AA:BB:CC:DD:EE:FF --reading AI:1:23.5 --reading DI:1:1
 #   ./scripts/simulate-gateway.sh --mac AA:BB:CC:DD:EE:FF --measured-at 2026-08-12T09:41:00Z   # test dedup: chạy 2 lần cùng timestamp
+#
+# Đăng nhập như gateway thật: tài khoản iiot-gateway, Client ID = MAC (docker/emqx/acl.conf).
 set -euo pipefail
 
 HOST="localhost"
@@ -18,8 +20,8 @@ PORT="1883"
 MAC=""
 INTERVAL=""
 MEASURED_AT=""
-USERNAME=""
-PASSWORD=""
+USERNAME="iiot-gateway"
+PASSWORD="iiot-gateway-dev"
 READINGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -68,10 +70,8 @@ publish_once() {
   payload="$(build_payload "$measured_at")"
   local topic="gateway/${MAC}/data"
   echo "==> Publishing to ${topic}: ${payload}"
-  # EMQX production bật xác thực; local dev để trống thì nối ẩn danh như cũ.
-  local auth=()
-  [[ -n "$USERNAME" ]] && auth+=(-u "$USERNAME" -P "$PASSWORD")
-  mosquitto_pub -h "$HOST" -p "$PORT" "${auth[@]}" -t "$topic" -q 1 -m "$payload"
+  # Client ID phải đúng MAC, sai là EMQX ngắt kết nối (docker/emqx/acl.conf).
+  mosquitto_pub -h "$HOST" -p "$PORT" -u "$USERNAME" -P "$PASSWORD" -i "$MAC" -t "$topic" -q 1 -m "$payload"
 }
 
 if [[ -n "$INTERVAL" ]]; then

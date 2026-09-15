@@ -8,15 +8,18 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 // Thay cho SqlIdentifierValidator cũ: từ V12 người dùng viết SQL tự do nên allowlist định danh
-// không còn ý nghĩa. Lớp bảo vệ thật là phiên READ ONLY + timeout + trần dòng ở lúc chạy; ở đây
-// chỉ chặn hai thứ khiến job không chạy được: thiếu :cursor và nhiều câu lệnh trong một ô.
+// không còn ý nghĩa. Lớp bảo vệ thật là phiên chỉ-đọc + timeout + trần dòng ở lúc chạy (xem
+// ExternalDbDialect.open); ở đây chặn thiếu :cursor, nhiều câu lệnh, và SELECT ... INTO.
 @Component
 public class SqlQueryValidator {
 
     // :cursor không được nằm trong chuỗi hay comment — bỏ qua chúng trước khi tìm.
     private static final Pattern CURSOR = Pattern.compile(":cursor\\b");
     private static final Pattern LEADING_KEYWORD = Pattern.compile("^\\s*(SELECT|WITH)\\b", Pattern.CASE_INSENSITIVE);
+    private static final Pattern INTO = Pattern.compile("\\bINTO\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern STRING_LITERAL = Pattern.compile("'([^']|'')*'");
+    private static final Pattern DOUBLE_QUOTED_IDENTIFIER = Pattern.compile("\"([^\"]|\"\")*\"");
+    private static final Pattern BRACKETED_IDENTIFIER = Pattern.compile("\\[([^\\]]|\\]\\])*\\]");
     private static final Pattern LINE_COMMENT = Pattern.compile("--[^\\n]*");
     private static final Pattern BLOCK_COMMENT = Pattern.compile("/\\*.*?\\*/", Pattern.DOTALL);
 
@@ -33,6 +36,11 @@ public class SqlQueryValidator {
         if (stripped.replaceAll(";\\s*$", "").contains(";")) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "INVALID_QUERY",
                     "Chỉ chạy được một câu lệnh — bỏ dấu chấm phẩy ở giữa câu truy vấn");
+        }
+        // SQL Server không có phiên READ ONLY phía máy chủ: SELECT ... INTO sẽ tạo bảng thật.
+        if (INTO.matcher(stripped).find()) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "INVALID_QUERY",
+                    "Truy vấn chỉ được đọc dữ liệu — không dùng SELECT ... INTO");
         }
         if (!CURSOR.matcher(stripped).find()) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MISSING_CURSOR_PLACEHOLDER",
@@ -58,53 +66,6 @@ public class SqlQueryValidator {
         return new PreparedSql(out.toString(), count);
     }
 
-    // Câu của người dùng dùng làm BẢNG CON cho backfill (đọc lùi) và cho phép đếm ước lượng.
-    // Phải bỏ comment (bảng con không cần) và gỡ LIMIT/OFFSET cuối câu — giữ lại thì mọi lô đều
-    // trả về đúng bấy nhiêu dòng tính từ đích, tức là đếm sai và vá sai.
-    public String toInnerSql(String sql) {
-        String withoutComments = stripComments(sql).trim();
-        String withoutSemicolon = TRAILING_SEMICOLON.matcher(withoutComments).replaceAll("");
-        return TRAILING_LIMIT.matcher(withoutSemicolon).replaceAll("").trim();
-    }
-
-    // LIMIT nằm trong bảng con của chính người dùng (kết thúc bằng dấu đóng ngoặc) thuộc về bảng
-    // con đó, không phải câu ngoài — vì vậy chỉ neo vào cuối câu, không quét toàn bộ.
-    private static final Pattern TRAILING_LIMIT = Pattern.compile(
-            "\\s+LIMIT\\s+\\d+(\\s+OFFSET\\s+\\d+)?\\s*$", Pattern.CASE_INSENSITIVE);
-    private static final Pattern TRAILING_SEMICOLON = Pattern.compile(";\\s*$");
-
-    // Quét một lượt, giữ nguyên chuỗi literal — khác strip() bên dưới vốn xoá luôn nội dung chuỗi
-    // (chấp nhận được khi chỉ để kiểm tra cú pháp, nhưng sẽ phá câu nếu đem đi chạy thật).
-    private String stripComments(String sql) {
-        StringBuilder out = new StringBuilder(sql.length());
-        boolean inString = false;
-        for (int i = 0; i < sql.length(); i++) {
-            char c = sql.charAt(i);
-            if (inString) {
-                out.append(c);
-                if (c == '\'') {
-                    inString = false;
-                }
-                continue;
-            }
-            if (c == '\'') {
-                inString = true;
-                out.append(c);
-            } else if (c == '-' && i + 1 < sql.length() && sql.charAt(i + 1) == '-') {
-                int end = sql.indexOf('\n', i);
-                i = end < 0 ? sql.length() : end - 1;
-                out.append('\n');
-            } else if (c == '/' && i + 1 < sql.length() && sql.charAt(i + 1) == '*') {
-                int end = sql.indexOf("*/", i + 2);
-                i = end < 0 ? sql.length() : end + 1;
-                out.append(' ');
-            } else {
-                out.append(c);
-            }
-        }
-        return out.toString();
-    }
-
     private boolean insideStringOrComment(String sql, int index) {
         String head = sql.substring(0, index);
         long quotes = head.chars().filter(c -> c == '\'').count();
@@ -116,8 +77,10 @@ public class SqlQueryValidator {
     }
 
     private String strip(String sql) {
-        return BLOCK_COMMENT.matcher(LINE_COMMENT.matcher(STRING_LITERAL.matcher(sql).replaceAll("''"))
-                .replaceAll("")).replaceAll("");
+        String withoutLiterals = STRING_LITERAL.matcher(sql).replaceAll("''");
+        String withoutIdentifiers = BRACKETED_IDENTIFIER.matcher(
+                DOUBLE_QUOTED_IDENTIFIER.matcher(withoutLiterals).replaceAll("\"\"")).replaceAll("[]");
+        return BLOCK_COMMENT.matcher(LINE_COMMENT.matcher(withoutIdentifiers).replaceAll("")).replaceAll("");
     }
 
     public record PreparedSql(String sql, int cursorParamCount) {

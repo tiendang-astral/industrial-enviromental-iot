@@ -38,7 +38,8 @@ public class ExternalDbController {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "CREDENTIAL_REQUIRED",
                     "Cần tài khoản và mật khẩu để thử kết nối");
         }
-        return ApiResponse.of(externalSourceQueryService.testConnection(request.connectionConfig(), request.credential()));
+        return ApiResponse.of(externalSourceQueryService.testConnection(
+                request.connectionType(), request.connectionConfig(), request.credential()));
     }
 
     @PostMapping("/api/v1/external-sources/{sourceId}/test-connection")

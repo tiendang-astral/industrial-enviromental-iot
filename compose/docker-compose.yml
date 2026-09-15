@@ -77,6 +77,10 @@ services:
   emqx:
     image: emqx/emqx:5.8.0
     container_name: iiot-emqx
+    environment:
+      EMQX_DASHBOARD__DEFAULT_PASSWORD: public
+      # Giống prod: vi phạm quyền topic thì ngắt kết nối thay vì lặng lẽ bỏ message.
+      EMQX_AUTHORIZATION__DENY_ACTION: disconnect
     ports:
       - "1883:1883"   # MQTT
       - "8083:8083"   # MQTT over WebSocket
@@ -84,11 +88,30 @@ services:
     volumes:
       - emqx_data:/opt/emqx/data
       - emqx_log:/opt/emqx/log
+      - ../docker/emqx/acl.conf:/opt/emqx/etc/acl.conf:ro
     healthcheck:
       test: ["CMD", "/opt/emqx/bin/emqx", "ctl", "status"]
       interval: 5s
       timeout: 5s
       retries: 10
+
+  # Bật xác thực + tạo tài khoản y như prod (docker/emqx/init.sh). Mật khẩu dev cố định, khớp mặc định
+  # trong application.yml của 3 service và các script giả lập gateway.
+  emqx-init:
+    image: curlimages/curl:8.10.1
+    container_name: iiot-emqx-init
+    depends_on:
+      emqx:
+        condition: service_healthy
+    restart: "no"
+    entrypoint: ["/bin/sh", "/init.sh"]
+    environment:
+      EMQX_DASHBOARD_PASSWORD: public
+      MQTT_SERVICE_USERNAME: iiot-service
+      MQTT_SERVICE_PASSWORD: iiot-service-dev
+      MQTT_GATEWAY_PASSWORD: iiot-gateway-dev
+    volumes:
+      - ../docker/emqx/init.sh:/init.sh:ro
 
   kafka:
     image: apache/kafka:3.7.0

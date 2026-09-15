@@ -22,7 +22,8 @@ fi
 # Bí mật để rỗng thì service sẽ lên rồi chết theo kiểu khó đoán — chặn ngay tại đây.
 missing=()
 for key in POSTGRES_PASSWORD INFLUX_TOKEN INFLUX_PASSWORD MINIO_ROOT_PASSWORD \
-           APP_JWT_SECRET APP_ENCRYPTION_KEY EMQX_DASHBOARD_PASSWORD MQTT_SERVICE_PASSWORD; do
+           APP_JWT_SECRET APP_ENCRYPTION_KEY EMQX_DASHBOARD_PASSWORD MQTT_SERVICE_PASSWORD \
+           MQTT_GATEWAY_PASSWORD APP_MQTT_PUBLIC_URL; do
   value="$(grep -E "^${key}=" "$ENV_FILE" | head -1 | cut -d= -f2-)"
   [ -z "$value" ] && missing+=("$key")
 done
@@ -64,11 +65,19 @@ set -a; source "$ENV_FILE"; set +a
 
 # URL WebSocket bị nướng vào bundle lúc build. Sai thì trang vẫn mở được nhưng dashboard
 # KHÔNG có dữ liệu realtime — triệu chứng dễ chẩn đoán nhầm sang backend hoặc EMQX.
-if grep -q "REPLACE_WITH_VPS_HOST" "$ENV_FILE"; then
+if echo "$TENANT_WS_BASE_URL" | grep -q "REPLACE_WITH_VPS_HOST"; then
   echo "!! TENANT_WS_BASE_URL còn placeholder trong .env.production" >&2
   echo "   Sửa thành địa chỉ THẬT mà người dùng gõ vào trình duyệt, ví dụ:" >&2
   echo "     TENANT_WS_BASE_URL=ws://203.0.113.10:31080/ws" >&2
   echo "     TENANT_WS_BASE_URL=wss://iot.congty.vn/ws      # nếu đi qua reverse proxy có TLS" >&2
+  exit 1
+fi
+
+# Địa chỉ này hiện ở nút "Thông tin kết nối" để người dùng điền lên gateway — localhost là địa chỉ của chính thiết bị.
+if echo "$APP_MQTT_PUBLIC_URL" | grep -qE "REPLACE_WITH_VPS_HOST|localhost|127\.0\.0\.1"; then
+  echo "!! APP_MQTT_PUBLIC_URL=$APP_MQTT_PUBLIC_URL không phải địa chỉ gateway ngoài hiện trường tới được" >&2
+  echo "   Sửa thành IP/tên miền THẬT của VPS kèm MQTT_PORT, ví dụ:" >&2
+  echo "     APP_MQTT_PUBLIC_URL=tcp://203.0.113.10:${MQTT_PORT}" >&2
   exit 1
 fi
 
@@ -112,16 +121,16 @@ cat <<EOF
 
   Frontend (tenant)   http://localhost:${TENANT_WEB_PORT}
   Frontend (admin)    http://localhost:${ADMIN_WEB_PORT}
-  MQTT (gateway)      tcp://<host>:${MQTT_PORT}
+  MQTT (gateway)      ${APP_MQTT_PUBLIC_URL}
+                      tài khoản iiot-gateway / MQTT_GATEWAY_PASSWORD, Client ID = MAC
   EMQX Dashboard      http://localhost:${EMQX_DASHBOARD_PORT}
 
   Quy mô hiện tại: processing ${PROCESSING_REPLICAS} bản x ${PROCESSING_CONCURRENCY} thread
                    / ${KAFKA_TELEMETRY_PARTITIONS} partition
 
-  VIỆC CÒN LẠI SAU LẦN DEPLOY ĐẦU — EMQX đang tắt ẩn danh, chưa có tài khoản nào:
-    1. Vào EMQX Dashboard, tạo user "${MQTT_SERVICE_USERNAME}" đúng mật khẩu trong .env.production
-    2. Tạo tài khoản RIÊNG cho từng gateway, kèm ACL chỉ cho phép topic gateway/<mac>/#
-    Chưa làm bước 1 thì ingestion/processing không nối được vào EMQX.
+  Xác thực MQTT đã bật tự động (emqx-init). Thông tin điền lên từng gateway nằm ở nút
+  "Thông tin kết nối" của trang chi tiết thiết bị. Gateway đang dùng tài khoản ${MQTT_SERVICE_USERNAME}
+  vẫn chạy được, nhưng nên chuyển sang iiot-gateway.
 
 $(if echo "$FLYWAY_LOCATIONS" | grep -q dev-seed; then cat <<'SEED'
   ⚠ DỮ LIỆU DEMO ĐANG BẬT (FLYWAY_LOCATIONS có db/dev-seed):

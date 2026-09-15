@@ -1,6 +1,7 @@
 import { httpClient } from '@/services/httpClient'
 import type { ApiEnvelope } from '@/types/api'
 import type {
+  ConnectionType,
   CreateExternalSourceRequest,
   DatastreamTelemetry,
   ExternalSource,
@@ -38,10 +39,12 @@ export async function deleteExternalSource(id: number): Promise<void> {
 }
 
 export async function testConnection(
+  connectionType: ConnectionType,
   connectionConfig: ExternalSourceConnectionConfig,
   credential: ExternalSourceCredential
 ): Promise<TestConnectionResult> {
   const { data } = await httpClient.post<ApiEnvelope<TestConnectionResult>>('/external-sources/test-connection', {
+    connectionType,
     connectionConfig,
     credential,
   })

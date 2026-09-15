@@ -56,6 +56,7 @@ scripts/down.sh    # tắt
 | App người dùng | http://localhost:7100 — `admin1` / `123456` |
 | Trang quản trị | http://localhost:7200 — `admin` / `123456` |
 | EMQX Dashboard | http://localhost:18083 — `admin` / `public` |
+| MQTT cho gateway | `tcp://localhost:1883` — `iiot-gateway` / `iiot-gateway-dev`, Client ID = MAC |
 | MailHog (xem mail) | http://localhost:8025 |
 
 ## Deploy production
@@ -79,11 +80,12 @@ Lần đầu build mất 1–2 tiếng. Script tự kiểm tra cấu hình và d
 
 ```bash
 # 1. Mật khẩu — để trống là script không cho chạy
-POSTGRES_PASSWORD=  APP_JWT_SECRET=  ...
+POSTGRES_PASSWORD=  APP_JWT_SECRET=  MQTT_GATEWAY_PASSWORD=  ...
 
-# 2. Địa chỉ người dùng gõ vào trình duyệt
+# 2. Địa chỉ người dùng gõ vào trình duyệt, và địa chỉ gateway ngoài hiện trường gửi dữ liệu tới
 TENANT_WS_BASE_URL=ws://<địa-chỉ>:31080/ws
 APP_CORS_ALLOWED_ORIGINS=http://<địa-chỉ>:31080,http://<địa-chỉ>:31090
+APP_MQTT_PUBLIC_URL=tcp://<địa-chỉ>:31883
 
 # 3. Bỏ dòng dev-seed đi khi chạy thật (nếu để, sẽ có sẵn tài khoản admin/123456)
 FLYWAY_LOCATIONS=classpath:db/migration

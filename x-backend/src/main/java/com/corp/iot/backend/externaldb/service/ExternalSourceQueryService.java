@@ -33,8 +33,9 @@ public class ExternalSourceQueryService {
     private final SqlQueryValidator sqlQueryValidator;
     private final ObjectMapper objectMapper;
 
-    public TestConnectionResponse testConnection(ExternalSourceConnectionConfig config, ExternalSourceCredential credential) {
-        return externalDbGateway.test(config, credential);
+    public TestConnectionResponse testConnection(String connectionType, ExternalSourceConnectionConfig config,
+                                                 ExternalSourceCredential credential) {
+        return externalDbGateway.test(connectionType, config, credential);
     }
 
     public TestConnectionResponse testConnection(Long sourceId) {
@@ -46,12 +47,12 @@ public class ExternalSourceQueryService {
         ExternalSource source = getOrThrow(sourceId);
         ExternalSourceConnectionConfig config = configOverride != null ? configOverride : source.getConnectionConfig();
         ExternalSourceCredential credential = credentialOverride != null ? credentialOverride : credentialOf(source);
-        return externalDbGateway.test(config, credential);
+        return externalDbGateway.test(source.getConnectionType(), config, credential);
     }
 
     public List<SchemaTable> listSchema(Long sourceId) {
         ExternalSource source = getOrThrow(sourceId);
-        return externalDbGateway.listSchema(source.getConnectionConfig(), credentialOf(source));
+        return externalDbGateway.listSchema(source.getConnectionType(), source.getConnectionConfig(), credentialOf(source));
     }
 
     // Ước lượng khối lượng backfill của 1 job — dùng chính câu SQL đã lưu, không nhận SQL từ
@@ -59,14 +60,14 @@ public class ExternalSourceQueryService {
     public BackfillEstimateResponse estimateBackfill(Long sourceId, ExternalSourceQueryConfig queryConfig,
                                                      Instant targetFrom, Instant coveredFrom) {
         ExternalSource source = getOrThrow(sourceId);
-        return externalDbGateway.estimate(source.getConnectionConfig(), credentialOf(source),
+        return externalDbGateway.estimate(source.getConnectionType(), source.getConnectionConfig(), credentialOf(source),
                 queryConfig.sql(), queryConfig.timestampColumn(), targetFrom, coveredFrom);
     }
 
     // Dòng mới nhất của một job đã lưu — dùng chính câu SQL đã lưu, không nhận SQL từ ngoài vào.
     public PreviewResponse sampleLatest(Long sourceId, ExternalSourceQueryConfig queryConfig, int limit) {
         ExternalSource source = getOrThrow(sourceId);
-        return externalDbGateway.sample(source.getConnectionConfig(), credentialOf(source),
+        return externalDbGateway.sample(source.getConnectionType(), source.getConnectionConfig(), credentialOf(source),
                 queryConfig.sql(), queryConfig.timestampColumn(), limit);
     }
 
@@ -74,7 +75,8 @@ public class ExternalSourceQueryService {
         // Chạy thử phải cùng luật với lúc lưu, nếu không người dùng chạy thử xanh rồi lưu lại đỏ.
         sqlQueryValidator.validate(sql);
         ExternalSource source = getOrThrow(sourceId);
-        return externalDbGateway.preview(source.getConnectionConfig(), credentialOf(source), sql, timestampColumn);
+        return externalDbGateway.preview(source.getConnectionType(), source.getConnectionConfig(), credentialOf(source),
+                sql, timestampColumn);
     }
 
     private ExternalSourceCredential credentialOf(ExternalSource source) {

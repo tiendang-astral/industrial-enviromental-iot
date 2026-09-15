@@ -41,5 +41,108 @@ services:
       - ../docker/mock-external-db/insert-loop.sh:/insert-loop.sh:ro
     entrypoint: ["sh", "/insert-loop.sh"]
 
+  # SQL Server cho dialect SQLSERVER. Image của Microsoft chỉ có bản amd64 — trên Apple Silicon chạy
+  # qua Rosetta của Docker Desktop (Settings → General → "Use Rosetta for x86_64/amd64 emulation").
+  # Tài khoản: sa / sensors_rw (có quyền ghi) / sensors_ro (chỉ đọc), cùng mật khẩu Sensors#2026.
+  mock-external-mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    platform: linux/amd64
+    container_name: mock-external-mssql
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: Developer
+      MSSQL_SA_PASSWORD: "Sensors#2026"
+    ports:
+      - "14330:1433"
+    volumes:
+      - mock_external_mssql_data:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -Q 'SELECT 1' -b -o /dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  # Dùng lại image server chỉ để có sqlcmd: tạo database + tài khoản, rồi chèn 1 dòng/20s.
+  mock-external-mssql-inserter:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    platform: linux/amd64
+    container_name: mock-external-mssql-inserter
+    depends_on:
+      mock-external-mssql:
+        condition: service_healthy
+    environment:
+      MSSQL_SA_PASSWORD: "Sensors#2026"
+    volumes:
+      - ../docker/mock-external-mssql:/scripts:ro
+    entrypoint: ["bash", "/scripts/init-and-insert.sh"]
+
+  # MySQL và MariaDB cho dialect MYSQL (cả hai có image arm64 gốc), dùng chung init.sql và insert-loop.sh.
+  # Tài khoản: root / sensors_rw (có quyền ghi) / sensors_ro (chỉ đọc), cùng mật khẩu Sensors#2026.
+  mock-external-mysql:
+    image: mysql:8.4
+    container_name: mock-external-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: "Sensors#2026"
+      MYSQL_DATABASE: sensors
+      TZ: UTC
+    ports:
+      - "3307:3306"
+    volumes:
+      - mock_external_mysql_data:/var/lib/mysql
+      - ../docker/mock-external-mysql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  mock-external-mysql-inserter:
+    image: mysql:8.4
+    container_name: mock-external-mysql-inserter
+    depends_on:
+      mock-external-mysql:
+        condition: service_healthy
+    environment:
+      DB_HOST: mock-external-mysql
+      MYSQL_PWD: "Sensors#2026"
+    volumes:
+      - ../docker/mock-external-mysql/insert-loop.sh:/insert-loop.sh:ro
+    entrypoint: ["bash", "/insert-loop.sh"]
+
+  mock-external-mariadb:
+    image: mariadb:11.4
+    container_name: mock-external-mariadb
+    environment:
+      MARIADB_ROOT_PASSWORD: "Sensors#2026"
+      MARIADB_DATABASE: sensors
+      TZ: UTC
+    ports:
+      - "3308:3306"
+    volumes:
+      - mock_external_mariadb_data:/var/lib/mysql
+      - ../docker/mock-external-mysql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  mock-external-mariadb-inserter:
+    image: mariadb:11.4
+    container_name: mock-external-mariadb-inserter
+    depends_on:
+      mock-external-mariadb:
+        condition: service_healthy
+    environment:
+      DB_HOST: mock-external-mariadb
+      MYSQL_PWD: "Sensors#2026"
+    volumes:
+      - ../docker/mock-external-mysql/insert-loop.sh:/insert-loop.sh:ro
+    entrypoint: ["bash", "/insert-loop.sh"]
+
 volumes:
   mock_external_db_data:
+  mock_external_mssql_data:
+  mock_external_mysql_data:
+  mock_external_mariadb_data:

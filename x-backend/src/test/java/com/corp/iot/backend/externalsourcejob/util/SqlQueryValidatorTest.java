@@ -75,33 +75,17 @@ class SqlQueryValidatorTest {
         assertThat(prepared.sql()).contains("':cursor'");
     }
 
-    // toInnerSql phục vụ 2 việc: đếm ước lượng và bọc bảng con khi vá lịch sử. Giữ lại LIMIT
-    // cuối câu thì phép đếm luôn trả về đúng bấy nhiêu và người dùng thấy con số sai.
+    // SQL Server không có phiên READ ONLY phía máy chủ nên SELECT ... INTO sẽ tạo bảng thật trên database khách hàng.
     @Test
-    void innerSqlStripsTrailingLimit() {
-        String sql = "SELECT measured_at, temp FROM readings WHERE measured_at > :cursor ORDER BY measured_at LIMIT 500";
-
-        assertThat(validator.toInnerSql(sql)).endsWith("ORDER BY measured_at");
+    void rejectsSelectInto() {
+        assertThatThrownBy(() ->
+                validator.validate("SELECT ts, temp INTO backup_readings FROM readings WHERE ts > :cursor"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("INTO");
     }
 
     @Test
-    void innerSqlStripsLimitWithOffsetAndSemicolon() {
-        assertThat(validator.toInnerSql("SELECT t FROM r WHERE t > :cursor LIMIT 100 OFFSET 20;"))
-                .isEqualTo("SELECT t FROM r WHERE t > :cursor");
-    }
-
-    @Test
-    void innerSqlKeepsLimitInsideUserSubquery() {
-        String sql = "SELECT * FROM (SELECT t FROM r ORDER BY t LIMIT 5) x WHERE x.t > :cursor";
-
-        assertThat(validator.toInnerSql(sql)).isEqualTo(sql);
-    }
-
-    @Test
-    void innerSqlDropsCommentsButKeepsStringContent() {
-        String sql = "SELECT t, 'a -- b' AS note -- ghi chu\nFROM r WHERE t > :cursor";
-
-        assertThat(validator.toInnerSql(sql)).contains("'a -- b'");
-        assertThat(validator.toInnerSql(sql)).doesNotContain("ghi chu");
+    void allowsIntoInsideStringOrQuotedIdentifier() {
+        validator.validate("SELECT ts, 'insert into' AS note, \"into\" AS a, [into] AS b FROM readings WHERE ts > :cursor");
     }
 }

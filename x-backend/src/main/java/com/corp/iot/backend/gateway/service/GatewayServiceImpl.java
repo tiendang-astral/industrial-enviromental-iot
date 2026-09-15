@@ -5,6 +5,7 @@ import com.corp.iot.backend.common.scope.ScopeService;
 import com.corp.iot.backend.common.security.AppUserPrincipal;
 import com.corp.iot.backend.common.tenant.TenantContext;
 import com.corp.iot.backend.gateway.dto.CreateGatewayRequest;
+import com.corp.iot.backend.gateway.dto.GatewayConnectionInfoResponse;
 import com.corp.iot.backend.gateway.dto.GatewayResponse;
 import com.corp.iot.backend.gateway.dto.UpdateGatewayRequest;
 import com.corp.iot.backend.gateway.entity.Gateway;
@@ -15,6 +16,7 @@ import com.corp.iot.backend.tenantnode.entity.NodeType;
 import com.corp.iot.backend.tenantnode.entity.TenantNode;
 import com.corp.iot.backend.tenantnode.repository.TenantNodeRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
@@ -33,6 +35,23 @@ public class GatewayServiceImpl implements GatewayService {
     private final GatewayMapper gatewayMapper;
     private final ScopeService scopeService;
     private final GatewayPinCacheEvictor gatewayPinCacheEvictor;
+
+    @Value("${app.mqtt.public-url}")
+    private String mqttPublicUrl;
+
+    @Value("${app.mqtt.gateway-username}")
+    private String mqttGatewayUsername;
+
+    @Value("${app.mqtt.gateway-password}")
+    private String mqttGatewayPassword;
+
+    @Override
+    public GatewayConnectionInfoResponse connectionInfo(Long id) {
+        String mac = getOrThrow(id).getMacAddress();
+        String topicPrefix = "gateway/" + mac + "/";
+        return new GatewayConnectionInfoResponse(mqttPublicUrl, mac, mqttGatewayUsername, mqttGatewayPassword,
+                topicPrefix + "data", topicPrefix + "command", topicPrefix + "ack");
+    }
 
     @Override
     public List<GatewayResponse> list(Long tenantNodeId, boolean includeDescendants) {

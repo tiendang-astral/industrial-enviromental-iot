@@ -1,6 +1,18 @@
 import { httpClient } from '@/services/httpClient'
 import type { ApiEnvelope } from '@/types/api'
-import type { CreateGatewayRequest, Gateway, UpdateGatewayRequest } from '@/types/gateway'
+import type {
+  CreateGatewayRequest,
+  Gateway,
+  GatewayConnectionInfo,
+  UpdateGatewayRequest,
+} from '@/types/gateway'
+
+export async function getGatewayConnectionInfo(id: number): Promise<GatewayConnectionInfo> {
+  const { data } = await httpClient.get<ApiEnvelope<GatewayConnectionInfo>>(
+    `/gateways/${id}/connection-info`
+  )
+  return data.data!
+}
 
 export async function listGateways(
   tenantNodeId?: number,

@@ -1,6 +1,7 @@
 import { z } from 'zod'
 
 export const createExternalSourceSchema = z.object({
+  connectionType: z.enum(['POSTGRESQL', 'SQLSERVER', 'MYSQL']),
   tenantNodeId: z.string().min(1, 'Vui lòng chọn node'),
   name: z.string().min(1, 'Vui lòng nhập tên nguồn'),
   host: z.string().min(1, 'Vui lòng nhập host'),

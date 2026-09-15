@@ -4,8 +4,10 @@ mọi pin INPUT hiện có 1 lần/chu kỳ (đúng contract MQTT thật, xem AR
 § Flow: Gateway sensor data) — mỗi metric random-walk quanh giá trị khởi điểm
 thực tế, không phải giá trị cố định.
 
+Đăng nhập như gateway thật: tài khoản iiot-gateway, Client ID = MAC (docker/emqx/acl.conf).
+
 Usage: python3 scripts/simulate_full_gateway.py [--interval 5] [--mac aa:bb:cc:dd:ee:ff]
-       python3 scripts/simulate_full_gateway.py --port 31883 --username iiot-service --password ...  # prod
+       python3 scripts/simulate_full_gateway.py --host <VPS> --port 31883 --password <MQTT_GATEWAY_PASSWORD>  # prod
 """
 import argparse
 import json
@@ -47,9 +49,8 @@ def main():
     parser.add_argument("--mac", default=DEFAULT_MAC)
     parser.add_argument("--host", default="localhost")
     parser.add_argument("--port", type=int, default=1883)
-    # EMQX production bật xác thực; bỏ trống thì nối ẩn danh (local dev).
-    parser.add_argument("--username", default=None)
-    parser.add_argument("--password", default=None)
+    parser.add_argument("--username", default="iiot-gateway")
+    parser.add_argument("--password", default="iiot-gateway-dev")
     args = parser.parse_args()
     topic = f"gateway/{args.mac}/data"
 
@@ -70,8 +71,9 @@ def main():
             "measuredAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "readings": readings,
         })
-        auth = {"username": args.username, "password": args.password} if args.username else None
-        publish.single(topic, payload=payload, hostname=args.host, port=args.port, qos=1, auth=auth)
+        auth = {"username": args.username, "password": args.password}
+        publish.single(topic, payload=payload, hostname=args.host, port=args.port, qos=1, auth=auth,
+                       client_id=args.mac)
         print(f"published {len(readings)} readings: {payload}")
         time.sleep(args.interval)
 

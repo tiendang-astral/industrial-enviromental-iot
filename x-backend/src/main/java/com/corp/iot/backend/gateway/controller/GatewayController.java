@@ -2,6 +2,7 @@ package com.corp.iot.backend.gateway.controller;
 
 import com.corp.iot.backend.common.dto.ApiResponse;
 import com.corp.iot.backend.gateway.dto.CreateGatewayRequest;
+import com.corp.iot.backend.gateway.dto.GatewayConnectionInfoResponse;
 import com.corp.iot.backend.gateway.dto.GatewayResponse;
 import com.corp.iot.backend.gateway.dto.UpdateGatewayRequest;
 import com.corp.iot.backend.gateway.service.GatewayService;
@@ -26,6 +27,13 @@ public class GatewayController {
             @RequestParam(required = false) Long tenantNodeId,
             @RequestParam(defaultValue = "false") boolean includeDescendants) {
         return ApiResponse.of(gatewayService.list(tenantNodeId, includeDescendants));
+    }
+
+    // VIEWER không được gọi: response có mật khẩu MQTT dùng chung.
+    @GetMapping("/{id}/connection-info")
+    @PreAuthorize("hasAnyAuthority('TENANT_ADMIN','MANAGER','OPERATOR') and @nodeScope.canAccessGateway(#id)")
+    public ApiResponse<GatewayConnectionInfoResponse> connectionInfo(@PathVariable Long id) {
+        return ApiResponse.of(gatewayService.connectionInfo(id));
     }
 
     @PostMapping

@@ -13,6 +13,7 @@ import { JobEditorDialog } from '@/components/datasources/JobEditorDialog'
 import { SourceMetaBar } from '@/components/datasources/SourceMetaBar'
 import { SourcePipeline } from '@/components/datasources/SourcePipeline'
 import { getApiErrorMessage } from '@/lib/apiError'
+import { connectionTypeLabel } from '@/lib/connectionTypes'
 import { useDeleteExternalSourceMutation } from '@/queries/useDeleteExternalSourceMutation'
 import { useExternalSourceJobsQuery } from '@/queries/useExternalSourceJobsQuery'
 import { useExternalSourcesQuery } from '@/queries/useExternalSourcesQuery'
@@ -81,7 +82,7 @@ export default function DataSourceDetailPage() {
           <>
             Nguồn {source.name}
             <Badge variant="secondary" className="font-mono text-[11px] font-normal">
-              {source.connectionType}
+              {connectionTypeLabel(source.connectionType)}
             </Badge>
           </>
         }

@@ -69,7 +69,7 @@ export function SourceMetaBar({
                 <TooltipTrigger asChild>
                   <Lock className="size-3.5 shrink-0 text-muted-foreground" />
                 </TooltipTrigger>
-                <TooltipContent>SSL: {source.connectionConfig.sslMode}</TooltipContent>
+                <TooltipContent>Kết nối có mã hoá</TooltipContent>
               </Tooltip>
             )}
             <CopyButton value={connection} label={`Sao chép chuỗi kết nối của ${source.name}`} />

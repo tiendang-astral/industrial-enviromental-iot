@@ -23,6 +23,14 @@ until docker compose -f compose/docker-compose.yml ps kafka --format json | grep
   sleep 1
 done
 
+# EMQX bắt đăng nhập — tài khoản chưa tạo xong thì ingestion/processing bị từ chối kết nối.
+echo "==> Waiting for EMQX accounts (emqx-init)..."
+if [ "$(docker wait iiot-emqx-init)" != "0" ]; then
+  echo "!! emqx-init lỗi, ingestion/processing sẽ không nối được EMQX:" >&2
+  docker logs iiot-emqx-init >&2
+  exit 1
+fi
+
 echo "==> Ensuring Kafka topics exist..."
 "$ROOT_DIR/scripts/create-kafka-topics.sh"
 
@@ -59,6 +67,8 @@ cat <<EOF
   Frontend (tenant)    http://localhost:7100
   Frontend (admin)     http://localhost:7200
   EMQX Dashboard       http://localhost:18083 (admin/public)
+  MQTT (gateway)       tcp://localhost:1883 — iiot-gateway / iiot-gateway-dev, Client ID = MAC
+  MQTT (service)       iiot-service / iiot-service-dev
   MinIO Console        http://localhost:19001 (iiot/iiot12345)
   InfluxDB UI          http://localhost:8086
 

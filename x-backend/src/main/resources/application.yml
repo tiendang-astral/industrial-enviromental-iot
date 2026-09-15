@@ -46,6 +46,12 @@ app:
     online-threshold-minutes: 5
   command:
     timeout-seconds: 30
+  mqtt:
+    # Địa chỉ gateway điền lên thiết bị — không phải tcp://emqx:1883 nội bộ của các service.
+    public-url: ${APP_MQTT_PUBLIC_URL:tcp://localhost:1883}
+    # Cố định vì docker/emqx/acl.conf viết luật theo đúng tên này.
+    gateway-username: iiot-gateway
+    gateway-password: ${MQTT_GATEWAY_PASSWORD:iiot-gateway-dev}
   external:
     query-timeout-seconds: 10
     preview-max-rows: 50

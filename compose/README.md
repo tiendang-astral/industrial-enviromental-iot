@@ -37,13 +37,19 @@ scripts/deploy-prod.sh
 `backend` chạy Flyway nên phải healthy trước `ingestion`/`processing` — hai service này để
 `ddl-auto=validate`, schema chưa có là chết ngay lúc boot. `kafka-init` tạo topic rồi thoát.
 
-### Sau lần deploy đầu
+### Tài khoản MQTT
 
-EMQX đặt `EMQX_ALLOW_ANONYMOUS=false` và **chưa có tài khoản nào**. Vào Dashboard tạo:
+Không có bước tay nào. `emqx-init` (`docker/emqx/init.sh`, dùng chung DEV và prod) bật xác thực và
+tạo/đồng bộ mật khẩu 2 tài khoản mỗi lần khởi động; lỗi thật thì nó thoát khác 0 và ingestion/processing
+không lên. Quyền theo topic nằm ở `docker/emqx/acl.conf`.
 
-1. User cho service, đúng `MQTT_SERVICE_USERNAME`/`PASSWORD` trong `.env.production` — chưa có thì
-   ingestion/processing không nối được vào EMQX.
-2. Tài khoản riêng cho từng gateway, kèm ACL chỉ cho phép topic `gateway/<mac>/#`.
+| Tài khoản | Dùng cho | Mật khẩu |
+|---|---|---|
+| `MQTT_SERVICE_USERNAME` | ingestion/processing, toàn quyền | `MQTT_SERVICE_PASSWORD` |
+| `iiot-gateway` | **mọi gateway dùng chung**, Client ID = MAC, chỉ đụng được topic của MAC đó | `MQTT_GATEWAY_PASSWORD` |
+
+Người dùng xem giá trị điền lên thiết bị ở nút "Thông tin kết nối" của trang chi tiết thiết bị — địa chỉ broker
+lấy từ `APP_MQTT_PUBLIC_URL`. Local dev: `iiot-service` / `iiot-service-dev`, `iiot-gateway` / `iiot-gateway-dev`.
 
 ### Nới quy mô
 

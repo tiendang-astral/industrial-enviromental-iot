@@ -10,11 +10,14 @@ export interface ExternalSourceCredential {
   password: string
 }
 
+/** Loại có dialect ở backend. `MYSQL` dùng chung cho MySQL và MariaDB. */
+export type ConnectionType = 'POSTGRESQL' | 'SQLSERVER' | 'MYSQL'
+
 export interface ExternalSource {
   id: number
   tenantNodeId: number
   name: string
-  connectionType: 'POSTGRESQL'
+  connectionType: ConnectionType
   connectionConfig: ExternalSourceConnectionConfig
   lastSyncStatus: string | null
   lastSyncAt: string | null
@@ -23,7 +26,7 @@ export interface ExternalSource {
 
 export interface CreateExternalSourceRequest {
   name: string
-  connectionType: 'POSTGRESQL'
+  connectionType: ConnectionType
   connectionConfig: ExternalSourceConnectionConfig
   credential: ExternalSourceCredential
 }

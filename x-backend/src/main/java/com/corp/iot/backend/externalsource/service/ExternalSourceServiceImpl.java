@@ -5,6 +5,7 @@ import com.corp.iot.backend.dashboard.repository.DashboardRepository;
 import com.corp.iot.backend.common.exception.BusinessException;
 import com.corp.iot.backend.common.scope.ScopeService;
 import com.corp.iot.backend.common.security.AppUserPrincipal;
+import com.corp.iot.backend.externaldb.dialect.ExternalDbDialects;
 import com.corp.iot.backend.externalsource.dto.CreateExternalSourceRequest;
 import com.corp.iot.backend.externalsource.dto.ExternalSourceCredential;
 import com.corp.iot.backend.externalsource.dto.ExternalSourceResponse;
@@ -29,10 +30,7 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class ExternalSourceServiceImpl implements ExternalSourceService {
 
-    // Chỉ hỗ trợ PostgreSQL ở Phase 5 (xem DATABASE.md § external_source) — mở rộng sau bằng
-    // migration đổi CHECK constraint, sửa cả set này.
-    private static final Set<String> SUPPORTED_CONNECTION_TYPES = Set.of("POSTGRESQL");
-
+    private final ExternalDbDialects externalDbDialects;
     private final ExternalSourceRepository externalSourceRepository;
     private final DashboardRepository dashboardRepository;
     private final ExternalSourceJobRepository externalSourceJobRepository;
@@ -67,7 +65,7 @@ public class ExternalSourceServiceImpl implements ExternalSourceService {
         if (!tenantNodeRepository.existsById(tenantNodeId)) {
             throw new BusinessException(HttpStatus.NOT_FOUND, "NODE_NOT_FOUND", "Không tìm thấy node");
         }
-        if (!SUPPORTED_CONNECTION_TYPES.contains(request.connectionType())) {
+        if (!externalDbDialects.supports(request.connectionType())) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "INVALID_CONNECTION_TYPE", "Loại kết nối không được hỗ trợ");
         }
 
