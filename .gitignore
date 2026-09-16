@@ -21,7 +21,9 @@ node_modules/
 .superpowers/
 .claude/
 context/
-docker/
+docker/*
+# acl.conf + init.sh được compose prod gắn thẳng vào container EMQX nên phải có trên máy deploy
+!docker/emqx/
 slide_image/
 slide_src/
 slide_video/
