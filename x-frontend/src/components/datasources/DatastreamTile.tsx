@@ -36,7 +36,7 @@ export function DatastreamTile({
   const hasValue = telemetry?.latestValue !== null && telemetry?.latestValue !== undefined
   // Màu của chỉ số: gắn cho con số, đơn vị và chip mã — ba thứ cùng nói "kênh này đo cái gì".
   // Kênh chưa có số đo thì bỏ màu, để "chưa có dữ liệu" vẫn đọc ra là trạng thái xám bình thường.
-  const color = hasValue ? metricColorVar(datastream.metricCode) : undefined
+  const color = hasValue ? metricColorVar(datastream.metricCode, datastream.metricColor) : undefined
 
   return (
     <button

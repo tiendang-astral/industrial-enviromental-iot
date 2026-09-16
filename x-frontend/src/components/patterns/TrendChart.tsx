@@ -40,6 +40,7 @@ export function TrendChart({
   now,
   zoomable = false,
   metricCode,
+  metricColor,
   className,
   emptyLabel = 'Chưa đủ số đo để vẽ biểu đồ',
 }: {
@@ -64,6 +65,7 @@ export function TrendChart({
    * khắp nơi.
    */
   metricCode?: string | null
+  metricColor?: string | null
   unit?: string | null
   /** Bắt buộc với `sparkline`: trục X cố định theo khoảng đang xem, không co theo dữ liệu. */
   rangeMinutes?: number
@@ -73,7 +75,7 @@ export function TrendChart({
   emptyLabel?: string
 }) {
   const palette = useChartPalette()
-  const color = metricSeriesColor(metricCode, palette)
+  const color = metricSeriesColor(metricCode, palette, metricColor)
   const [width, setWidth] = useState(INITIAL_WIDTH)
 
   // Làm tròn xuống bội số 40px: kéo giãn widget không dựng lại option ở từng pixel một.

@@ -61,6 +61,11 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class ReportServiceImpl implements ReportService {
+    // Luôn MAX: trung bình hoá một đỉnh vượt ngưỡng thành đường phẳng là giấu mất đúng thứ người
+    // trực ca cần thấy. Trước đây suy từ metric.max_value, nhưng ngưỡng nay là của từng tenant
+    // (tenant_metric_setting) nên biểu đồ sẽ đổi hình khi ai đó đặt ngưỡng — không chấp nhận được.
+    private static final AggregateFn AGGREGATE_FN = AggregateFn.MAX;
+
 
     /** Truy vấn chạy đồng bộ trong request thread — hai trần này thay cho việc để người dùng tự treo. */
     private static final int MAX_RANGE_DAYS = 366;
@@ -141,7 +146,7 @@ public class ReportServiceImpl implements ReportService {
                 influxReadService.summarizeSensor(tenantId, new HashSet<>(sensorKeys.values()), from, to);
         Map<ExternalChannel, ChannelStats> externalStats =
                 influxReadService.summarizeExternal(tenantId, new HashSet<>(externalKeys.values()), from, to);
-        Map<Long, List<ReadingPointDto>> histories = histories(tenantId, datastreams, metrics, sensorKeys, externalKeys, from, to);
+        Map<Long, List<ReadingPointDto>> histories = histories(tenantId, datastreams, sensorKeys, externalKeys, from, to);
 
         List<EnvironmentChannelResponse> channels = datastreams.stream().map(d -> {
             Metric metric = metrics.get(d.getMetricId());
@@ -239,31 +244,31 @@ public class ReportServiceImpl implements ReportService {
     }
 
     /**
-     * Lịch sử cho biểu đồ, gom theo (measurement, hàm gộp) — hàm gộp khác nhau theo metric nên không
-     * dồn được tất cả vào một câu, nhưng tối đa vẫn chỉ 4 câu truy vấn cho cả báo cáo.
+     * Lịch sử cho biểu đồ — đúng 2 câu truy vấn cho cả báo cáo, một cho mỗi measurement. Trước đây
+     * còn gom thêm theo hàm gộp vì nó suy từ ngưỡng của metric; ngưỡng nay là của từng tenant nên
+     * hàm gộp cố định MAX (xem AGGREGATE_FN).
      */
     private Map<Long, List<ReadingPointDto>> histories(
-            Long tenantId, List<Datastream> datastreams, Map<Long, Metric> metrics,
+            Long tenantId, List<Datastream> datastreams,
             Map<Long, SensorChannel> sensorKeys, Map<Long, ExternalChannel> externalKeys, Instant from, Instant to) {
 
-        Map<AggregateFn, Set<SensorChannel>> sensorByFn = new LinkedHashMap<>();
-        Map<AggregateFn, Set<ExternalChannel>> externalByFn = new LinkedHashMap<>();
+        Set<SensorChannel> sensorChannels = new HashSet<>();
+        Set<ExternalChannel> externalChannels = new HashSet<>();
         for (Datastream d : datastreams) {
-            AggregateFn fn = aggregateFn(metrics.get(d.getMetricId()));
             SensorChannel sensorKey = sensorKeys.get(d.getId());
             if (sensorKey != null) {
-                sensorByFn.computeIfAbsent(fn, k -> new HashSet<>()).add(sensorKey);
+                sensorChannels.add(sensorKey);
             } else if (externalKeys.containsKey(d.getId())) {
-                externalByFn.computeIfAbsent(fn, k -> new HashSet<>()).add(externalKeys.get(d.getId()));
+                externalChannels.add(externalKeys.get(d.getId()));
             }
         }
 
-        Map<SensorChannel, List<ReadingPoint>> sensorPoints = new HashMap<>();
-        sensorByFn.forEach((fn, channels) ->
-                sensorPoints.putAll(influxReadService.historySensorRange(tenantId, channels, from, to, fn)));
-        Map<ExternalChannel, List<ReadingPoint>> externalPoints = new HashMap<>();
-        externalByFn.forEach((fn, channels) ->
-                externalPoints.putAll(influxReadService.historyExternalRange(tenantId, channels, from, to, fn)));
+        Map<SensorChannel, List<ReadingPoint>> sensorPoints = sensorChannels.isEmpty()
+                ? Map.of()
+                : influxReadService.historySensorRange(tenantId, sensorChannels, from, to, AGGREGATE_FN);
+        Map<ExternalChannel, List<ReadingPoint>> externalPoints = externalChannels.isEmpty()
+                ? Map.of()
+                : influxReadService.historyExternalRange(tenantId, externalChannels, from, to, AGGREGATE_FN);
 
         Map<Long, List<ReadingPointDto>> result = new HashMap<>();
         for (Datastream d : datastreams) {
@@ -377,12 +382,6 @@ public class ReportServiceImpl implements ReportService {
                 list.stream().filter(i -> AlertSeverity.WARNING.name().equals(i.severity())).count())));
         rows.sort(Comparator.comparingLong(IncidentCountResponse::total).reversed());
         return rows;
-    }
-
-    // Kênh có ngưỡng trên thì gộp bằng MAX — khớp quy ước của TelemetryServiceImpl, để biểu đồ báo
-    // cáo không phẳng hơn biểu đồ trên dashboard của cùng kênh.
-    private AggregateFn aggregateFn(Metric metric) {
-        return metric != null && metric.getMaxValue() != null ? AggregateFn.MAX : AggregateFn.MEAN;
     }
 
     private void validateRange(Instant from, Instant to) {

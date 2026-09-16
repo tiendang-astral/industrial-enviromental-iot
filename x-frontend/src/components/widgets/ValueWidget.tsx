@@ -55,7 +55,7 @@ function valueColor(row: Pick<ChannelRow, 'threshold' | 'datastream'>): {
   if (row.threshold.status !== 'ok') {
     return { className: METRIC_STATUS_VALUE_CLASS[row.threshold.status] }
   }
-  const color = metricColorVar(row.datastream.metricCode)
+  const color = metricColorVar(row.datastream.metricCode, row.datastream.metricColor)
   return { className: '', style: color ? { color } : undefined }
 }
 

@@ -11,6 +11,7 @@ import GatewayDetailPage from '@/pages/GatewayDetailPage'
 import LoginPage from '@/pages/LoginPage'
 import OrganizationPage from '@/pages/OrganizationPage'
 import ReportsPage from '@/pages/ReportsPage'
+import SettingsPage from '@/pages/SettingsPage'
 import UsersPage from '@/pages/UsersPage'
 import SourceDashboardPage from '@/pages/SourceDashboardPage'
 
@@ -85,6 +86,10 @@ export const router = createBrowserRouter([
           {
             path: '/users',
             element: <UsersPage />,
+          },
+          {
+            path: '/settings',
+            element: <SettingsPage />,
           },
         ],
       },

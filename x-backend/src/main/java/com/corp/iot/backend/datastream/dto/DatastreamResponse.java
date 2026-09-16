@@ -9,6 +9,9 @@ public record DatastreamResponse(
         Long metricId,
         String metricCode,
         String metricUnit,
+        // Token màu của chỉ số riêng do tenant thêm; NULL với chỉ số hệ thống — FE tra theo
+        // metricCode trong lib/metricColors.ts.
+        String metricColor,
         String sourceType,
         Long sourceId,
         String sourceField,

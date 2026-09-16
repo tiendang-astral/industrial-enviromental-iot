@@ -45,6 +45,8 @@ export interface Datastream {
   metricId: number
   metricCode: string | null
   metricUnit: string | null
+  /** Token màu của chỉ số riêng; null với chỉ số hệ thống (màu tra theo metricCode). */
+  metricColor: string | null
   sourceType: 'GATEWAY_PIN' | 'EXTERNAL_SOURCE_JOB'
   sourceId: number
   /** Chỉ có khi sourceType=EXTERNAL_SOURCE_JOB — tên cột trong kết quả truy vấn của job. */

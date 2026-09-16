@@ -31,7 +31,7 @@ export function ChannelChartCard({ view }: { view: PinView }) {
   // bên dưới một khung báo "chưa đủ số đo" là hai câu đá nhau trên cùng một card.
   const summary = history.length > 1 ? stats(history.map((point) => point.value)) : null
   // Cùng màu với nhãn và con số của chân này ở tab Tổng quan.
-  const color = pin.enabled ? metricColorVar(metric?.code) : undefined
+  const color = pin.enabled ? metricColorVar(metric?.code, metric?.color) : undefined
 
   return (
     <Card ref={ref}>

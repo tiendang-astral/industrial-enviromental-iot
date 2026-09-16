@@ -1,6 +1,6 @@
 import { NavLink, useLocation } from 'react-router-dom'
 import { Activity } from 'lucide-react'
-import { NAV_GROUPS } from '@/components/layout/navConfig'
+import { NAV_GROUPS, isNavItemVisible } from '@/components/layout/navConfig'
 import {
   Sidebar,
   SidebarContent,
@@ -13,6 +13,7 @@ import {
   SidebarMenuItem,
 } from '@/components/ui/sidebar'
 import { cn } from '@/lib/utils'
+import { useAuthStore } from '@/stores/useAuthStore'
 
 /**
  * Nav chức năng. Thu gọn kiểu icon-rail — mỗi mục có icon riêng nên rail vẫn nhận ra được.
@@ -21,6 +22,7 @@ import { cn } from '@/lib/utils'
  */
 export function AppSidebar() {
   const { pathname } = useLocation()
+  const authorities = useAuthStore((state) => state.user?.authorities)
 
   return (
     <Sidebar collapsible="icon">
@@ -37,7 +39,10 @@ export function AppSidebar() {
       </SidebarHeader>
 
       <SidebarContent className="pt-2">
-        {NAV_GROUPS.map((group, index) => (
+        {NAV_GROUPS.map((group, index) => {
+          const items = group.items.filter((item) => isNavItemVisible(item, authorities))
+          if (items.length === 0) return null
+          return (
           <SidebarGroup
             key={group.label ?? `group-${index}`}
             className="px-2 py-1 group-data-[collapsible=icon]:px-1"
@@ -49,7 +54,7 @@ export function AppSidebar() {
             )}
             <SidebarGroupContent>
               <SidebarMenu className="gap-1">
-                {group.items.map((item) => {
+                {items.map((item) => {
                   const isActive =
                     item.href === '/' ? pathname === '/' : pathname.startsWith(item.href)
                   return (
@@ -91,7 +96,8 @@ export function AppSidebar() {
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
-        ))}
+          )
+        })}
       </SidebarContent>
     </Sidebar>
   )

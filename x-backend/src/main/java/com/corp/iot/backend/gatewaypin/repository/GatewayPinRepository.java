@@ -14,4 +14,6 @@ public interface GatewayPinRepository extends JpaRepository<GatewayPin, Long> {
     List<GatewayPin> findByGatewayIdIn(Collection<Long> gatewayIds);
 
     boolean existsByGatewayIdAndTypeAndPinNumber(Long gatewayId, PinType type, Integer pinNumber);
+
+    boolean existsByMetricId(Long metricId);
 }

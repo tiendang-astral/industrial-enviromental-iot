@@ -50,4 +50,6 @@ public interface DatastreamRepository extends JpaRepository<Datastream, Long> {
               AND j.externalSourceId IN :externalSourceIds
             """)
     List<Datastream> findByExternalSourceIdIn(@Param("externalSourceIds") Collection<Long> externalSourceIds);
+
+    boolean existsByMetricId(Long metricId);
 }

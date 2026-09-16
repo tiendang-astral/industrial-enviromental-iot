@@ -178,7 +178,7 @@ export function DatastreamDetailDialog({
 
   if (!datastream) return null
   const oldest = telemetry?.oldestReadingAt ?? datastream.oldestReadingAt ?? null
-  const metricColor = metricColorVar(datastream.metricCode)
+  const metricColor = metricColorVar(datastream.metricCode, datastream.metricColor)
 
   function confirmDelete() {
     if (!datastream) return

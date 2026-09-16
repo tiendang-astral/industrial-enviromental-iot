@@ -30,6 +30,11 @@ import java.util.Optional;
 @Service
 @RequiredArgsConstructor
 public class TelemetryServiceImpl implements TelemetryService {
+    // Luôn MAX: trung bình hoá một đỉnh vượt ngưỡng thành đường phẳng là giấu mất đúng thứ người
+    // trực ca cần thấy. Trước đây suy từ metric.max_value, nhưng ngưỡng nay là của từng tenant
+    // (tenant_metric_setting) nên biểu đồ sẽ đổi hình khi ai đó đặt ngưỡng — không chấp nhận được.
+    private static final AggregateFn AGGREGATE_FN = AggregateFn.MAX;
+
 
     private final GatewayPinRepository gatewayPinRepository;
     private final MetricRepository metricRepository;
@@ -75,7 +80,7 @@ public class TelemetryServiceImpl implements TelemetryService {
         Optional<ReadingPoint> latest = influxReadService.latest(tenantId, pin.getGatewayId(), pinType, pin.getPinNumber());
         List<ReadingPointDto> history = includeHistory
                 ? influxReadService
-                        .history(tenantId, pin.getGatewayId(), pinType, pin.getPinNumber(), rangeMinutes, aggregateFn(metric)).stream()
+                        .history(tenantId, pin.getGatewayId(), pinType, pin.getPinNumber(), rangeMinutes, AGGREGATE_FN).stream()
                         .map(point -> new ReadingPointDto(point.value(), point.measuredAt()))
                         .toList()
                 : List.of();
@@ -102,7 +107,7 @@ public class TelemetryServiceImpl implements TelemetryService {
         Optional<ReadingPoint> latest = influxReadService.latestExternal(tenantId, jobId, sourceField);
         List<ReadingPointDto> history = includeHistory
                 ? influxReadService
-                        .historyExternal(tenantId, jobId, sourceField, rangeMinutes, aggregateFn(metric)).stream()
+                        .historyExternal(tenantId, jobId, sourceField, rangeMinutes, AGGREGATE_FN).stream()
                         .map(point -> new ReadingPointDto(point.value(), point.measuredAt()))
                         .toList()
                 : List.of();
@@ -126,7 +131,7 @@ public class TelemetryServiceImpl implements TelemetryService {
         Metric metric = pin.getMetricId() != null ? metricRepository.findById(pin.getMetricId()).orElse(null) : null;
         Optional<ReadingPoint> latest = influxReadService.latest(tenantId, gatewayId, pinType, pin.getPinNumber());
         List<ReadingPointDto> history = influxReadService
-                .history(tenantId, gatewayId, pinType, pin.getPinNumber(), rangeMinutes, aggregateFn(metric)).stream()
+                .history(tenantId, gatewayId, pinType, pin.getPinNumber(), rangeMinutes, AGGREGATE_FN).stream()
                 .map(point -> new ReadingPointDto(point.value(), point.measuredAt()))
                 .toList();
 
@@ -142,12 +147,6 @@ public class TelemetryServiceImpl implements TelemetryService {
                 AggregationWindow.windowSeconds(rangeMinutes),
                 history
         );
-    }
-
-    // Kênh có ngưỡng trên thì gộp bằng MAX: trung bình hoá một đỉnh vượt ngưỡng thành đường phẳng
-    // là giấu mất đúng thứ người trực ca cần thấy.
-    private AggregateFn aggregateFn(Metric metric) {
-        return metric != null && metric.getMaxValue() != null ? AggregateFn.MAX : AggregateFn.MEAN;
     }
 
     private AppUserPrincipal currentPrincipal() {

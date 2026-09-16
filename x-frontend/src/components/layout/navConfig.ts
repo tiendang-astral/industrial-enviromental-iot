@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   Network,
   Router,
+  Settings,
   Users,
 } from 'lucide-react'
 
@@ -13,6 +14,8 @@ export interface NavItem {
   label: string
   href: string
   icon: ComponentType<{ className?: string }>
+  /** Bỏ trống = mọi vai trò thấy được. Khai vai trò = chỉ vai trò đó thấy mục này. */
+  roles?: string[]
 }
 
 export interface NavGroup {
@@ -39,9 +42,15 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: 'Nguồn dữ liệu', href: '/data-sources', icon: Database },
       { label: 'Cảnh báo', href: '/alerts', icon: BellRing },
       { label: 'Người dùng', href: '/users', icon: Users },
+      { label: 'Cài đặt', href: '/settings', icon: Settings, roles: ['TENANT_ADMIN'] },
     ],
   },
 ]
+
+export function isNavItemVisible(item: NavItem, authorities: string[] | undefined) {
+  if (!item.roles) return true
+  return !!authorities?.some((authority) => item.roles!.includes(authority))
+}
 
 /** Danh sách phẳng cho breadcrumb — giữ đúng thứ tự hiển thị trong sidebar. */
 export const NAV_ITEMS: NavItem[] = NAV_GROUPS.flatMap((group) => group.items)

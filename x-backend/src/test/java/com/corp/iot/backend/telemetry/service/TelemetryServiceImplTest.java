@@ -73,7 +73,7 @@ class TelemetryServiceImplTest {
         GatewayPin output = pin(2L, PinDirection.OUTPUT, PinType.DO, 1, null);
         when(gatewayPinRepository.findByGatewayId(34L)).thenReturn(List.of(input, output));
         when(influxReadService.latest(12L, 34L, "AI", 1)).thenReturn(Optional.empty());
-        when(influxReadService.history(12L, 34L, "AI", 1, 60, AggregateFn.MEAN)).thenReturn(List.of());
+        when(influxReadService.history(12L, 34L, "AI", 1, 60, AggregateFn.MAX)).thenReturn(List.of());
         when(metricRepository.findById(99L)).thenReturn(Optional.of(metric(99L, "temperature", "°C")));
 
         List<PinTelemetryResponse> result = service.getGatewayTelemetry(34L, 60);
@@ -90,7 +90,7 @@ class TelemetryServiceImplTest {
         when(metricRepository.findById(99L)).thenReturn(Optional.of(metric(99L, "temperature", "°C")));
         Instant now = Instant.parse("2026-08-12T10:00:00Z");
         when(influxReadService.latest(12L, 34L, "AI", 1)).thenReturn(Optional.of(new ReadingPoint(23.5, now)));
-        when(influxReadService.history(12L, 34L, "AI", 1, 60, AggregateFn.MEAN))
+        when(influxReadService.history(12L, 34L, "AI", 1, 60, AggregateFn.MAX))
                 .thenReturn(List.of(new ReadingPoint(22.0, now.minusSeconds(60)), new ReadingPoint(23.5, now)));
 
         List<PinTelemetryResponse> result = service.getGatewayTelemetry(34L, 60);
@@ -105,33 +105,19 @@ class TelemetryServiceImplTest {
     }
 
     @Test
-    void kenhCoNguongTrenThiGopBangMax() {
+    void lichSuLuonGopBangMaxDuMetricNao() {
         GatewayPin input = pin(1L, PinDirection.INPUT, PinType.AI, 1, 99L);
-        Metric withThreshold = metric(99L, "nh3", "ppm");
-        withThreshold.setMaxValue(25.0);
         when(gatewayPinRepository.findByGatewayId(34L)).thenReturn(List.of(input));
-        when(metricRepository.findById(99L)).thenReturn(Optional.of(withThreshold));
+        when(metricRepository.findById(99L)).thenReturn(Optional.of(metric(99L, "temperature", "°C")));
         when(influxReadService.latest(12L, 34L, "AI", 1)).thenReturn(Optional.empty());
         when(influxReadService.history(12L, 34L, "AI", 1, 1440, AggregateFn.MAX)).thenReturn(List.of());
 
         service.getGatewayTelemetry(34L, 1440);
 
-        // Trung bình hoá một đỉnh vượt ngưỡng thành đường phẳng là giấu mất thứ cần thấy nhất.
+        // Hàm gộp không còn suy từ ngưỡng của metric: ngưỡng nay là của từng tenant, nên nếu còn
+        // buộc vào nhau thì biểu đồ sẽ đổi hình ngay khi có người đặt ngưỡng.
         verify(influxReadService).history(12L, 34L, "AI", 1, 1440, AggregateFn.MAX);
         verify(influxReadService, never()).history(12L, 34L, "AI", 1, 1440, AggregateFn.MEAN);
-    }
-
-    @Test
-    void kenhKhongCoNguongThiGopBangMean() {
-        GatewayPin input = pin(1L, PinDirection.INPUT, PinType.AI, 1, 99L);
-        when(gatewayPinRepository.findByGatewayId(34L)).thenReturn(List.of(input));
-        when(metricRepository.findById(99L)).thenReturn(Optional.of(metric(99L, "temperature", "°C")));
-        when(influxReadService.latest(12L, 34L, "AI", 1)).thenReturn(Optional.empty());
-        when(influxReadService.history(12L, 34L, "AI", 1, 1440, AggregateFn.MEAN)).thenReturn(List.of());
-
-        service.getGatewayTelemetry(34L, 1440);
-
-        verify(influxReadService).history(12L, 34L, "AI", 1, 1440, AggregateFn.MEAN);
     }
 
     // Widget biểu đồ trên dashboard chỉ cầm datastreamId — cả hai loại nguồn phải ra CÙNG một DTO,
@@ -144,7 +130,7 @@ class TelemetryServiceImplTest {
         when(metricRepository.findById(99L)).thenReturn(Optional.of(metric(99L, "temperature", "°C")));
         when(influxReadService.latest(12L, 34L, "AI", 3))
                 .thenReturn(Optional.of(new ReadingPoint(23.5, Instant.EPOCH)));
-        when(influxReadService.history(12L, 34L, "AI", 3, 60, AggregateFn.MEAN))
+        when(influxReadService.history(12L, 34L, "AI", 3, 60, AggregateFn.MAX))
                 .thenReturn(List.of(new ReadingPoint(23.5, Instant.EPOCH)));
 
         DatastreamTelemetryResponse result = service.getDatastreamTelemetry(7L, 60, true);
@@ -165,7 +151,7 @@ class TelemetryServiceImplTest {
         when(datastreamRepository.findById(8L)).thenReturn(Optional.of(datastream));
         when(metricRepository.findById(99L)).thenReturn(Optional.of(metric(99L, "temperature", "°C")));
         when(influxReadService.latestExternal(12L, 5L, "temp_in")).thenReturn(Optional.empty());
-        when(influxReadService.historyExternal(12L, 5L, "temp_in", 60, AggregateFn.MEAN)).thenReturn(List.of());
+        when(influxReadService.historyExternal(12L, 5L, "temp_in", 60, AggregateFn.MAX)).thenReturn(List.of());
 
         DatastreamTelemetryResponse result = service.getDatastreamTelemetry(8L, 60, true);
 

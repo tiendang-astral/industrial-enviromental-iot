@@ -29,6 +29,7 @@ public class DatastreamMapper {
                 datastream.getMetricId(),
                 metric != null ? metric.getCode() : null,
                 metric != null ? metric.getUnit() : null,
+                metric != null ? metric.getColor() : null,
                 datastream.getSourceType().name(),
                 datastream.getSourceId(),
                 datastream.getSourceField(),

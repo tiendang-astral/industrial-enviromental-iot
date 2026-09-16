@@ -35,7 +35,7 @@ export function PinReadout({ view, className }: { view: PinView; className?: str
   // Vượt ngưỡng: đỏ THẮNG màu chỉ số. Trên màn hình vận hành, đỏ chỉ được có một nghĩa.
   // Chân đã tắt cũng bỏ màu: số còn đó là số cũ, tô màu chỉ số vào nó là nói nó vẫn đang đo.
   const isCritical = status === 'critical'
-  const color = isCritical || !pin.enabled ? undefined : metricColorVar(metric?.code)
+  const color = isCritical || !pin.enabled ? undefined : metricColorVar(metric?.code, metric?.color)
 
   return (
     <Tooltip>

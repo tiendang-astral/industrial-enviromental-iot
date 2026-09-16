@@ -15,4 +15,6 @@ public interface AlertRuleRepository extends JpaRepository<AlertRule, Long> {
     List<AlertRule> findByGroupId(Long groupId);
 
     List<AlertRule> findByGroupIdIn(Collection<Long> groupIds);
+
+    boolean existsByMetricId(Long metricId);
 }

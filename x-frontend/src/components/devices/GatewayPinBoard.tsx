@@ -61,7 +61,7 @@ function PinRow({
   // Màu nhóm chỉ số nằm ở MÃ CHÂN chứ không ở tên: tên chân do người dùng đặt, mỗi hàng một chuỗi
   // khác nhau — tô màu cả cột tên thì chín hàng chín màu chữ, đọc mệt. Mã chân là ô nhỏ, cố định
   // bề ngang, xếp thẳng cột: tô ở đó thì lướt dọc một phát là gom được nhóm.
-  const codeColor = !isOutput && pin.enabled ? metricColorVar(metric?.code) : undefined
+  const codeColor = !isOutput && pin.enabled ? metricColorVar(metric?.code, metric?.color) : undefined
 
   return (
     <div className="flex items-center gap-3 border-t px-4 py-2.5 transition-colors duration-(--motion-fast) hover:bg-muted/50">

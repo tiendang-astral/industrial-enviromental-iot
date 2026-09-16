@@ -128,6 +128,11 @@
     --motion-base: 180ms;
     --motion-slow: 280ms;
     --motion-ease: cubic-bezier(0.32, 0.72, 0, 1);
+
+    /* Control gốc của trình duyệt (mũi tên tăng/giảm của input number, thanh cuộn, ô chọn
+       ngày) do UA vẽ, không đọc token màu của dự án. Thiếu khai báo này thì chúng luôn
+       theo bảng sáng: mũi tên đen trên nền input tối, coi như tàng hình. */
+    color-scheme: light;
 }
 
 /* ---------------------------------------------------------------------------
@@ -239,6 +244,8 @@
 }
 
 .dark {
+    color-scheme: dark;
+
     /* Chroma THUÔN DẦN khi độ sáng tăng (0.042 → 0.005): nền tối gánh được nhiều
        màu mà không bị ám, còn chữ sáng phải gần trung tính mới không ngả xanh.
        Bản trước để cả dải nội dung ở 0.022 nên khung app ra navy còn thẻ/bảng ra

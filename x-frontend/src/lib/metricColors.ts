@@ -65,12 +65,23 @@ export function metricGroup(metricCode: string | null | undefined): MetricGroup 
  * chưa xếp nhóm ở đây. Thà không màu còn hơn phát cho nó một màu tuỳ tiện rồi người đọc suy ra
  * một nhóm không có thật.
  */
-export function metricColorVar(metricCode: string | null | undefined): string | undefined {
+export function metricColorVar(
+  metricCode: string | null | undefined,
+  metricColor?: string | null
+): string | undefined {
+  // Chỉ số riêng do tenant thêm mang sẵn màu đã chọn; bảng GROUP_OF ở trên không thể biết mã của
+  // chúng nên chỉ dùng cho chỉ số hệ thống.
+  if (metricColor) return colorTokenVar(metricColor)
   const group = metricGroup(metricCode)
   if (group === null) return undefined
   const index = GROUP_CHART_INDEX[group]
   // Nhóm điện năng: màu chữ xám thường, vẫn đọc tốt mà không thêm một hue nữa vào bảng.
   return index === null ? 'var(--foreground-subtle)' : `var(--chart-${index})`
+}
+
+/** Token màu -> biến CSS. `neutral` dùng chung màu chữ phụ với nhóm điện năng. */
+export function colorTokenVar(token: string): string {
+  return token === 'neutral' ? 'var(--foreground-subtle)' : `var(--${token})`
 }
 
 /**
@@ -79,8 +90,14 @@ export function metricColorVar(metricCode: string | null | undefined): string | 
  */
 export function metricSeriesColor(
   metricCode: string | null | undefined,
-  palette: ChartPalette
+  palette: ChartPalette,
+  metricColor?: string | null
 ): string | undefined {
+  if (metricColor) {
+    if (metricColor === 'neutral') return palette.text
+    const index = Number(metricColor.replace('chart-', ''))
+    return Number.isFinite(index) ? palette.series[index - 1] : undefined
+  }
   const group = metricGroup(metricCode)
   if (group === null) return undefined
   const index = GROUP_CHART_INDEX[group]
